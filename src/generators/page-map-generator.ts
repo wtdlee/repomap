@@ -811,11 +811,14 @@ export class PageMapGenerator {
       const isDetailOpen = detail.classList.contains('open');
       if (!isDetailOpen) return;
       
-      // Check if click is inside detail panel or on page items
+      // Check if click is inside detail panel or on interactive elements
       if (detail.contains(e.target)) return;
       if (e.target.closest('.page-item')) return;
       if (e.target.closest('.node-circle')) return;
       if (e.target.closest('.modal')) return;
+      if (e.target.closest('#graph-canvas')) return;
+      if (e.target.closest('.graph-view')) return;
+      if (e.target.closest('.stat')) return;
       
       closeDetail();
     });
