@@ -427,15 +427,15 @@ export class PageMapGenerator {
         <div class="legend-item"><span class="tag tag-mutation">MUTATION</span> update</div>
       </div>
       
-      <div class="stats">
-        <div class="stat" data-filter="pages" onclick="filterByType('pages', this)"><div class="stat-val">${allPages.length}</div><div class="stat-label">Pages</div></div>
-        <div class="stat" data-filter="hierarchies" onclick="filterByType('hierarchies', this)"><div class="stat-val">${
+      <div class="stats" id="stats-container">
+        <div class="stat" data-filter="pages"><div class="stat-val">${allPages.length}</div><div class="stat-label">Pages</div></div>
+        <div class="stat" data-filter="hierarchies"><div class="stat-val">${
           relations.filter((r) => r.type === 'parent-child').length
         }</div><div class="stat-label">Hierarchies</div></div>
-        <div class="stat" data-filter="graphql" onclick="filterByType('graphql', this)"><div class="stat-val">${
+        <div class="stat" data-filter="graphql"><div class="stat-val">${
           this.graphqlOps.length
         }</div><div class="stat-label">GraphQL</div></div>
-        <div class="stat" data-filter="restapi" onclick="filterByType('restapi', this)"><div class="stat-val">${
+        <div class="stat" data-filter="restapi"><div class="stat-val">${
           this.apiCalls.length
         }</div><div class="stat-label">REST API</div></div>
       </div>
@@ -579,7 +579,9 @@ export class PageMapGenerator {
     
     // Filter by stat type
     let currentFilter = null;
-    window.filterByType = function(type, el) {
+    
+    function handleStatClick(type, el) {
+      console.log('handleStatClick called with:', type);
       // Toggle filter
       if (currentFilter === type) {
         currentFilter = null;
@@ -604,7 +606,16 @@ export class PageMapGenerator {
         showAllPages();
         closeDetail();
       }
-    };
+    }
+    
+    // Register stat click handlers
+    document.querySelectorAll('.stat[data-filter]').forEach(stat => {
+      stat.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const filterType = this.getAttribute('data-filter');
+        handleStatClick(filterType, this);
+      });
+    });
     
     function showAllPages() {
       document.querySelectorAll('.group').forEach(g => g.style.display = '');
