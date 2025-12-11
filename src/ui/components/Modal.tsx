@@ -1,6 +1,6 @@
-import { styled } from "../setup.js";
-import { theme } from "../styles/theme.js";
-import type { ComponentChildren, JSX } from "preact";
+import { styled } from '../setup.js';
+import { theme } from '../styles/theme.js';
+import type { ComponentChildren, JSX } from 'preact';
 
 interface ModalProps {
   isOpen: boolean;
@@ -9,28 +9,28 @@ interface ModalProps {
   showBack?: boolean;
   title?: string;
   children: ComponentChildren;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 const sizeMap: Record<string, string> = {
-  sm: "400px",
-  md: "600px",
-  lg: "800px",
-  xl: "1000px",
+  sm: '400px',
+  md: '600px',
+  lg: '800px',
+  xl: '1000px',
 };
 
 interface OverlayProps {
   $isOpen: boolean;
 }
 
-const Overlay = styled("div")<OverlayProps>`
+const Overlay = styled('div')<OverlayProps>`
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.5);
-  display: ${(p) => (p.$isOpen ? "flex" : "none")};
+  display: ${(p) => (p.$isOpen ? 'flex' : 'none')};
   align-items: center;
   justify-content: center;
   z-index: 1000;
@@ -41,7 +41,7 @@ interface ModalContainerProps {
   $size: string;
 }
 
-const ModalContainer = styled("div")<ModalContainerProps>`
+const ModalContainer = styled('div')<ModalContainerProps>`
   background: ${theme.colors.background};
   border-radius: ${theme.borderRadius.xl};
   box-shadow: ${theme.shadow.xl};
@@ -53,7 +53,7 @@ const ModalContainer = styled("div")<ModalContainerProps>`
   overflow: hidden;
 `;
 
-const ModalHeader = styled("div")`
+const ModalHeader = styled('div')`
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -61,7 +61,7 @@ const ModalHeader = styled("div")`
   border-bottom: 1px solid ${theme.colors.border};
 `;
 
-const ModalTitle = styled("h3")`
+const ModalTitle = styled('h3')`
   display: flex;
   align-items: center;
   gap: ${theme.spacing.sm};
@@ -70,7 +70,7 @@ const ModalTitle = styled("h3")`
   margin: 0;
 `;
 
-const BackButton = styled("button")`
+const BackButton = styled('button')`
   display: flex;
   align-items: center;
   gap: 4px;
@@ -81,14 +81,14 @@ const BackButton = styled("button")`
   border: none;
   cursor: pointer;
   border-radius: ${theme.borderRadius.sm};
-  
+
   &:hover {
     background: ${theme.colors.backgroundHover};
     color: ${theme.colors.text};
   }
 `;
 
-const CloseButton = styled("button")`
+const CloseButton = styled('button')`
   width: 32px;
   height: 32px;
   display: flex;
@@ -100,14 +100,14 @@ const CloseButton = styled("button")`
   border: none;
   cursor: pointer;
   border-radius: ${theme.borderRadius.sm};
-  
+
   &:hover {
     background: ${theme.colors.backgroundHover};
     color: ${theme.colors.text};
   }
 `;
 
-const ModalBody = styled("div")`
+const ModalBody = styled('div')`
   padding: ${theme.spacing.lg};
   overflow-y: auto;
   flex: 1;
@@ -120,7 +120,7 @@ export function Modal({
   showBack = false,
   title,
   children,
-  size = "md",
+  size = 'md',
 }: ModalProps) {
   const handleOverlayClick = (e: JSX.TargetedMouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
@@ -138,9 +138,7 @@ export function Modal({
         {title && (
           <ModalHeader>
             <ModalTitle>
-              {showBack && onBack && (
-                <BackButton onClick={onBack}>← Back</BackButton>
-              )}
+              {showBack && onBack && <BackButton onClick={onBack}>← Back</BackButton>}
               {title}
             </ModalTitle>
             <CloseButton onClick={onClose}>×</CloseButton>
@@ -153,15 +151,15 @@ export function Modal({
 }
 
 // Modal sections
-export const ModalSection = styled("div")`
+export const ModalSection = styled('div')`
   margin-bottom: ${theme.spacing.lg};
-  
+
   &:last-child {
     margin-bottom: 0;
   }
 `;
 
-export const ModalSectionTitle = styled("h4")`
+export const ModalSectionTitle = styled('h4')`
   font-size: ${theme.fontSize.md};
   font-weight: ${theme.fontWeight.semibold};
   color: ${theme.colors.text};

@@ -1,9 +1,9 @@
-import { styled } from "../setup.js";
-import { theme } from "../styles/theme.js";
-import type { ComponentChildren, JSX } from "preact";
+import { styled } from '../setup.js';
+import { theme } from '../styles/theme.js';
+import type { ComponentChildren, JSX } from 'preact';
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "outline";
-type ButtonSize = "sm" | "md" | "lg";
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline';
+type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps {
   variant?: ButtonVariant;
@@ -12,19 +12,22 @@ interface ButtonProps {
   disabled?: boolean;
   children: ComponentChildren;
   className?: string;
-  type?: "button" | "submit" | "reset";
+  type?: 'button' | 'submit' | 'reset';
 }
 
 const sizeStyles: Record<ButtonSize, { padding: string; fontSize: string }> = {
-  sm: { padding: "4px 8px", fontSize: theme.fontSize.xs },
-  md: { padding: "8px 16px", fontSize: theme.fontSize.sm },
-  lg: { padding: "12px 24px", fontSize: theme.fontSize.md },
+  sm: { padding: '4px 8px', fontSize: theme.fontSize.xs },
+  md: { padding: '8px 16px', fontSize: theme.fontSize.sm },
+  lg: { padding: '12px 24px', fontSize: theme.fontSize.md },
 };
 
-const variantStyles: Record<ButtonVariant, { bg: string; color: string; border: string; hoverBg: string }> = {
+const variantStyles: Record<
+  ButtonVariant,
+  { bg: string; color: string; border: string; hoverBg: string }
+> = {
   primary: {
     bg: theme.colors.primary,
-    color: "#ffffff",
+    color: '#ffffff',
     border: theme.colors.primary,
     hoverBg: theme.colors.primaryHover,
   },
@@ -35,16 +38,16 @@ const variantStyles: Record<ButtonVariant, { bg: string; color: string; border: 
     hoverBg: theme.colors.backgroundHover,
   },
   ghost: {
-    bg: "transparent",
+    bg: 'transparent',
     color: theme.colors.text,
-    border: "transparent",
+    border: 'transparent',
     hoverBg: theme.colors.backgroundHover,
   },
   outline: {
-    bg: "transparent",
+    bg: 'transparent',
     color: theme.colors.primary,
     border: theme.colors.primary,
-    hoverBg: "#eff6ff",
+    hoverBg: '#eff6ff',
   },
 };
 
@@ -53,7 +56,7 @@ interface StyledButtonProps {
   $size: ButtonSize;
 }
 
-const StyledButton = styled("button")<StyledButtonProps>`
+const StyledButton = styled('button')<StyledButtonProps>`
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -67,16 +70,16 @@ const StyledButton = styled("button")<StyledButtonProps>`
   border: 1px solid ${(p: StyledButtonProps) => variantStyles[p.$variant].border};
   cursor: pointer;
   transition: all ${theme.transition.fast};
-  
+
   &:hover:not(:disabled) {
     background: ${(p: StyledButtonProps) => variantStyles[p.$variant].hoverBg};
   }
-  
+
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
-  
+
   &:focus {
     outline: none;
     box-shadow: 0 0 0 2px ${theme.colors.primary}33;
@@ -84,13 +87,13 @@ const StyledButton = styled("button")<StyledButtonProps>`
 `;
 
 export function Button({
-  variant = "primary",
-  size = "md",
+  variant = 'primary',
+  size = 'md',
   onClick,
   disabled,
   children,
   className,
-  type = "button",
+  type = 'button',
 }: ButtonProps) {
   return (
     <StyledButton

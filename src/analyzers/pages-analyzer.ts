@@ -1,8 +1,15 @@
-import { Project, SourceFile, SyntaxKind, Node } from "ts-morph";
-import fg from "fast-glob";
-import * as path from "path";
-import { BaseAnalyzer } from "./base-analyzer.js";
-import type { AnalysisResult, PageInfo, AuthRequirement, DataFetchingInfo, NavigationInfo } from "../types.js";
+import { Project, SourceFile, SyntaxKind, Node } from 'ts-morph';
+import fg from 'fast-glob';
+import * as path from 'path';
+import { BaseAnalyzer } from './base-analyzer.js';
+import type {
+  AnalysisResult,
+  PageInfo,
+  AuthRequirement,
+  DataFetchingInfo,
+  NavigationInfo,
+  RepositoryConfig,
+} from '../types.js';
 
 /**
  * Analyzer for Next.js pages
@@ -11,28 +18,28 @@ import type { AnalysisResult, PageInfo, AuthRequirement, DataFetchingInfo, Navig
 export class PagesAnalyzer extends BaseAnalyzer {
   private project: Project;
 
-  constructor(config: any) {
+  constructor(config: RepositoryConfig) {
     super(config);
     this.project = new Project({
-      tsConfigFilePath: this.resolvePath("tsconfig.json"),
+      tsConfigFilePath: this.resolvePath('tsconfig.json'),
       skipAddingFilesFromTsConfig: true,
     });
   }
 
   getName(): string {
-    return "PagesAnalyzer";
+    return 'PagesAnalyzer';
   }
 
   async analyze(): Promise<Partial<AnalysisResult>> {
-    this.log("Starting page analysis...");
+    this.log('Starting page analysis...');
 
-    const pagesDir = this.getSetting("pagesDir", "src/pages");
+    const pagesDir = this.getSetting('pagesDir', 'src/pages');
     const pagesPath = this.resolvePath(pagesDir);
 
     // Find all page files
-    const pageFiles = await fg(["**/*.tsx", "**/*.ts"], {
+    const pageFiles = await fg(['**/*.tsx', '**/*.ts'], {
       cwd: pagesPath,
-      ignore: ["_app.tsx", "_document.tsx", "api/**"],
+      ignore: ['_app.tsx', '_document.tsx', 'api/**'],
       absolute: true,
     });
 
@@ -92,12 +99,12 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   private filePathToRoutePath(filePath: string): string {
     return (
-      "/" +
+      '/' +
       filePath
-        .replace(/\.tsx?$/, "")
-        .replace(/\/index$/, "")
-        .replace(/\[\.\.\.(\w+)\]/g, "*")
-        .replace(/\[(\w+)\]/g, ":$1")
+        .replace(/\.tsx?$/, '')
+        .replace(/\/index$/, '')
+        .replace(/\[\.\.\.(\w+)\]/g, '*')
+        .replace(/\[(\w+)\]/g, ':$1')
     );
   }
 
@@ -119,9 +126,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     // Find Page variable
-    const pageVar = sourceFile.getVariableDeclaration("Page");
+    const pageVar = sourceFile.getVariableDeclaration('Page');
     if (pageVar) {
-      return "Page";
+      return 'Page';
     }
 
     return null;
@@ -131,7 +138,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Look for getLayout property
     const getLayoutAssignment = sourceFile
       .getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)
-      .find((node) => node.getName() === "getLayout");
+      .find((node) => node.getName() === 'getLayout');
 
     if (getLayoutAssignment) {
       const parent = getLayoutAssignment.getParent();
@@ -150,10 +157,16 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   private extractAuthRequirement(sourceFile: SourceFile): AuthRequirement {
     const filePath = sourceFile.getFilePath();
-    const fileName = filePath.split("/").pop() || "";
+    const fileName = filePath.split('/').pop() || '';
 
     // Pages that don't require authentication (exceptions)
-    const publicPages = ["404.tsx", "permission-denied.tsx", "_app.tsx", "_document.tsx", "_error.tsx"];
+    const publicPages = [
+      '404.tsx',
+      'permission-denied.tsx',
+      '_app.tsx',
+      '_document.tsx',
+      '_error.tsx',
+    ];
     const isPublicPage = publicPages.some((p) => fileName === p);
 
     // Default: ALL pages require authentication (because _app.tsx wraps everything with RequireAuthorization)
@@ -165,11 +178,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
       // Look for RequiredConditionWithSession for additional permission checks
       const requiredCondition = sourceFile
         .getDescendantsOfKind(SyntaxKind.JsxOpeningElement)
-        .find((node) => node.getTagNameNode().getText().includes("RequiredCondition"));
+        .find((node) => node.getTagNameNode().getText().includes('RequiredCondition'));
 
       if (requiredCondition) {
         // Has additional permission requirements beyond basic auth
-        result.condition = "Additional permissions required";
+        result.condition = 'Additional permissions required';
 
         // Extract condition - safely iterate attributes
         const attributes = requiredCondition.getAttributes();
@@ -177,7 +190,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
           if (attr.isKind(SyntaxKind.JsxAttribute)) {
             try {
               const name = attr.getNameNode().getText();
-              if (name === "condition") {
+              if (name === 'condition') {
                 const initializer = attr.getInitializer();
                 if (initializer) {
                   result.condition = initializer.getText();
@@ -216,10 +229,12 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const permissions: string[] = [];
 
     // Look for permission checks in the code
-    const permissionChecks = sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).filter((node) => {
-      const text = node.getText();
-      return text.includes("Permission") || text.includes("Role") || text.includes("isAdmin");
-    });
+    const permissionChecks = sourceFile
+      .getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)
+      .filter((node) => {
+        const text = node.getText();
+        return text.includes('Permission') || text.includes('Role') || text.includes('isAdmin');
+      });
 
     for (const check of permissionChecks) {
       const text = check.getText();
@@ -235,34 +250,38 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const dataFetching: DataFetchingInfo[] = [];
 
     // Find useQuery calls
-    const useQueryCalls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression).filter((call) => {
-      const expression = call.getExpression().getText();
-      return ["useQuery", "useMutation", "useLazyQuery"].includes(expression);
-    });
+    const useQueryCalls = sourceFile
+      .getDescendantsOfKind(SyntaxKind.CallExpression)
+      .filter((call) => {
+        const expression = call.getExpression().getText();
+        return ['useQuery', 'useMutation', 'useLazyQuery'].includes(expression);
+      });
 
     for (const call of useQueryCalls) {
-      const type = call.getExpression().getText() as DataFetchingInfo["type"];
+      const type = call.getExpression().getText() as DataFetchingInfo['type'];
       const args = call.getArguments();
 
-      let operationName = "unknown";
+      let operationName = 'unknown';
       const variables: string[] = [];
 
       if (args.length > 0) {
         operationName = args[0]
           .getText()
-          .replace(/Document$/, "")
-          .replace(/Query$|Mutation$/, "");
+          .replace(/Document$/, '')
+          .replace(/Query$|Mutation$/, '');
       }
 
       if (args.length > 1) {
         const optionsArg = args[1];
-        const variablesProperty = optionsArg.getDescendantsOfKind(SyntaxKind.PropertyAssignment).find((prop) => {
-          try {
-            return prop.getName() === "variables";
-          } catch {
-            return false;
-          }
-        });
+        const variablesProperty = optionsArg
+          .getDescendantsOfKind(SyntaxKind.PropertyAssignment)
+          .find((prop) => {
+            try {
+              return prop.getName() === 'variables';
+            } catch {
+              return false;
+            }
+          });
 
         if (variablesProperty) {
           const initializer = variablesProperty.getInitializer();
@@ -284,20 +303,20 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     // Find getServerSideProps
-    const getServerSideProps = sourceFile.getFunction("getServerSideProps");
+    const getServerSideProps = sourceFile.getFunction('getServerSideProps');
     if (getServerSideProps) {
       dataFetching.push({
-        type: "getServerSideProps",
-        operationName: "getServerSideProps",
+        type: 'getServerSideProps',
+        operationName: 'getServerSideProps',
       });
     }
 
     // Find getStaticProps
-    const getStaticProps = sourceFile.getFunction("getStaticProps");
+    const getStaticProps = sourceFile.getFunction('getStaticProps');
     if (getStaticProps) {
       dataFetching.push({
-        type: "getStaticProps",
-        operationName: "getStaticProps",
+        type: 'getStaticProps',
+        operationName: 'getStaticProps',
       });
     }
 
@@ -306,14 +325,14 @@ export class PagesAnalyzer extends BaseAnalyzer {
     for (const imp of imports) {
       const moduleSpec = imp.getModuleSpecifierValue();
       // Track imports from features directory
-      if (moduleSpec.includes("/features/")) {
+      if (moduleSpec.includes('/features/')) {
         const namedImports = imp.getNamedImports();
         for (const named of namedImports) {
           const name = named.getName();
           // Mark as feature component reference
-          if (name.includes("Container") || name.includes("Page") || name.includes("Form")) {
+          if (name.includes('Container') || name.includes('Page') || name.includes('Form')) {
             dataFetching.push({
-              type: "useQuery",
+              type: 'useQuery',
               operationName: `→ ${name}`,
               variables: [],
             });
@@ -324,9 +343,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
         const defaultImport = imp.getDefaultImport();
         if (defaultImport) {
           const name = defaultImport.getText();
-          if (name.includes("Container") || name.includes("Page") || name.includes("Form")) {
+          if (name.includes('Container') || name.includes('Page') || name.includes('Form')) {
             dataFetching.push({
-              type: "useQuery",
+              type: 'useQuery',
               operationName: `→ ${name}`,
               variables: [],
             });
@@ -346,13 +365,15 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     try {
       // Find globalNavigationStyle assignment
-      const navStyleAssignment = sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).find((node) => {
-        try {
-          return node.getName() === "globalNavigationStyle";
-        } catch {
-          return false;
-        }
-      });
+      const navStyleAssignment = sourceFile
+        .getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)
+        .find((node) => {
+          try {
+            return node.getName() === 'globalNavigationStyle';
+          } catch {
+            return false;
+          }
+        });
 
       if (navStyleAssignment) {
         const parent = navStyleAssignment.getParent();
@@ -360,40 +381,46 @@ export class PagesAnalyzer extends BaseAnalyzer {
           const right = parent.getRight();
 
           // Extract visible
-          const visibleProp = right.getDescendantsOfKind(SyntaxKind.PropertyAssignment).find((prop) => {
-            try {
-              return prop.getName() === "visible";
-            } catch {
-              return false;
-            }
-          });
+          const visibleProp = right
+            .getDescendantsOfKind(SyntaxKind.PropertyAssignment)
+            .find((prop) => {
+              try {
+                return prop.getName() === 'visible';
+              } catch {
+                return false;
+              }
+            });
           if (visibleProp) {
-            result.visible = visibleProp.getInitializer()?.getText() === "true";
+            result.visible = visibleProp.getInitializer()?.getText() === 'true';
           }
 
           // Extract currentNavItem
-          const navItemProp = right.getDescendantsOfKind(SyntaxKind.PropertyAssignment).find((prop) => {
-            try {
-              return prop.getName() === "currentNavItem";
-            } catch {
-              return false;
-            }
-          });
+          const navItemProp = right
+            .getDescendantsOfKind(SyntaxKind.PropertyAssignment)
+            .find((prop) => {
+              try {
+                return prop.getName() === 'currentNavItem';
+              } catch {
+                return false;
+              }
+            });
           if (navItemProp) {
             const value = navItemProp.getInitializer()?.getText();
-            result.currentNavItem = value && value !== "null" ? value.replace(/['"]/g, "") : null;
+            result.currentNavItem = value && value !== 'null' ? value.replace(/['"]/g, '') : null;
           }
 
           // Extract mini
-          const miniProp = right.getDescendantsOfKind(SyntaxKind.PropertyAssignment).find((prop) => {
-            try {
-              return prop.getName() === "mini";
-            } catch {
-              return false;
-            }
-          });
+          const miniProp = right
+            .getDescendantsOfKind(SyntaxKind.PropertyAssignment)
+            .find((prop) => {
+              try {
+                return prop.getName() === 'mini';
+              } catch {
+                return false;
+              }
+            });
           if (miniProp) {
-            result.mini = miniProp.getInitializer()?.getText() === "true";
+            result.mini = miniProp.getInitializer()?.getText() === 'true';
           }
         }
       }
@@ -408,10 +435,14 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const linkedPages: string[] = [];
 
     // Find router.push/replace calls
-    const routerCalls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression).filter((call) => {
-      const text = call.getExpression().getText();
-      return text.includes("router.push") || text.includes("router.replace") || text.includes("Link");
-    });
+    const routerCalls = sourceFile
+      .getDescendantsOfKind(SyntaxKind.CallExpression)
+      .filter((call) => {
+        const text = call.getExpression().getText();
+        return (
+          text.includes('router.push') || text.includes('router.replace') || text.includes('Link')
+        );
+      });
 
     for (const call of routerCalls) {
       const args = call.getArguments();
@@ -428,7 +459,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Find Link components
     const linkElements = sourceFile
       .getDescendantsOfKind(SyntaxKind.JsxOpeningElement)
-      .filter((node) => node.getTagNameNode().getText() === "Link");
+      .filter((node) => node.getTagNameNode().getText() === 'Link');
 
     for (const link of linkElements) {
       try {
@@ -439,7 +470,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
           if (attr.isKind(SyntaxKind.JsxAttribute)) {
             const nameNode = attr.getNameNode();
             const name = nameNode.getText();
-            if (name === "href") {
+            if (name === 'href') {
               const value = attr.getInitializer()?.getText();
               if (value) {
                 const pathMatch = value.match(/['"`]([^'"`]+)['"`]/);

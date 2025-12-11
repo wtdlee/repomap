@@ -26,20 +26,20 @@ export interface RepositoryConfig {
   path: string;
   remote?: string;
   branch: string;
-  type: "nextjs" | "rails" | "generic";
+  type: 'nextjs' | 'rails' | 'generic';
   analyzers: AnalyzerType[];
   settings: Record<string, string>;
 }
 
 export type AnalyzerType =
-  | "pages"
-  | "graphql"
-  | "components"
-  | "dataflow"
-  | "api-endpoints"
-  | "graphql-schema"
-  | "models"
-  | "controllers";
+  | 'pages'
+  | 'graphql'
+  | 'components'
+  | 'dataflow'
+  | 'api-endpoints'
+  | 'graphql-schema'
+  | 'models'
+  | 'controllers';
 
 export interface AnalysisConfig {
   include: string[];
@@ -53,7 +53,7 @@ export interface DiagramConfig {
   theme: string;
 }
 
-export type DiagramType = "flowchart" | "sequence" | "er" | "class";
+export type DiagramType = 'flowchart' | 'sequence' | 'er' | 'class';
 
 export interface WatchConfig {
   enabled: boolean;
@@ -106,7 +106,7 @@ export interface AuthRequirement {
 }
 
 export interface DataFetchingInfo {
-  type: "useQuery" | "useMutation" | "useLazyQuery" | "getServerSideProps" | "getStaticProps";
+  type: 'useQuery' | 'useMutation' | 'useLazyQuery' | 'getServerSideProps' | 'getStaticProps';
   operationName: string;
   variables?: string[];
 }
@@ -120,7 +120,7 @@ export interface NavigationInfo {
 
 export interface GraphQLOperation {
   name: string;
-  type: "query" | "mutation" | "subscription" | "fragment";
+  type: 'query' | 'mutation' | 'subscription' | 'fragment';
   filePath: string;
   usedIn: string[];
   variables: VariableInfo[];
@@ -144,7 +144,7 @@ export interface VariableInfo {
 export interface ComponentInfo {
   name: string;
   filePath: string;
-  type: "page" | "container" | "presentational" | "layout" | "hook";
+  type: 'page' | 'container' | 'presentational' | 'layout' | 'hook';
   props: PropInfo[];
   dependencies: string[];
   dependents: string[];
@@ -170,7 +170,7 @@ export interface DataFlow {
 }
 
 export interface DataFlowNode {
-  type: "component" | "hook" | "context" | "api" | "cache" | "store";
+  type: 'component' | 'hook' | 'context' | 'api' | 'cache' | 'store';
   name: string;
   repository?: string;
 }
@@ -189,7 +189,7 @@ export interface APIEndpoint {
 export interface ParameterInfo {
   name: string;
   type: string;
-  location: "path" | "query" | "body" | "header";
+  location: 'path' | 'query' | 'body' | 'header';
   required: boolean;
 }
 
@@ -217,7 +217,7 @@ export interface AttributeInfo {
 }
 
 export interface AssociationInfo {
-  type: "belongs_to" | "has_one" | "has_many" | "has_and_belongs_to_many";
+  type: 'belongs_to' | 'has_one' | 'has_many' | 'has_and_belongs_to_many';
   name: string;
   model: string;
   foreignKey?: string;
@@ -228,7 +228,7 @@ export interface CrossRepoLink {
   sourcePath: string;
   targetRepo: string;
   targetPath: string;
-  linkType: "api-call" | "shared-type" | "graphql-operation" | "navigation";
+  linkType: 'api-call' | 'shared-type' | 'graphql-operation' | 'navigation';
   description: string;
 }
 

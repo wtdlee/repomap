@@ -1,10 +1,16 @@
-import { Project, SyntaxKind } from "ts-morph";
-import fg from "fast-glob";
-import * as fs from "fs/promises";
-import * as path from "path";
-import { parse as parseGraphQL, DocumentNode, DefinitionNode } from "graphql";
-import { BaseAnalyzer } from "./base-analyzer.js";
-import type { AnalysisResult, GraphQLOperation, VariableInfo, GraphQLField } from "../types.js";
+import { Project, SyntaxKind } from 'ts-morph';
+import fg from 'fast-glob';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { parse as parseGraphQL, DocumentNode, DefinitionNode, TypeNode } from 'graphql';
+import { BaseAnalyzer } from './base-analyzer.js';
+import type {
+  AnalysisResult,
+  GraphQLOperation,
+  VariableInfo,
+  GraphQLField,
+  RepositoryConfig,
+} from '../types.js';
 
 /**
  * Analyzer for GraphQL operations
@@ -13,20 +19,20 @@ import type { AnalysisResult, GraphQLOperation, VariableInfo, GraphQLField } fro
 export class GraphQLAnalyzer extends BaseAnalyzer {
   private project: Project;
 
-  constructor(config: any) {
+  constructor(config: RepositoryConfig) {
     super(config);
     this.project = new Project({
-      tsConfigFilePath: this.resolvePath("tsconfig.json"),
+      tsConfigFilePath: this.resolvePath('tsconfig.json'),
       skipAddingFilesFromTsConfig: true,
     });
   }
 
   getName(): string {
-    return "GraphQLAnalyzer";
+    return 'GraphQLAnalyzer';
   }
 
   async analyze(): Promise<Partial<AnalysisResult>> {
-    this.log("Starting GraphQL analysis...");
+    this.log('Starting GraphQL analysis...');
 
     const operations: GraphQLOperation[] = [];
 
@@ -49,17 +55,20 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   private async analyzeGraphQLFiles(): Promise<GraphQLOperation[]> {
     const operations: GraphQLOperation[] = [];
 
-    const graphqlFiles = await fg(["**/*.graphql"], {
+    const graphqlFiles = await fg(['**/*.graphql'], {
       cwd: this.basePath,
-      ignore: ["**/node_modules/**", "**/.next/**"],
+      ignore: ['**/node_modules/**', '**/.next/**'],
       absolute: true,
     });
 
     for (const filePath of graphqlFiles) {
       try {
-        const content = await fs.readFile(filePath, "utf-8");
+        const content = await fs.readFile(filePath, 'utf-8');
         const document = parseGraphQL(content);
-        const fileOperations = this.extractOperationsFromDocument(document, path.relative(this.basePath, filePath));
+        const fileOperations = this.extractOperationsFromDocument(
+          document,
+          path.relative(this.basePath, filePath)
+        );
         operations.push(...fileOperations);
       } catch (error) {
         this.warn(`Failed to parse ${filePath}: ${(error as Error).message}`);
@@ -72,12 +81,18 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   private async analyzeInlineGraphQL(): Promise<GraphQLOperation[]> {
     const operations: GraphQLOperation[] = [];
 
-    const featuresDir = this.getSetting("featuresDir", "src/features");
-    const commonDir = this.getSetting("componentsDir", "src/common");
+    const _featuresDir = this.getSetting('featuresDir', 'src/features');
+    const _commonDir = this.getSetting('componentsDir', 'src/common');
 
-    const tsFiles = await fg(["**/*.ts", "**/*.tsx"], {
+    const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
-      ignore: ["**/node_modules/**", "**/.next/**", "**/__tests__/**", "**/*.test.*", "**/*.spec.*"],
+      ignore: [
+        '**/node_modules/**',
+        '**/.next/**',
+        '**/__tests__/**',
+        '**/*.test.*',
+        '**/*.spec.*',
+      ],
       absolute: true,
     });
 
@@ -87,14 +102,16 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         const relativePath = path.relative(this.basePath, filePath);
 
         // Find gql`` or graphql`` template literals
-        const taggedTemplates = sourceFile.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression);
+        const taggedTemplates = sourceFile.getDescendantsOfKind(
+          SyntaxKind.TaggedTemplateExpression
+        );
 
         for (const template of taggedTemplates) {
           const tag = template.getTag().getText();
-          if (tag === "gql" || tag === "graphql") {
+          if (tag === 'gql' || tag === 'graphql') {
             try {
               const templateLiteral = template.getTemplate();
-              let content = "";
+              let content = '';
 
               if (templateLiteral.isKind(SyntaxKind.NoSubstitutionTemplateLiteral)) {
                 content = templateLiteral.getLiteralValue();
@@ -104,7 +121,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
                 // Remove template literal backticks and interpolations
                 content = fullText
                   .slice(1, -1) // Remove outer backticks
-                  .replace(/\$\{[^}]*\}/g, "PLACEHOLDER"); // Replace ${...} with placeholder
+                  .replace(/\$\{[^}]*\}/g, 'PLACEHOLDER'); // Replace ${...} with placeholder
               }
 
               if (content && content.trim()) {
@@ -128,11 +145,11 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         for (const varDecl of variableDeclarations) {
           const name = varDecl.getName();
           if (
-            name.includes("QUERY") ||
-            name.includes("MUTATION") ||
-            name.includes("FRAGMENT") ||
-            name.includes("Query") ||
-            name.includes("Mutation")
+            name.includes('QUERY') ||
+            name.includes('MUTATION') ||
+            name.includes('FRAGMENT') ||
+            name.includes('Query') ||
+            name.includes('Mutation')
           ) {
             const initializer = varDecl.getInitializer();
             if (initializer && initializer.isKind(SyntaxKind.TaggedTemplateExpression)) {
@@ -148,7 +165,10 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     return operations;
   }
 
-  private extractOperationsFromDocument(document: DocumentNode, filePath: string): GraphQLOperation[] {
+  private extractOperationsFromDocument(
+    document: DocumentNode,
+    filePath: string
+  ): GraphQLOperation[] {
     const operations: GraphQLOperation[] = [];
 
     for (const definition of document.definitions) {
@@ -162,9 +182,9 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   }
 
   private extractOperation(definition: DefinitionNode, filePath: string): GraphQLOperation | null {
-    if (definition.kind === "OperationDefinition") {
-      const name = definition.name?.value || "anonymous";
-      const type = definition.operation as "query" | "mutation" | "subscription";
+    if (definition.kind === 'OperationDefinition') {
+      const name = definition.name?.value || 'anonymous';
+      const type = definition.operation as 'query' | 'mutation' | 'subscription';
       const variables = this.extractVariables(definition);
       const fragments = this.extractFragmentReferences(definition);
       const fields = this.extractFields(definition);
@@ -181,10 +201,10 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
       };
     }
 
-    if (definition.kind === "FragmentDefinition") {
+    if (definition.kind === 'FragmentDefinition') {
       return {
         name: definition.name.value,
-        type: "fragment",
+        type: 'fragment',
         filePath,
         usedIn: [],
         variables: [],
@@ -197,22 +217,25 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractFields(definition: any): GraphQLField[] {
     const fields: GraphQLField[] = [];
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const extractFromSelectionSet = (selectionSet: any, depth: number = 0): GraphQLField[] => {
       if (!selectionSet || !selectionSet.selections || depth > 5) return [];
 
       const result: GraphQLField[] = [];
       for (const selection of selectionSet.selections) {
-        if (selection.kind === "Field") {
+        if (selection.kind === 'Field') {
           const field: GraphQLField = {
             name: selection.name.value,
           };
 
           // Extract arguments as part of type info
           if (selection.arguments && selection.arguments.length > 0) {
-            const args = selection.arguments.map((arg: any) => arg.name.value).join(", ");
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const args = selection.arguments.map((arg: any) => arg.name.value).join(', ');
             field.type = `(${args})`;
           }
 
@@ -222,14 +245,14 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
           }
 
           result.push(field);
-        } else if (selection.kind === "FragmentSpread") {
-          result.push({ name: `...${selection.name.value}`, type: "fragment" });
-        } else if (selection.kind === "InlineFragment") {
+        } else if (selection.kind === 'FragmentSpread') {
+          result.push({ name: `...${selection.name.value}`, type: 'fragment' });
+        } else if (selection.kind === 'InlineFragment') {
           if (selection.selectionSet) {
-            const typeName = selection.typeCondition?.name?.value || "inline";
+            const typeName = selection.typeCondition?.name?.value || 'inline';
             result.push({
               name: `... on ${typeName}`,
-              type: "inline-fragment",
+              type: 'inline-fragment',
               fields: extractFromSelectionSet(selection.selectionSet, depth + 1),
             });
           }
@@ -245,6 +268,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     return fields;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractVariables(definition: any): VariableInfo[] {
     const variables: VariableInfo[] = [];
 
@@ -252,7 +276,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
       for (const varDef of definition.variableDefinitions) {
         const name = varDef.variable.name.value;
         const type = this.typeNodeToString(varDef.type);
-        const required = varDef.type.kind === "NonNullType";
+        const required = varDef.type.kind === 'NonNullType';
 
         variables.push({ name, type, required });
       }
@@ -261,26 +285,28 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     return variables;
   }
 
-  private typeNodeToString(typeNode: any): string {
-    if (typeNode.kind === "NonNullType") {
+  private typeNodeToString(typeNode: TypeNode): string {
+    if (typeNode.kind === 'NonNullType') {
       return `${this.typeNodeToString(typeNode.type)}!`;
     }
-    if (typeNode.kind === "ListType") {
+    if (typeNode.kind === 'ListType') {
       return `[${this.typeNodeToString(typeNode.type)}]`;
     }
-    if (typeNode.kind === "NamedType") {
+    if (typeNode.kind === 'NamedType') {
       return typeNode.name.value;
     }
-    return "unknown";
+    return 'unknown';
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractFragmentReferences(definition: any): string[] {
     const fragments: string[] = [];
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const visit = (node: any) => {
       if (!node) return;
 
-      if (node.kind === "FragmentSpread") {
+      if (node.kind === 'FragmentSpread') {
         fragments.push(node.name.value);
       }
 
@@ -295,20 +321,21 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     return fragments;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private inferReturnType(definition: any): string {
     if (definition.selectionSet && definition.selectionSet.selections.length > 0) {
       const firstSelection = definition.selectionSet.selections[0];
-      if (firstSelection.kind === "Field") {
+      if (firstSelection.kind === 'Field') {
         return firstSelection.name.value;
       }
     }
-    return "unknown";
+    return 'unknown';
   }
 
   private async findOperationUsage(operations: GraphQLOperation[]): Promise<void> {
-    const tsFiles = await fg(["**/*.ts", "**/*.tsx"], {
+    const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
-      ignore: ["**/node_modules/**", "**/.next/**"],
+      ignore: ['**/node_modules/**', '**/.next/**'],
       absolute: true,
     });
 
@@ -319,7 +346,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
     for (const filePath of tsFiles) {
       try {
-        const content = await fs.readFile(filePath, "utf-8");
+        const content = await fs.readFile(filePath, 'utf-8');
         const relativePath = path.relative(this.basePath, filePath);
 
         for (const [name, operation] of operationNames) {

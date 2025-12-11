@@ -1,6 +1,6 @@
-import { simpleGit } from "simple-git";
-import * as fs from "fs/promises";
-import * as path from "path";
+import { simpleGit } from 'simple-git';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type {
   DocGeneratorConfig,
   RepositoryConfig,
@@ -9,12 +9,15 @@ import type {
   RepositoryReport,
   CrossRepoAnalysis,
   CrossRepoLink,
-} from "../types.js";
-import { PagesAnalyzer } from "../analyzers/pages-analyzer.js";
-import { GraphQLAnalyzer } from "../analyzers/graphql-analyzer.js";
-import { DataFlowAnalyzer } from "../analyzers/dataflow-analyzer.js";
-import { MermaidGenerator } from "../generators/mermaid-generator.js";
-import { MarkdownGenerator } from "../generators/markdown-generator.js";
+  APIConnection,
+  NavigationFlow,
+  DataFlow,
+} from '../types.js';
+import { PagesAnalyzer } from '../analyzers/pages-analyzer.js';
+import { GraphQLAnalyzer } from '../analyzers/graphql-analyzer.js';
+import { DataFlowAnalyzer } from '../analyzers/dataflow-analyzer.js';
+import { MermaidGenerator } from '../generators/mermaid-generator.js';
+import { MarkdownGenerator } from '../generators/markdown-generator.js';
 
 /**
  * Main documentation generation engine
@@ -35,7 +38,7 @@ export class DocGeneratorEngine {
    * Run documentation generation for all configured repositories
    */
   async generate(): Promise<DocumentationReport> {
-    console.log("🚀 Starting documentation generation...\n");
+    console.log('🚀 Starting documentation generation...\n');
 
     const repositoryReports: RepositoryReport[] = [];
 
@@ -51,11 +54,11 @@ export class DocGeneratorEngine {
     }
 
     // Cross-repository analysis
-    console.log("\n🔗 Running cross-repository analysis...");
+    console.log('\n🔗 Running cross-repository analysis...');
     const crossRepoAnalysis = this.analyzeCrossRepo(repositoryReports);
 
     // Generate diagrams
-    console.log("\n📊 Generating diagrams...");
+    console.log('\n📊 Generating diagrams...');
     const results = repositoryReports.map((r) => r.analysis);
     const crossRepoLinks = this.extractCrossRepoLinks(results);
     const diagrams = this.mermaidGenerator.generateAll(results, crossRepoLinks);
@@ -68,10 +71,10 @@ export class DocGeneratorEngine {
     };
 
     // Write documentation
-    console.log("\n📝 Writing documentation...");
+    console.log('\n📝 Writing documentation...');
     await this.writeDocumentation(report);
 
-    console.log("\n✨ Documentation generation complete!");
+    console.log('\n✨ Documentation generation complete!');
     console.log(`📁 Output: ${this.config.outputDir}`);
 
     return report;
@@ -96,7 +99,12 @@ export class DocGeneratorEngine {
     }
 
     // Merge results
-    const analysis = this.mergeAnalysisResults(analysisResults, repoConfig.name, version, commitHash);
+    const analysis = this.mergeAnalysisResults(
+      analysisResults,
+      repoConfig.name,
+      version,
+      commitHash
+    );
 
     // Calculate summary
     const summary = {
@@ -121,42 +129,47 @@ export class DocGeneratorEngine {
   /**
    * Get repository version and commit info
    */
-  private async getRepoInfo(repoConfig: RepositoryConfig): Promise<{ version: string; commitHash: string }> {
+  private async getRepoInfo(
+    repoConfig: RepositoryConfig
+  ): Promise<{ version: string; commitHash: string }> {
     try {
       const git = simpleGit(repoConfig.path);
       const log = await git.log({ n: 1 });
-      const commitHash = log.latest?.hash || "unknown";
+      const commitHash = log.latest?.hash || 'unknown';
 
       // Try to get version from package.json
-      let version = "unknown";
+      let version = 'unknown';
       try {
-        const packageJsonPath = path.join(repoConfig.path, "package.json");
-        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
-        version = packageJson.version || "unknown";
+        const packageJsonPath = path.join(repoConfig.path, 'package.json');
+        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
+        version = packageJson.version || 'unknown';
       } catch {
         // Ignore if no package.json
       }
 
       return { version, commitHash };
     } catch {
-      return { version: "unknown", commitHash: "unknown" };
+      return { version: 'unknown', commitHash: 'unknown' };
     }
   }
 
   /**
    * Create analyzer instance based on type
    */
-  private createAnalyzer(type: string, config: RepositoryConfig): any {
+  private createAnalyzer(
+    type: string,
+    config: RepositoryConfig
+  ): PagesAnalyzer | GraphQLAnalyzer | DataFlowAnalyzer | null {
     switch (type) {
-      case "pages":
-        if (config.type === "nextjs") {
+      case 'pages':
+        if (config.type === 'nextjs') {
           return new PagesAnalyzer(config);
         }
         break;
-      case "graphql":
+      case 'graphql':
         return new GraphQLAnalyzer(config);
-      case "dataflow":
-      case "components":
+      case 'dataflow':
+      case 'components':
         return new DataFlowAnalyzer(config);
       // Add more analyzers as needed
     }
@@ -204,9 +217,9 @@ export class DocGeneratorEngine {
    */
   private analyzeCrossRepo(reports: RepositoryReport[]): CrossRepoAnalysis {
     const sharedTypes: string[] = [];
-    const apiConnections: any[] = [];
-    const navigationFlows: any[] = [];
-    const dataFlowAcrossRepos: any[] = [];
+    const apiConnections: APIConnection[] = [];
+    const navigationFlows: NavigationFlow[] = [];
+    const dataFlowAcrossRepos: DataFlow[] = [];
 
     // Find shared GraphQL operations
     const operationsByName = new Map<string, string[]>();
@@ -236,7 +249,9 @@ export class DocGeneratorEngine {
             frontend: frontend.name,
             backend: backend.name,
             endpoint: endpoint.path,
-            operations: frontend.analysis.graphqlOperations.filter((op) => op.usedIn.length > 0).map((op) => op.name),
+            operations: frontend.analysis.graphqlOperations
+              .filter((op) => op.usedIn.length > 0)
+              .map((op) => op.name),
           });
         }
       }
@@ -273,7 +288,7 @@ export class DocGeneratorEngine {
           sourcePath: `graphql/${name}`,
           targetRepo: repos[1].repository,
           targetPath: `graphql/${name}`,
-          linkType: "graphql-operation",
+          linkType: 'graphql-operation',
           description: `Shared GraphQL operation: ${name}`,
         });
       }
@@ -298,13 +313,13 @@ export class DocGeneratorEngine {
       const fullPath = path.join(outputDir, filePath);
       const dir = path.dirname(fullPath);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(fullPath, content, "utf-8");
+      await fs.writeFile(fullPath, content, 'utf-8');
       console.log(`  📄 ${filePath}`);
     }
 
     // Write JSON report
-    const jsonPath = path.join(outputDir, "report.json");
-    await fs.writeFile(jsonPath, JSON.stringify(report, null, 2), "utf-8");
+    const jsonPath = path.join(outputDir, 'report.json');
+    await fs.writeFile(jsonPath, JSON.stringify(report, null, 2), 'utf-8');
     console.log(`  📋 report.json`);
   }
 }

@@ -1,1 +1,1 @@
-export * from "./doc-server.js";
+export * from './doc-server.js';

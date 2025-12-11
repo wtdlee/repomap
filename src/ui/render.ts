@@ -1,6 +1,6 @@
-import { h, VNode } from "preact";
-import { render as preactRender } from "preact-render-to-string";
-import { setup, extractCss } from "goober";
+import { h, VNode } from 'preact';
+import { render as preactRender } from 'preact-render-to-string';
+import { setup, extractCss } from 'goober';
 
 // Initialize goober
 setup(h);
@@ -11,10 +11,10 @@ setup(h);
 export function renderToHtml(component: VNode): { html: string; css: string } {
   // Reset CSS extraction
   extractCss(); // Clear any previous styles
-  
+
   const html = preactRender(component);
   const css = extractCss();
-  
+
   return { html, css };
 }
 
@@ -29,7 +29,7 @@ export function renderDocument(
     mermaidEnabled?: boolean;
   } = {}
 ): string {
-  const { title = "Repomap", scripts = [], mermaidEnabled = true } = options;
+  const { title = 'Repomap', scripts = [], mermaidEnabled = true } = options;
   const { html, css } = renderToHtml(component);
 
   return `<!DOCTYPE html>
@@ -44,7 +44,7 @@ export function renderDocument(
 <body>
   ${html}
   ${mermaidEnabled ? '<script>mermaid.initialize({ startOnLoad: true, theme: "neutral" });</script>' : ''}
-  ${scripts.map((s) => `<script>${s}</script>`).join("\n")}
+  ${scripts.map((s) => `<script>${s}</script>`).join('\n')}
 </body>
 </html>`;
 }

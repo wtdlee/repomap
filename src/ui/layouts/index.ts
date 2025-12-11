@@ -1,1 +1,1 @@
-export * from "./DocLayout.js";
+export * from './DocLayout.js';

@@ -1,12 +1,17 @@
-import express from "express";
-import { Server } from "socket.io";
-import * as http from "http";
-import * as fs from "fs/promises";
-import * as path from "path";
-import { marked } from "marked";
-import type { DocGeneratorConfig, DocumentationReport } from "../types.js";
-import { DocGeneratorEngine } from "../core/engine.js";
-import { PageMapGenerator } from "../generators/page-map-generator.js";
+import express from 'express';
+import { Server } from 'socket.io';
+import * as http from 'http';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { marked } from 'marked';
+import type {
+  DocGeneratorConfig,
+  DocumentationReport,
+  VariableInfo,
+  GraphQLField,
+} from '../types.js';
+import { DocGeneratorEngine } from '../core/engine.js';
+import { PageMapGenerator } from '../generators/page-map-generator.js';
 
 /**
  * Documentation server with live reload
@@ -35,17 +40,17 @@ export class DocServer {
 
   private setupRoutes(): void {
     // Serve static assets
-    this.app.use("/assets", express.static(path.join(this.config.outputDir, "assets")));
+    this.app.use('/assets', express.static(path.join(this.config.outputDir, 'assets')));
 
     // Main page
-    this.app.get("/", async (req, res) => {
-      res.send(await this.renderPage("index"));
+    this.app.get('/', async (req, res) => {
+      res.send(await this.renderPage('index'));
     });
 
     // Interactive page map
-    this.app.get("/page-map", (req, res) => {
+    this.app.get('/page-map', (req, res) => {
       if (!this.currentReport) {
-        res.status(503).send("Documentation not ready yet");
+        res.status(503).send('Documentation not ready yet');
         return;
       }
       const generator = new PageMapGenerator();
@@ -53,29 +58,29 @@ export class DocServer {
     });
 
     // Markdown pages
-    this.app.get("/docs/*", async (req, res) => {
-      const pagePath = (req.params as Record<string, string>)[0] || "index";
+    this.app.get('/docs/*', async (req, res) => {
+      const pagePath = (req.params as Record<string, string>)[0] || 'index';
       res.send(await this.renderPage(pagePath));
     });
 
     // API endpoints
-    this.app.get("/api/report", (req, res) => {
+    this.app.get('/api/report', (req, res) => {
       res.json(this.currentReport);
     });
 
-    this.app.get("/api/diagram/:name", (req, res) => {
+    this.app.get('/api/diagram/:name', (req, res) => {
       const diagram = this.currentReport?.diagrams.find(
-        (d) => d.title.toLowerCase().replace(/\s+/g, "-") === req.params.name
+        (d) => d.title.toLowerCase().replace(/\s+/g, '-') === req.params.name
       );
       if (diagram) {
         res.json(diagram);
       } else {
-        res.status(404).json({ error: "Diagram not found" });
+        res.status(404).json({ error: 'Diagram not found' });
       }
     });
 
     // Regenerate endpoint
-    this.app.post("/api/regenerate", async (req, res) => {
+    this.app.post('/api/regenerate', async (req, res) => {
       try {
         await this.regenerate();
         res.json({ success: true });
@@ -86,23 +91,23 @@ export class DocServer {
   }
 
   private setupSocketIO(): void {
-    this.io.on("connection", (socket) => {
-      console.log("Client connected");
+    this.io.on('connection', (socket) => {
+      console.log('Client connected');
 
-      socket.on("disconnect", () => {
-        console.log("Client disconnected");
+      socket.on('disconnect', () => {
+        console.log('Client disconnected');
       });
     });
   }
 
   private async renderPage(pagePath: string): Promise<string> {
     // Remove .md extension if present
-    const cleanPath = pagePath.replace(/\.md$/, "");
+    const cleanPath = pagePath.replace(/\.md$/, '');
     const mdPath = path.join(this.config.outputDir, `${cleanPath}.md`);
-    let content = "";
+    let content = '';
 
     try {
-      const markdown = await fs.readFile(mdPath, "utf-8");
+      const markdown = await fs.readFile(mdPath, 'utf-8');
       // Parse markdown to HTML
       let html = await marked.parse(markdown);
       // Convert mermaid code blocks to mermaid divs
@@ -114,7 +119,7 @@ export class DocServer {
       );
       // Wrap tables for horizontal scroll
       html = html.replace(/<table>/g, '<div class="table-wrapper"><table>');
-      html = html.replace(/<\/table>/g, "</table></div>");
+      html = html.replace(/<\/table>/g, '</table></div>');
       content = html;
     } catch (e) {
       console.error(`Failed to render page: ${mdPath}`, e);
@@ -125,8 +130,15 @@ export class DocServer {
   }
 
   private getGraphQLData(): string {
-    if (!this.currentReport) return "[]";
-    const ops: any[] = [];
+    if (!this.currentReport) return '[]';
+    const ops: Array<{
+      name: string;
+      type: string;
+      returnType: string;
+      variables: VariableInfo[];
+      fields: GraphQLField[];
+      usedIn: string[];
+    }> = [];
     for (const repo of this.currentReport.repositories) {
       for (const op of repo.analysis?.graphqlOperations || []) {
         ops.push({
@@ -778,7 +790,7 @@ export class DocServer {
           </div>
         `
           )
-          .join("")}
+          .join('')}
         <a href="/docs/cross-repo">Cross Repository</a>
         <a href="/docs/diagrams">Diagrams</a>
         <a href="/page-map" class="highlight">Page Map</a>
@@ -958,7 +970,7 @@ export class DocServer {
       modalHistory = [];
 
       // Clean name: remove icons and extract operation name from patterns like "GraphQL: OPERATION_NAME"
-      let cleanName = text.replace(/[🔒📡✏️🔄]/g, '').trim();
+      let cleanName = text.replace(/[\u{1F512}\u{1F4E1}\u{270F}\u{FE0F}\u{1F504}]/gu, '').trim();
       // Handle "GraphQL: OPERATION_NAME" pattern
       if (cleanName.includes('GraphQL:')) {
         cleanName = cleanName.replace(/^.*GraphQL:\s*/, '').trim();
@@ -1621,18 +1633,18 @@ export class DocServer {
 
   async start(openBrowser: boolean = true): Promise<void> {
     // Generate initial documentation
-    console.log("Generating initial documentation...");
+    console.log('Generating initial documentation...');
     this.currentReport = await this.engine.generate();
 
     // Start server
     this.server.listen(this.port, () => {
       console.log(`\n🌐 Documentation server running at http://localhost:${this.port}`);
-      console.log("   Press Ctrl+C to stop\n");
+      console.log('   Press Ctrl+C to stop\n');
     });
 
     // Open browser
     if (openBrowser) {
-      const open = (await import("open")).default;
+      const open = (await import('open')).default;
       await open(`http://localhost:${this.port}`);
     }
 
@@ -1643,10 +1655,10 @@ export class DocServer {
   }
 
   private async regenerate(): Promise<void> {
-    console.log("\n🔄 Regenerating documentation...");
+    console.log('\n🔄 Regenerating documentation...');
     this.currentReport = await this.engine.generate();
-    this.io.emit("reload");
-    console.log("✅ Documentation regenerated");
+    this.io.emit('reload');
+    console.log('✅ Documentation regenerated');
   }
 
   private async watchForChanges(): Promise<void> {
@@ -1658,7 +1670,10 @@ export class DocServer {
         const watcher = fs.watch(dir, { recursive: true });
         (async () => {
           for await (const event of watcher) {
-            if (event.filename && (event.filename.endsWith(".ts") || event.filename.endsWith(".tsx"))) {
+            if (
+              event.filename &&
+              (event.filename.endsWith('.ts') || event.filename.endsWith('.tsx'))
+            ) {
               if (timeout) clearTimeout(timeout);
 
               timeout = setTimeout(async () => {
@@ -1675,6 +1690,6 @@ export class DocServer {
 
   stop(): void {
     this.server.close();
-    console.log("\n👋 Server stopped");
+    console.log('\n👋 Server stopped');
   }
 }

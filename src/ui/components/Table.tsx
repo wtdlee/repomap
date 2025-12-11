@@ -1,27 +1,27 @@
-import { styled } from "../setup.js";
-import { theme } from "../styles/theme.js";
-import type { ComponentChildren } from "preact";
+import { styled } from '../setup.js';
+import { theme } from '../styles/theme.js';
+import type { ComponentChildren } from 'preact';
 
 // Styled table components
-export const Table = styled("table")`
+export const Table = styled('table')`
   width: 100%;
   border-collapse: collapse;
   font-size: ${theme.fontSize.sm};
 `;
 
-export const Thead = styled("thead")`
+export const Thead = styled('thead')`
   background: ${theme.colors.backgroundAlt};
 `;
 
-export const Tbody = styled("tbody")``;
+export const Tbody = styled('tbody')``;
 
 interface TrProps {
   $hoverable?: boolean;
 }
 
-export const Tr = styled("tr")<TrProps>`
+export const Tr = styled('tr')<TrProps>`
   border-bottom: 1px solid ${theme.colors.border};
-  
+
   ${(p) =>
     p.$hoverable &&
     `
@@ -33,12 +33,12 @@ export const Tr = styled("tr")<TrProps>`
 
 interface ThProps {
   $width?: string;
-  $align?: "left" | "center" | "right";
+  $align?: 'left' | 'center' | 'right';
 }
 
-export const Th = styled("th")<ThProps>`
+export const Th = styled('th')<ThProps>`
   padding: ${theme.spacing.sm} ${theme.spacing.md};
-  text-align: ${(p) => p.$align || "left"};
+  text-align: ${(p) => p.$align || 'left'};
   font-weight: ${theme.fontWeight.semibold};
   color: ${theme.colors.text};
   white-space: nowrap;
@@ -46,18 +46,18 @@ export const Th = styled("th")<ThProps>`
 `;
 
 interface TdProps {
-  $align?: "left" | "center" | "right";
+  $align?: 'left' | 'center' | 'right';
 }
 
-export const Td = styled("td")<TdProps>`
+export const Td = styled('td')<TdProps>`
   padding: ${theme.spacing.sm} ${theme.spacing.md};
-  text-align: ${(p) => p.$align || "left"};
+  text-align: ${(p) => p.$align || 'left'};
   color: ${theme.colors.text};
   vertical-align: top;
 `;
 
 // Responsive table wrapper
-export const TableWrapper = styled("div")`
+export const TableWrapper = styled('div')`
   overflow-x: auto;
   border: 1px solid ${theme.colors.border};
   border-radius: ${theme.borderRadius.md};

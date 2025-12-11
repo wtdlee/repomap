@@ -1,4 +1,4 @@
-import type { PageInfo, DocumentationReport, GraphQLOperation, ComponentInfo } from "../types.js";
+import type { PageInfo, DocumentationReport, GraphQLOperation } from '../types.js';
 
 interface PageNode extends PageInfo {
   repo: string;
@@ -10,7 +10,7 @@ interface PageNode extends PageInfo {
 interface PageRelation {
   from: string;
   to: string;
-  type: "parent-child" | "sibling" | "same-layout";
+  type: 'parent-child' | 'sibling' | 'same-layout';
   description: string;
 }
 
@@ -72,10 +72,10 @@ export class PageMapGenerator {
     }
 
     for (const page of pages) {
-      const segments = page.path.split("/").filter(Boolean);
+      const segments = page.path.split('/').filter(Boolean);
 
       for (let i = segments.length - 1; i >= 1; i--) {
-        const parentPath = "/" + segments.slice(0, i).join("/");
+        const parentPath = '/' + segments.slice(0, i).join('/');
         const parent = pathMap.get(parentPath);
         if (parent) {
           page.parent = parentPath;
@@ -86,7 +86,7 @@ export class PageMapGenerator {
           relations.push({
             from: parentPath,
             to: page.path,
-            type: "parent-child",
+            type: 'parent-child',
             description: `Sub-page of ${parentPath}`,
           });
           break;
@@ -104,14 +104,15 @@ export class PageMapGenerator {
           if (other.path !== page.path && other.layout === page.layout) {
             const existing = relations.find(
               (r) =>
-                r.type === "same-layout" &&
-                ((r.from === page.path && r.to === other.path) || (r.from === other.path && r.to === page.path))
+                r.type === 'same-layout' &&
+                ((r.from === page.path && r.to === other.path) ||
+                  (r.from === other.path && r.to === page.path))
             );
             if (!existing) {
               relations.push({
                 from: page.path,
                 to: other.path,
-                type: "same-layout",
+                type: 'same-layout',
                 description: `Both use ${page.layout}`,
               });
             }
@@ -124,7 +125,11 @@ export class PageMapGenerator {
     return { rootPages, relations };
   }
 
-  private renderPageMapHtml(allPages: PageNode[], rootPages: PageNode[], relations: PageRelation[]): string {
+  private renderPageMapHtml(
+    allPages: PageNode[],
+    rootPages: PageNode[],
+    relations: PageRelation[]
+  ): string {
     const graphqlOpsJson = JSON.stringify(
       this.graphqlOps.map((op) => ({
         name: op.name,
@@ -141,9 +146,9 @@ export class PageMapGenerator {
     // Group by first path segment
     const groups = new Map<string, PageNode[]>();
     for (const page of allPages) {
-      const seg = page.path.split("/").filter(Boolean)[0] || "root";
+      const seg = page.path.split('/').filter(Boolean)[0] || 'root';
       if (!groups.has(seg)) groups.set(seg, []);
-      groups.get(seg)!.push(page);
+      groups.get(seg)?.push(page);
     }
 
     return `<!DOCTYPE html>
@@ -421,7 +426,7 @@ export class PageMapGenerator {
       <div class="stats">
         <div class="stat"><div class="stat-val">${allPages.length}</div><div class="stat-label">Pages</div></div>
         <div class="stat"><div class="stat-val">${
-          relations.filter((r) => r.type === "parent-child").length
+          relations.filter((r) => r.type === 'parent-child').length
         }</div><div class="stat-label">Hierarchies</div></div>
         <div class="stat"><div class="stat-val">${
           new Set(allPages.map((p) => p.layout).filter(Boolean)).size
@@ -1090,7 +1095,16 @@ export class PageMapGenerator {
   }
 
   private buildTreeHtml(groups: Map<string, PageNode[]>, allPages: PageNode[]): string {
-    const colors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899"];
+    const colors = [
+      '#ef4444',
+      '#f97316',
+      '#eab308',
+      '#22c55e',
+      '#14b8a6',
+      '#3b82f6',
+      '#8b5cf6',
+      '#ec4899',
+    ];
     let idx = 0;
 
     return Array.from(groups.entries())
@@ -1105,12 +1119,12 @@ export class PageMapGenerator {
 
         // Calculate depth for each page based on closest existing ancestor
         for (const p of sorted) {
-          const segments = p.path.split("/").filter(Boolean);
+          const segments = p.path.split('/').filter(Boolean);
           let depth = 0;
 
           // Find closest existing ancestor
           for (let i = segments.length - 1; i >= 1; i--) {
-            const ancestorPath = "/" + segments.slice(0, i).join("/");
+            const ancestorPath = '/' + segments.slice(0, i).join('/');
             if (pathSet.has(ancestorPath)) {
               depth = (depthMap.get(ancestorPath) ?? 0) + 1;
               break;
@@ -1123,16 +1137,32 @@ export class PageMapGenerator {
         const pagesHtml = sorted
           .map((p) => {
             const type = this.getPageType(p.path);
-            const queries = (p.dataFetching || []).filter((d: any) => !d.type?.includes("Mutation")).length;
-            const mutations = (p.dataFetching || []).filter((d: any) => d.type?.includes("Mutation")).length;
+            const queries = (p.dataFetching || []).filter(
+              (d) => !d.type?.includes('Mutation')
+            ).length;
+            const mutations = (p.dataFetching || []).filter((d) =>
+              d.type?.includes('Mutation')
+            ).length;
             const depth = depthMap.get(p.path) ?? 0;
 
-            const repoName = (p as any).repo || "";
+            const pageNode = p as PageNode;
+            const repoName = pageNode.repo || '';
             // Only show repo tag if there are multiple repositories
-            const showRepoTag = allPages.some((pg: any) => pg.repo && pg.repo !== repoName);
+            const showRepoTag = allPages.some(
+              (pg) => (pg as PageNode).repo && (pg as PageNode).repo !== repoName
+            );
             // Create short name: take last part or abbreviate long names
-            const shortRepoName = repoName.split("/").pop()?.split("-").map((s: string) => s.substring(0, 4)).join("-") || repoName.substring(0, 8);
-            const repoTag = showRepoTag && repoName ? `<span class="tag tag-repo" title="${repoName}">${shortRepoName}</span>` : "";
+            const shortRepoName =
+              repoName
+                .split('/')
+                .pop()
+                ?.split('-')
+                .map((s: string) => s.substring(0, 4))
+                .join('-') || repoName.substring(0, 8);
+            const repoTag =
+              showRepoTag && repoName
+                ? `<span class="tag tag-repo" title="${repoName}">${shortRepoName}</span>`
+                : '';
 
             return `<div class="page-item" data-path="${p.path}" data-repo="${repoName}" onclick="selectPage('${
               p.path
@@ -1141,13 +1171,13 @@ export class PageMapGenerator {
               <span class="page-path">${p.path}</span>
               <div class="page-tags">
                 ${repoTag}
-                ${p.authentication?.required ? '<span class="tag tag-auth">AUTH</span>' : ""}
-                ${queries > 0 ? `<span class="tag tag-query">Q:${queries}</span>` : ""}
-                ${mutations > 0 ? `<span class="tag tag-mutation">M:${mutations}</span>` : ""}
+                ${p.authentication?.required ? '<span class="tag tag-auth">AUTH</span>' : ''}
+                ${queries > 0 ? `<span class="tag tag-query">Q:${queries}</span>` : ''}
+                ${mutations > 0 ? `<span class="tag tag-mutation">M:${mutations}</span>` : ''}
               </div>
             </div>`;
           })
-          .join("");
+          .join('');
 
         return `<div class="group">
           <div class="group-header" onclick="toggleGroup(this)" style="--group-color:${color}">
@@ -1158,15 +1188,15 @@ export class PageMapGenerator {
           <div class="group-content">${pagesHtml}</div>
         </div>`;
       })
-      .join("");
+      .join('');
   }
 
   private getPageType(path: string): { label: string; color: string } {
-    const last = path.split("/").filter(Boolean).pop() || "";
-    if (last === "new" || path.endsWith("/new")) return { label: "CREATE", color: "#22c55e" };
-    if (last === "edit" || path.includes("/edit")) return { label: "EDIT", color: "#f59e0b" };
-    if (last.startsWith("[") || last.startsWith(":")) return { label: "DETAIL", color: "#3b82f6" };
-    if (path.includes("setting")) return { label: "SETTINGS", color: "#6b7280" };
-    return { label: "LIST", color: "#06b6d4" };
+    const last = path.split('/').filter(Boolean).pop() || '';
+    if (last === 'new' || path.endsWith('/new')) return { label: 'CREATE', color: '#22c55e' };
+    if (last === 'edit' || path.includes('/edit')) return { label: 'EDIT', color: '#f59e0b' };
+    if (last.startsWith('[') || last.startsWith(':')) return { label: 'DETAIL', color: '#3b82f6' };
+    if (path.includes('setting')) return { label: 'SETTINGS', color: '#6b7280' };
+    return { label: 'LIST', color: '#06b6d4' };
   }
 }

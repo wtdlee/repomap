@@ -1,6 +1,6 @@
-import { styled } from "../setup.js";
-import { theme } from "../styles/theme.js";
-import type { ComponentChildren } from "preact";
+import { styled } from '../setup.js';
+import { theme } from '../styles/theme.js';
+import type { ComponentChildren } from 'preact';
 
 interface CodeBlockProps {
   children: ComponentChildren;
@@ -9,13 +9,13 @@ interface CodeBlockProps {
   maxHeight?: string;
 }
 
-const Container = styled("div")`
+const Container = styled('div')`
   border-radius: ${theme.borderRadius.md};
   overflow: hidden;
   background: ${theme.colors.codeBackground};
 `;
 
-const Header = styled("div")`
+const Header = styled('div')`
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -24,13 +24,13 @@ const Header = styled("div")`
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 `;
 
-const Title = styled("span")`
+const Title = styled('span')`
   font-size: ${theme.fontSize.xs};
   color: ${theme.colors.textLight};
   font-weight: ${theme.fontWeight.medium};
 `;
 
-const Language = styled("span")`
+const Language = styled('span')`
   font-size: ${theme.fontSize.xs};
   color: ${theme.colors.textLight};
   text-transform: uppercase;
@@ -40,11 +40,11 @@ interface PreProps {
   $maxHeight?: string;
 }
 
-const Pre = styled("pre")<PreProps>`
+const Pre = styled('pre')<PreProps>`
   margin: 0;
   padding: ${theme.spacing.md};
   overflow: auto;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: ${theme.fontSize.sm};
   line-height: 1.5;
   color: ${theme.colors.codeText};
@@ -52,7 +52,7 @@ const Pre = styled("pre")<PreProps>`
   ${(p) => p.$maxHeight && `max-height: ${p.$maxHeight};`}
 `;
 
-const Code = styled("code")`
+const Code = styled('code')`
   font-family: inherit;
 `;
 

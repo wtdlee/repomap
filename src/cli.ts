@@ -1,43 +1,43 @@
 #!/usr/bin/env node
 
-import { Command } from "commander";
-import chalk from "chalk";
-import * as path from "path";
-import * as fs from "fs/promises";
-import { DocGeneratorEngine } from "./core/engine.js";
-import { DocServer } from "./server/doc-server.js";
-import type { DocGeneratorConfig, RepositoryConfig } from "./types.js";
+import { Command } from 'commander';
+import chalk from 'chalk';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import { DocGeneratorEngine } from './core/engine.js';
+import { DocServer } from './server/doc-server.js';
+import type { DocGeneratorConfig, RepositoryConfig, DocumentationReport } from './types.js';
 
 const program = new Command();
 
 program
-  .name("repomap")
-  .description("Interactive documentation generator for code repositories")
-  .version("0.1.0");
+  .name('repomap')
+  .description('Interactive documentation generator for code repositories')
+  .version('0.1.0');
 
 /**
  * Auto-detect project type and settings
  */
 async function detectProject(dir: string): Promise<RepositoryConfig | null> {
-  const packageJsonPath = path.join(dir, "package.json");
-  
+  const packageJsonPath = path.join(dir, 'package.json');
+
   try {
-    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
     const name = packageJson.name || path.basename(dir);
-    
+
     // Detect project type
     const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-    let type: "nextjs" | "rails" | "generic" = "generic";
-    
-    if (deps["next"]) {
-      type = "nextjs";
+    let type: 'nextjs' | 'rails' | 'generic' = 'generic';
+
+    if (deps['next']) {
+      type = 'nextjs';
     }
-    
+
     // Detect directories
     const settings: Record<string, string> = {};
-    
+
     // Check common Next.js structures
-    const possiblePagesDirs = ["src/pages", "pages", "app", "src/app"];
+    const possiblePagesDirs = ['src/pages', 'pages', 'app', 'src/app'];
     for (const pagesDir of possiblePagesDirs) {
       try {
         await fs.access(path.join(dir, pagesDir));
@@ -45,9 +45,9 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
         break;
       } catch {}
     }
-    
+
     // Check for features directory
-    const possibleFeaturesDirs = ["src/features", "features", "src/modules", "modules"];
+    const possibleFeaturesDirs = ['src/features', 'features', 'src/modules', 'modules'];
     for (const featuresDir of possibleFeaturesDirs) {
       try {
         await fs.access(path.join(dir, featuresDir));
@@ -55,9 +55,9 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
         break;
       } catch {}
     }
-    
+
     // Check for components directory
-    const possibleComponentsDirs = ["src/components", "components", "src/common/components"];
+    const possibleComponentsDirs = ['src/components', 'components', 'src/common/components'];
     for (const componentsDir of possibleComponentsDirs) {
       try {
         await fs.access(path.join(dir, componentsDir));
@@ -65,15 +65,15 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
         break;
       } catch {}
     }
-    
+
     return {
       name,
       displayName: packageJson.name || path.basename(dir),
-      description: packageJson.description || "",
+      description: packageJson.description || '',
       path: dir,
-      branch: "main",
+      branch: 'main',
       type,
-      analyzers: ["pages", "graphql", "components", "dataflow"],
+      analyzers: ['pages', 'graphql', 'components', 'dataflow'],
       settings,
     };
   } catch {
@@ -86,35 +86,44 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
  */
 async function createDefaultConfig(cwd: string): Promise<DocGeneratorConfig> {
   const project = await detectProject(cwd);
-  
+
   if (!project) {
-    throw new Error("Could not detect project. Please create a repomap.config.ts file or run 'repomap init'.");
+    throw new Error(
+      "Could not detect project. Please create a repomap.config.ts file or run 'repomap init'."
+    );
   }
-  
+
   return {
-    outputDir: "./.repomap",
+    outputDir: './.repomap',
     site: {
       title: `${project.displayName} Documentation`,
-      description: "Auto-generated documentation",
-      baseUrl: "/docs",
+      description: 'Auto-generated documentation',
+      baseUrl: '/docs',
     },
     repositories: [project],
     analysis: {
-      include: ["**/*.tsx", "**/*.ts"],
-      exclude: ["**/node_modules/**", "**/__tests__/**", "**/*.test.*", "**/*.spec.*", "**/dist/**", "**/.next/**"],
+      include: ['**/*.tsx', '**/*.ts'],
+      exclude: [
+        '**/node_modules/**',
+        '**/__tests__/**',
+        '**/*.test.*',
+        '**/*.spec.*',
+        '**/dist/**',
+        '**/.next/**',
+      ],
       maxDepth: 5,
     },
     diagrams: {
       enabled: true,
-      types: ["flowchart", "sequence"],
-      theme: "default",
+      types: ['flowchart', 'sequence'],
+      theme: 'default',
     },
     watch: {
       enabled: false,
       debounce: 1000,
     },
     integrations: {
-      github: { enabled: false, organization: "" },
+      github: { enabled: false, organization: '' },
       slack: { enabled: false },
     },
   };
@@ -125,10 +134,10 @@ async function createDefaultConfig(cwd: string): Promise<DocGeneratorConfig> {
  */
 async function loadConfig(configPath: string | null, cwd: string): Promise<DocGeneratorConfig> {
   // Try to load config file
-  const configFiles = configPath 
+  const configFiles = configPath
     ? [configPath]
-    : ["repomap.config.ts", "repomap.config.js", "repomap.config.mjs"];
-  
+    : ['repomap.config.ts', 'repomap.config.js', 'repomap.config.mjs'];
+
   for (const file of configFiles) {
     const fullPath = path.resolve(cwd, file);
     try {
@@ -138,9 +147,9 @@ async function loadConfig(configPath: string | null, cwd: string): Promise<DocGe
       return module.config || module.default;
     } catch {}
   }
-  
+
   // No config file, auto-detect
-  console.log(chalk.gray("No config file found, auto-detecting project..."));
+  console.log(chalk.gray('No config file found, auto-detecting project...'));
   return createDefaultConfig(cwd);
 }
 
@@ -148,14 +157,14 @@ async function loadConfig(configPath: string | null, cwd: string): Promise<DocGe
  * Generate command - generates documentation
  */
 program
-  .command("generate")
-  .description("Generate documentation from source code")
-  .option("-c, --config <path>", "Path to config file")
-  .option("-o, --output <path>", "Output directory")
-  .option("--repo <name>", "Analyze specific repository only")
-  .option("--watch", "Watch for changes and regenerate")
+  .command('generate')
+  .description('Generate documentation from source code')
+  .option('-c, --config <path>', 'Path to config file')
+  .option('-o, --output <path>', 'Output directory')
+  .option('--repo <name>', 'Analyze specific repository only')
+  .option('--watch', 'Watch for changes and regenerate')
   .action(async (options) => {
-    console.log(chalk.blue.bold("\n📚 Repomap - Documentation Generator\n"));
+    console.log(chalk.blue.bold('\n📚 Repomap - Documentation Generator\n'));
 
     try {
       const cwd = process.cwd();
@@ -179,14 +188,14 @@ program
       const engine = new DocGeneratorEngine(config);
 
       if (options.watch) {
-        console.log(chalk.yellow("\n👀 Watch mode enabled. Press Ctrl+C to stop.\n"));
+        console.log(chalk.yellow('\n👀 Watch mode enabled. Press Ctrl+C to stop.\n'));
         await watchAndGenerate(engine, config);
       } else {
         const report = await engine.generate();
         printSummary(report);
       }
     } catch (error) {
-      console.error(chalk.red("\n❌ Error:"), (error as Error).message);
+      console.error(chalk.red('\n❌ Error:'), (error as Error).message);
       process.exit(1);
     }
   });
@@ -195,13 +204,13 @@ program
  * Serve command - starts documentation server
  */
 program
-  .command("serve")
-  .description("Start local documentation server with live reload")
-  .option("-c, --config <path>", "Path to config file")
-  .option("-p, --port <number>", "Server port", "3030")
-  .option("--no-open", "Don't open browser automatically")
+  .command('serve')
+  .description('Start local documentation server with live reload')
+  .option('-c, --config <path>', 'Path to config file')
+  .option('-p, --port <number>', 'Server port', '3030')
+  .option('--no-open', "Don't open browser automatically")
   .action(async (options) => {
-    console.log(chalk.blue.bold("\n🌐 Repomap - Documentation Server\n"));
+    console.log(chalk.blue.bold('\n🌐 Repomap - Documentation Server\n'));
 
     try {
       const cwd = process.cwd();
@@ -210,7 +219,7 @@ program
       const server = new DocServer(config, parseInt(options.port));
       await server.start(!options.open);
     } catch (error) {
-      console.error(chalk.red("\n❌ Error:"), (error as Error).message);
+      console.error(chalk.red('\n❌ Error:'), (error as Error).message);
       process.exit(1);
     }
   });
@@ -219,11 +228,11 @@ program
  * Init command - creates config file
  */
 program
-  .command("init")
-  .description("Initialize repomap configuration")
-  .option("-f, --force", "Overwrite existing config")
+  .command('init')
+  .description('Initialize repomap configuration')
+  .option('-f, --force', 'Overwrite existing config')
   .action(async (options) => {
-    const configPath = "./repomap.config.ts";
+    const configPath = './repomap.config.ts';
 
     try {
       const exists = await fs
@@ -232,17 +241,17 @@ program
         .catch(() => false);
 
       if (exists && !options.force) {
-        console.log(chalk.yellow("Config file already exists. Use --force to overwrite."));
+        console.log(chalk.yellow('Config file already exists. Use --force to overwrite.'));
         return;
       }
 
       // Detect current project
       const project = await detectProject(process.cwd());
-      const projectName = project?.name || "my-project";
-      const projectType = project?.type || "nextjs";
-      const pagesDir = project?.settings.pagesDir || "src/pages";
-      const featuresDir = project?.settings.featuresDir || "src/features";
-      const componentsDir = project?.settings.componentsDir || "src/components";
+      const projectName = project?.name || 'my-project';
+      const projectType = project?.type || 'nextjs';
+      const pagesDir = project?.settings.pagesDir || 'src/pages';
+      const featuresDir = project?.settings.featuresDir || 'src/features';
+      const componentsDir = project?.settings.componentsDir || 'src/components';
 
       const templateConfig = `import type { DocGeneratorConfig } from "repomap";
 
@@ -303,11 +312,11 @@ export const config: DocGeneratorConfig = {
 export default config;
 `;
 
-      await fs.writeFile(configPath, templateConfig, "utf-8");
+      await fs.writeFile(configPath, templateConfig, 'utf-8');
       console.log(chalk.green(`✅ Created ${configPath}`));
       console.log(chalk.gray("\nRun 'npx repomap serve' to start the documentation server."));
     } catch (error) {
-      console.error(chalk.red("Failed to create config:"), (error as Error).message);
+      console.error(chalk.red('Failed to create config:'), (error as Error).message);
     }
   });
 
@@ -315,17 +324,17 @@ export default config;
  * Diff command - shows changes since last generation
  */
 program
-  .command("diff")
-  .description("Show documentation changes since last generation")
-  .option("-c, --config <path>", "Path to config file")
+  .command('diff')
+  .description('Show documentation changes since last generation')
+  .option('-c, --config <path>', 'Path to config file')
   .action(async (options) => {
-    console.log(chalk.blue.bold("\n📊 Documentation Diff\n"));
+    console.log(chalk.blue.bold('\n📊 Documentation Diff\n'));
 
     try {
       const cwd = process.cwd();
       const config = await loadConfig(options.config, cwd);
 
-      const reportPath = path.join(config.outputDir, "report.json");
+      const reportPath = path.join(config.outputDir, 'report.json');
       const reportExists = await fs
         .access(reportPath)
         .then(() => true)
@@ -336,7 +345,7 @@ program
         return;
       }
 
-      const previousReport = JSON.parse(await fs.readFile(reportPath, "utf-8"));
+      const previousReport = JSON.parse(await fs.readFile(reportPath, 'utf-8'));
 
       // Generate new report without writing
       const engine = new DocGeneratorEngine(config);
@@ -345,13 +354,16 @@ program
       // Compare
       showDiff(previousReport, currentReport);
     } catch (error) {
-      console.error(chalk.red("Failed to generate diff:"), (error as Error).message);
+      console.error(chalk.red('Failed to generate diff:'), (error as Error).message);
     }
   });
 
 // Helper functions
 
-async function watchAndGenerate(engine: DocGeneratorEngine, config: DocGeneratorConfig): Promise<void> {
+async function watchAndGenerate(
+  engine: DocGeneratorEngine,
+  config: DocGeneratorConfig
+): Promise<void> {
   // Initial generation
   await engine.generate();
 
@@ -364,7 +376,7 @@ async function watchAndGenerate(engine: DocGeneratorEngine, config: DocGenerator
     let timeout: NodeJS.Timeout | null = null;
 
     for await (const event of watcher) {
-      if (event.filename && (event.filename.endsWith(".ts") || event.filename.endsWith(".tsx"))) {
+      if (event.filename && (event.filename.endsWith('.ts') || event.filename.endsWith('.tsx'))) {
         if (timeout) clearTimeout(timeout);
 
         timeout = setTimeout(async () => {
@@ -376,8 +388,8 @@ async function watchAndGenerate(engine: DocGeneratorEngine, config: DocGenerator
   }
 }
 
-function printSummary(report: any): void {
-  console.log(chalk.green.bold("\n📈 Generation Summary\n"));
+function printSummary(report: DocumentationReport): void {
+  console.log(chalk.green.bold('\n📈 Generation Summary\n'));
 
   for (const repo of report.repositories) {
     console.log(chalk.cyan(`  ${repo.displayName}:`));
@@ -391,11 +403,11 @@ function printSummary(report: any): void {
   console.log(chalk.gray(`  Generated at: ${report.generatedAt}`));
 }
 
-function showDiff(previous: any, current: any): void {
-  console.log(chalk.cyan("Changes detected:\n"));
+function showDiff(previous: DocumentationReport, current: DocumentationReport): void {
+  console.log(chalk.cyan('Changes detected:\n'));
 
   for (const repo of current.repositories) {
-    const prevRepo = previous.repositories.find((r: any) => r.name === repo.name);
+    const prevRepo = previous.repositories.find((r) => r.name === repo.name);
 
     if (!prevRepo) {
       console.log(chalk.green(`  + New repository: ${repo.displayName}`));
@@ -409,13 +421,13 @@ function showDiff(previous: any, current: any): void {
     if (pagesDiff !== 0 || compDiff !== 0 || gqlDiff !== 0) {
       console.log(chalk.yellow(`  ~ ${repo.displayName}:`));
       if (pagesDiff !== 0) {
-        console.log(`    Pages: ${pagesDiff > 0 ? "+" : ""}${pagesDiff}`);
+        console.log(`    Pages: ${pagesDiff > 0 ? '+' : ''}${pagesDiff}`);
       }
       if (compDiff !== 0) {
-        console.log(`    Components: ${compDiff > 0 ? "+" : ""}${compDiff}`);
+        console.log(`    Components: ${compDiff > 0 ? '+' : ''}${compDiff}`);
       }
       if (gqlDiff !== 0) {
-        console.log(`    GraphQL Ops: ${gqlDiff > 0 ? "+" : ""}${gqlDiff}`);
+        console.log(`    GraphQL Ops: ${gqlDiff > 0 ? '+' : ''}${gqlDiff}`);
       }
     }
   }

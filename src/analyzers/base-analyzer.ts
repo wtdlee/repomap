@@ -1,4 +1,4 @@
-import type { RepositoryConfig, AnalysisResult } from "../types.js";
+import type { RepositoryConfig, AnalysisResult } from '../types.js';
 
 /**
  * Base class for all analyzers
@@ -37,7 +37,7 @@ export abstract class BaseAnalyzer {
    * Get setting value with fallback
    * 設定値を取得（フォールバック付き）
    */
-  protected getSetting(key: string, defaultValue: string = ""): string {
+  protected getSetting(key: string, defaultValue: string = ''): string {
     return this.config.settings[key] ?? defaultValue;
   }
 
@@ -62,6 +62,6 @@ export abstract class BaseAnalyzer {
    * エラーをログ出力
    */
   protected error(message: string, error?: Error): void {
-    console.error(`[${this.getName()}] ❌ ${message}`, error?.message || "");
+    console.error(`[${this.getName()}] ❌ ${message}`, error?.message || '');
   }
 }
