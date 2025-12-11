@@ -9,6 +9,3 @@ export * from './generators/mermaid-generator.js';
 export * from './generators/markdown-generator.js';
 export * from './generators/page-map-generator.js';
 export * from './server/doc-server.js';
-
-// UI Components (Preact + goober)
-export * from './ui/index.js';
