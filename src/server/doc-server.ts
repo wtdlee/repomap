@@ -154,8 +154,38 @@ export class DocServer {
     return JSON.stringify(ops);
   }
 
+  private getApiCallsData(): string {
+    if (!this.currentReport) return '[]';
+    const calls: Array<{
+      id: string;
+      method: string;
+      url: string;
+      callType: string;
+      filePath: string;
+      line: number;
+      containingFunction: string;
+      requiresAuth: boolean;
+    }> = [];
+    for (const repo of this.currentReport.repositories) {
+      for (const call of repo.analysis?.apiCalls || []) {
+        calls.push({
+          id: call.id,
+          method: call.method,
+          url: call.url,
+          callType: call.callType,
+          filePath: call.filePath,
+          line: call.line,
+          containingFunction: call.containingFunction,
+          requiresAuth: call.requiresAuth,
+        });
+      }
+    }
+    return JSON.stringify(calls);
+  }
+
   private getHtmlTemplate(content: string): string {
     const graphqlData = this.getGraphQLData();
+    const apiCallsData = this.getApiCallsData();
     return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -166,6 +196,7 @@ export class DocServer {
   <script src="/socket.io/socket.io.js"></script>
   <script>
     window.graphqlOps = ${graphqlData};
+    window.apiCalls = ${apiCallsData};
     // Create multiple lookup maps for different naming conventions
     window.gqlMap = new Map();
     window.gqlMapNormalized = new Map();

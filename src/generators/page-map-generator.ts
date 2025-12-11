@@ -1,4 +1,4 @@
-import type { PageInfo, DocumentationReport, GraphQLOperation } from '../types.js';
+import type { PageInfo, DocumentationReport, GraphQLOperation, APICall } from '../types.js';
 
 interface PageNode extends PageInfo {
   repo: string;
@@ -26,6 +26,7 @@ interface ComponentData {
  */
 export class PageMapGenerator {
   private graphqlOps: GraphQLOperation[] = [];
+  private apiCalls: APICall[] = [];
   private components: ComponentData[] = [];
 
   generatePageMapHtml(report: DocumentationReport): string {
@@ -33,6 +34,7 @@ export class PageMapGenerator {
 
     for (const repoResult of report.repositories) {
       this.graphqlOps.push(...(repoResult.analysis?.graphqlOperations || []));
+      this.apiCalls.push(...(repoResult.analysis?.apiCalls || []));
       // Collect component information
       const comps = repoResult.analysis?.components || [];
       for (const comp of comps) {
@@ -429,11 +431,11 @@ export class PageMapGenerator {
           relations.filter((r) => r.type === 'parent-child').length
         }</div><div class="stat-label">Hierarchies</div></div>
         <div class="stat"><div class="stat-val">${
-          new Set(allPages.map((p) => p.layout).filter(Boolean)).size
-        }</div><div class="stat-label">Layouts</div></div>
-        <div class="stat"><div class="stat-val">${
           this.graphqlOps.length
         }</div><div class="stat-label">GraphQL</div></div>
+        <div class="stat"><div class="stat-val">${
+          this.apiCalls.length
+        }</div><div class="stat-label">REST API</div></div>
       </div>
     </aside>
     

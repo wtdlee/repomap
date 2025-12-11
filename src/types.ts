@@ -36,6 +36,7 @@ export type AnalyzerType =
   | 'graphql'
   | 'components'
   | 'dataflow'
+  | 'rest-api'
   | 'api-endpoints'
   | 'graphql-schema'
   | 'models'
@@ -79,11 +80,43 @@ export interface AnalysisResult {
   commitHash: string;
   pages: PageInfo[];
   graphqlOperations: GraphQLOperation[];
+  apiCalls: APICall[];
   components: ComponentInfo[];
   dataFlows: DataFlow[];
   apiEndpoints: APIEndpoint[];
   models: ModelInfo[];
   crossRepoLinks: CrossRepoLink[];
+}
+
+/**
+ * Frontend API call information
+ * フロントエンドAPIコール情報
+ */
+export interface APICall {
+  /** Unique identifier */
+  id: string;
+  /** HTTP method (GET, POST, PUT, DELETE, etc.) */
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'unknown';
+  /** URL or endpoint path */
+  url: string;
+  /** Type of API call (fetch, axios, useSWR, etc.) */
+  callType: 'fetch' | 'axios' | 'useSWR' | 'useQuery' | 'custom';
+  /** File path where the call is made */
+  filePath: string;
+  /** Line number in the file */
+  line: number;
+  /** Component or function name containing the call */
+  containingFunction: string;
+  /** Pages or components using this API call */
+  usedIn: string[];
+  /** Request body type if available */
+  requestType?: string;
+  /** Response type if available */
+  responseType?: string;
+  /** Whether authentication is required */
+  requiresAuth: boolean;
+  /** Additional options or headers */
+  options?: Record<string, unknown>;
 }
 
 export interface PageInfo {

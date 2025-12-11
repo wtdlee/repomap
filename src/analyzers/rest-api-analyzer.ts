@@ -1,0 +1,416 @@
+import { Project, SyntaxKind, CallExpression, Node } from 'ts-morph';
+import fg from 'fast-glob';
+import * as path from 'path';
+import { BaseAnalyzer } from './base-analyzer.js';
+import type { AnalysisResult, APICall, RepositoryConfig } from '../types.js';
+
+/**
+ * Analyzer for REST API calls (fetch, axios, useSWR, etc.)
+ * REST API呼び出しの分析器
+ */
+export class RestApiAnalyzer extends BaseAnalyzer {
+  private project: Project;
+  private apiCallCounter = 0;
+
+  constructor(config: RepositoryConfig) {
+    super(config);
+    this.project = new Project({
+      tsConfigFilePath: this.resolvePath('tsconfig.json'),
+      skipAddingFilesFromTsConfig: true,
+    });
+  }
+
+  getName(): string {
+    return 'RestApiAnalyzer';
+  }
+
+  async analyze(): Promise<Partial<AnalysisResult>> {
+    this.log('Starting REST API analysis...');
+
+    const apiCalls: APICall[] = [];
+
+    const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
+      cwd: this.basePath,
+      ignore: [
+        '**/node_modules/**',
+        '**/.next/**',
+        '**/__tests__/**',
+        '**/*.test.*',
+        '**/*.spec.*',
+        '**/*.stories.*',
+        '**/__generated__/**',
+        '**/dist/**',
+        '**/build/**',
+      ],
+      absolute: true,
+    });
+
+    for (const filePath of tsFiles) {
+      try {
+        const sourceFile = this.project.addSourceFileAtPath(filePath);
+        const relativePath = path.relative(this.basePath, filePath);
+
+        // Find fetch() calls
+        const fetchCalls = this.findFetchCalls(sourceFile, relativePath);
+        apiCalls.push(...fetchCalls);
+
+        // Find axios calls
+        const axiosCalls = this.findAxiosCalls(sourceFile, relativePath);
+        apiCalls.push(...axiosCalls);
+
+        // Find useSWR calls
+        const swrCalls = this.findSwrCalls(sourceFile, relativePath);
+        apiCalls.push(...swrCalls);
+
+        this.project.removeSourceFile(sourceFile);
+      } catch {
+        // Skip files that can't be parsed
+      }
+    }
+
+    this.log(`Found ${apiCalls.length} REST API calls`);
+
+    return { apiCalls };
+  }
+
+  /**
+   * Find fetch() calls
+   */
+  private findFetchCalls(sourceFile: Node, filePath: string): APICall[] {
+    const calls: APICall[] = [];
+
+    const callExpressions = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
+
+    for (const call of callExpressions) {
+      try {
+        const expression = call.getExpression();
+        const expressionText = expression.getText();
+
+        // Match fetch() or window.fetch()
+        if (expressionText === 'fetch' || expressionText === 'window.fetch') {
+          const apiCall = this.extractFetchCall(call, filePath);
+          if (apiCall) {
+            calls.push(apiCall);
+          }
+        }
+      } catch {
+        // Skip parsing errors
+      }
+    }
+
+    return calls;
+  }
+
+  /**
+   * Find axios calls (axios.get, axios.post, etc.)
+   */
+  private findAxiosCalls(sourceFile: Node, filePath: string): APICall[] {
+    const calls: APICall[] = [];
+
+    const callExpressions = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
+
+    for (const call of callExpressions) {
+      try {
+        const expression = call.getExpression();
+        const expressionText = expression.getText();
+
+        // Match axios.get, axios.post, axios.put, axios.delete, axios.patch
+        const axiosMatch = expressionText.match(/^axios\.(get|post|put|delete|patch)$/i);
+        if (axiosMatch) {
+          const apiCall = this.extractAxiosCall(call, filePath, axiosMatch[1].toUpperCase());
+          if (apiCall) {
+            calls.push(apiCall);
+          }
+        }
+
+        // Match axios() direct call
+        if (expressionText === 'axios') {
+          const apiCall = this.extractAxiosDirectCall(call, filePath);
+          if (apiCall) {
+            calls.push(apiCall);
+          }
+        }
+      } catch {
+        // Skip parsing errors
+      }
+    }
+
+    return calls;
+  }
+
+  /**
+   * Find useSWR calls
+   */
+  private findSwrCalls(sourceFile: Node, filePath: string): APICall[] {
+    const calls: APICall[] = [];
+
+    const callExpressions = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
+
+    for (const call of callExpressions) {
+      try {
+        const expression = call.getExpression();
+        const expressionText = expression.getText();
+
+        // Match useSWR
+        if (expressionText === 'useSWR' || expressionText === 'useSWRImmutable') {
+          const apiCall = this.extractSwrCall(call, filePath);
+          if (apiCall) {
+            calls.push(apiCall);
+          }
+        }
+      } catch {
+        // Skip parsing errors
+      }
+    }
+
+    return calls;
+  }
+
+  /**
+   * Extract API call info from fetch()
+   */
+  private extractFetchCall(call: CallExpression, filePath: string): APICall | null {
+    const args = call.getArguments();
+    if (args.length === 0) return null;
+
+    const urlArg = args[0].getText();
+    const url = this.cleanStringLiteral(urlArg);
+    if (!url || !this.isApiUrl(url)) return null;
+
+    let method: APICall['method'] = 'GET';
+    let requiresAuth = false;
+
+    // Check options argument for method
+    if (args.length > 1) {
+      const optionsText = args[1].getText();
+      const methodMatch = optionsText.match(/method:\s*["'](\w+)["']/i);
+      if (methodMatch) {
+        method = this.normalizeMethod(methodMatch[1]);
+      }
+      requiresAuth =
+        optionsText.includes('credentials') ||
+        optionsText.includes('Authorization') ||
+        optionsText.includes('withCredentials');
+    }
+
+    const containingFunction = this.getContainingFunctionName(call);
+    const line = call.getStartLineNumber();
+
+    return {
+      id: `api-${++this.apiCallCounter}`,
+      method,
+      url,
+      callType: 'fetch',
+      filePath,
+      line,
+      containingFunction,
+      usedIn: [],
+      requiresAuth,
+    };
+  }
+
+  /**
+   * Extract API call info from axios.method()
+   */
+  private extractAxiosCall(call: CallExpression, filePath: string, method: string): APICall | null {
+    const args = call.getArguments();
+    if (args.length === 0) return null;
+
+    const urlArg = args[0].getText();
+    const url = this.cleanStringLiteral(urlArg);
+    if (!url) return null;
+
+    let requiresAuth = false;
+    if (args.length > 1) {
+      const optionsText = args[args.length - 1].getText();
+      requiresAuth =
+        optionsText.includes('withCredentials') || optionsText.includes('Authorization');
+    }
+
+    const containingFunction = this.getContainingFunctionName(call);
+    const line = call.getStartLineNumber();
+
+    return {
+      id: `api-${++this.apiCallCounter}`,
+      method: this.normalizeMethod(method),
+      url,
+      callType: 'axios',
+      filePath,
+      line,
+      containingFunction,
+      usedIn: [],
+      requiresAuth,
+    };
+  }
+
+  /**
+   * Extract API call info from axios() direct call
+   */
+  private extractAxiosDirectCall(call: CallExpression, filePath: string): APICall | null {
+    const args = call.getArguments();
+    if (args.length === 0) return null;
+
+    const configText = args[0].getText();
+    const urlMatch = configText.match(/url:\s*["'`]([^"'`]+)["'`]/);
+    const methodMatch = configText.match(/method:\s*["'](\w+)["']/i);
+
+    if (!urlMatch) return null;
+
+    const url = urlMatch[1];
+    const method = methodMatch ? this.normalizeMethod(methodMatch[1]) : 'GET';
+    const requiresAuth =
+      configText.includes('withCredentials') || configText.includes('Authorization');
+
+    const containingFunction = this.getContainingFunctionName(call);
+    const line = call.getStartLineNumber();
+
+    return {
+      id: `api-${++this.apiCallCounter}`,
+      method,
+      url,
+      callType: 'axios',
+      filePath,
+      line,
+      containingFunction,
+      usedIn: [],
+      requiresAuth,
+    };
+  }
+
+  /**
+   * Extract API call info from useSWR()
+   */
+  private extractSwrCall(call: CallExpression, filePath: string): APICall | null {
+    const args = call.getArguments();
+    if (args.length === 0) return null;
+
+    const keyArg = args[0].getText();
+
+    // Handle various key patterns
+    let url: string | null = null;
+
+    // String literal: useSWR("/api/users", fetcher)
+    if (keyArg.startsWith('"') || keyArg.startsWith("'") || keyArg.startsWith('`')) {
+      url = this.cleanStringLiteral(keyArg);
+    }
+    // Conditional: useSWR(isReady ? "/api/users" : null, fetcher)
+    else if (keyArg.includes('?') && keyArg.includes(':')) {
+      const match = keyArg.match(/\?\s*["'`]([^"'`]+)["'`]/);
+      if (match) {
+        url = match[1];
+      }
+    }
+    // Variable reference - try to extract meaningful name
+    else if (!keyArg.includes('null') && !keyArg.includes('undefined')) {
+      // Use the variable name as a placeholder
+      url = `[${keyArg}]`;
+    }
+
+    if (!url) return null;
+
+    const containingFunction = this.getContainingFunctionName(call);
+    const line = call.getStartLineNumber();
+
+    return {
+      id: `api-${++this.apiCallCounter}`,
+      method: 'GET', // SWR is typically for GET requests
+      url,
+      callType: 'useSWR',
+      filePath,
+      line,
+      containingFunction,
+      usedIn: [],
+      requiresAuth: false,
+    };
+  }
+
+  /**
+   * Get the name of the containing function/component
+   */
+  private getContainingFunctionName(node: Node): string {
+    let current: Node | undefined = node;
+
+    while (current) {
+      // Function declaration
+      if (Node.isFunctionDeclaration(current)) {
+        return current.getName() || 'anonymous';
+      }
+
+      // Variable declaration with arrow function
+      if (Node.isVariableDeclaration(current)) {
+        return current.getName();
+      }
+
+      // Method declaration
+      if (Node.isMethodDeclaration(current)) {
+        return current.getName();
+      }
+
+      // Arrow function in variable
+      if (Node.isArrowFunction(current)) {
+        const parent = current.getParent();
+        if (parent && Node.isVariableDeclaration(parent)) {
+          return parent.getName();
+        }
+      }
+
+      current = current.getParent();
+    }
+
+    return 'unknown';
+  }
+
+  /**
+   * Clean string literal (remove quotes)
+   */
+  private cleanStringLiteral(value: string): string | null {
+    // Remove quotes and template literal markers
+    const cleaned = value.replace(/^["'`]|["'`]$/g, '').trim();
+
+    // Skip template literals with expressions
+    if (cleaned.includes('${')) {
+      // Try to extract the base path
+      const baseMatch = cleaned.match(/^([^$]+)/);
+      if (baseMatch) {
+        return baseMatch[1] + '...';
+      }
+      return null;
+    }
+
+    return cleaned || null;
+  }
+
+  /**
+   * Check if URL looks like an API endpoint
+   */
+  private isApiUrl(url: string): boolean {
+    // Skip data URLs, blob URLs, etc.
+    if (url.startsWith('data:') || url.startsWith('blob:')) {
+      return false;
+    }
+
+    // Skip file extensions that are clearly not APIs
+    if (/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/i.test(url)) {
+      return false;
+    }
+
+    // Accept paths that look like API endpoints
+    return (
+      url.startsWith('/') ||
+      url.startsWith('http') ||
+      url.includes('/api/') ||
+      url.includes('.json')
+    );
+  }
+
+  /**
+   * Normalize HTTP method
+   */
+  private normalizeMethod(method: string): APICall['method'] {
+    const upper = method.toUpperCase();
+    if (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(upper)) {
+      return upper as APICall['method'];
+    }
+    return 'unknown';
+  }
+}

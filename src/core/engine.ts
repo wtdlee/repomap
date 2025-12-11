@@ -16,6 +16,7 @@ import type {
 import { PagesAnalyzer } from '../analyzers/pages-analyzer.js';
 import { GraphQLAnalyzer } from '../analyzers/graphql-analyzer.js';
 import { DataFlowAnalyzer } from '../analyzers/dataflow-analyzer.js';
+import { RestApiAnalyzer } from '../analyzers/rest-api-analyzer.js';
 import { MermaidGenerator } from '../generators/mermaid-generator.js';
 import { MarkdownGenerator } from '../generators/markdown-generator.js';
 
@@ -159,7 +160,7 @@ export class DocGeneratorEngine {
   private createAnalyzer(
     type: string,
     config: RepositoryConfig
-  ): PagesAnalyzer | GraphQLAnalyzer | DataFlowAnalyzer | null {
+  ): PagesAnalyzer | GraphQLAnalyzer | DataFlowAnalyzer | RestApiAnalyzer | null {
     switch (type) {
       case 'pages':
         if (config.type === 'nextjs') {
@@ -171,7 +172,9 @@ export class DocGeneratorEngine {
       case 'dataflow':
       case 'components':
         return new DataFlowAnalyzer(config);
-      // Add more analyzers as needed
+      case 'rest-api':
+      case 'api':
+        return new RestApiAnalyzer(config);
     }
     return null;
   }
@@ -192,6 +195,7 @@ export class DocGeneratorEngine {
       commitHash,
       pages: [],
       graphqlOperations: [],
+      apiCalls: [],
       components: [],
       dataFlows: [],
       apiEndpoints: [],
@@ -202,6 +206,7 @@ export class DocGeneratorEngine {
     for (const result of results) {
       if (result.pages) merged.pages.push(...result.pages);
       if (result.graphqlOperations) merged.graphqlOperations.push(...result.graphqlOperations);
+      if (result.apiCalls) merged.apiCalls.push(...result.apiCalls);
       if (result.components) merged.components.push(...result.components);
       if (result.dataFlows) merged.dataFlows.push(...result.dataFlows);
       if (result.apiEndpoints) merged.apiEndpoints.push(...result.apiEndpoints);
