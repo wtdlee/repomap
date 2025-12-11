@@ -600,12 +600,99 @@ export class PageMapGenerator {
       } else if (type === 'restapi') {
         showRestApiList();
       } else if (type === 'pages') {
-        showAllPages();
-        closeDetail();
+        showPagesSummary();
       } else if (type === 'hierarchies') {
-        showAllPages();
-        closeDetail();
+        showHierarchiesList();
       }
+    }
+    
+    function showPagesSummary() {
+      // Group pages by first segment
+      const groups = {};
+      pages.forEach(p => {
+        const seg = p.path.split('/').filter(Boolean)[0] || 'root';
+        if (!groups[seg]) groups[seg] = [];
+        groups[seg].push(p);
+      });
+      
+      const authPages = pages.filter(p => p.authentication?.required);
+      const dynamicPages = pages.filter(p => p.path.includes('[') && p.path.includes(']'));
+      
+      let html = '<div class="detail-section"><h4>Pages Summary</h4>';
+      html += '<div class="detail-item"><div class="detail-label">TOTAL</div>'+pages.length+' pages</div>';
+      html += '<div class="detail-item"><div class="detail-label">AUTH REQUIRED</div>'+authPages.length+' pages</div>';
+      html += '<div class="detail-item"><div class="detail-label">DYNAMIC ROUTES</div>'+dynamicPages.length+' pages</div>';
+      html += '</div>';
+      
+      html += '<div class="detail-section"><h4>By Route Group</h4>';
+      Object.keys(groups).sort().forEach(g => {
+        const count = groups[g].length;
+        html += '<div class="detail-item" style="cursor:pointer" onclick="filterByGroup(\\''+g+'\\')"><div class="detail-label">/'+g+'</div>'+count+' pages</div>';
+      });
+      html += '</div>';
+      
+      document.getElementById('detail-title').textContent = 'Pages Overview';
+      document.getElementById('detail-body').innerHTML = html;
+      document.getElementById('detail').style.right = '0';
+    }
+    
+    window.filterByGroup = function(group) {
+      document.querySelectorAll('.group').forEach(g => {
+        const name = g.querySelector('.group-name')?.textContent || '';
+        g.style.display = name.includes('/'+group) ? '' : 'none';
+      });
+    };
+    
+    function showHierarchiesList() {
+      const hierarchyRels = relations.filter(r => r.type === 'parent-child');
+      
+      // Build tree structure
+      const roots = pages.filter(p => !p.parent && p.children && p.children.length > 0);
+      
+      let html = '<div class="detail-section"><h4>Page Hierarchies ('+hierarchyRels.length+' relationships)</h4>';
+      
+      if (roots.length === 0) {
+        html += '<div style="color:var(--text2);font-size:12px">No hierarchical pages found</div>';
+      } else {
+        roots.forEach(root => {
+          html += renderHierarchyTree(root, 0);
+        });
+      }
+      html += '</div>';
+      
+      document.getElementById('detail-title').textContent = 'Page Hierarchies';
+      document.getElementById('detail-body').innerHTML = html;
+      document.getElementById('detail').style.right = '0';
+      
+      // Highlight hierarchical pages in the list
+      document.querySelectorAll('.page-item').forEach(item => {
+        const path = item.dataset.path;
+        const page = pageMap.get(path);
+        const hasHierarchy = page && (page.parent || (page.children && page.children.length > 0));
+        item.style.opacity = hasHierarchy ? '1' : '0.4';
+      });
+    }
+    
+    function renderHierarchyTree(page, depth) {
+      const indent = depth * 12;
+      let html = '<div class="rel-item" style="padding-left:'+(10+indent)+'px" onclick="event.stopPropagation(); selectPage(\\''+page.path+'\\')">';
+      html += '<div class="rel-header">';
+      html += '<span style="color:var(--text2);font-size:10px">'+'─'.repeat(depth > 0 ? 1 : 0)+(depth > 0 ? ' ' : '')+'</span>';
+      html += '<span class="rel-path">'+page.path+'</span>';
+      if (page.children && page.children.length > 0) {
+        html += '<span style="color:var(--text2);font-size:9px;margin-left:auto">'+page.children.length+' children</span>';
+      }
+      html += '</div></div>';
+      
+      if (page.children) {
+        page.children.forEach(childPath => {
+          const child = pageMap.get(childPath);
+          if (child) {
+            html += renderHierarchyTree(child, depth + 1);
+          }
+        });
+      }
+      return html;
     }
     
     // Register stat click handlers
