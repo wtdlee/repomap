@@ -208,14 +208,15 @@ program
   .command('serve')
   .description('Start local documentation server with live reload')
   .option('-c, --config <path>', 'Path to config file')
+  .option('--path <path>', 'Path to repository to analyze (auto-detect if no config)')
   .option('-p, --port <number>', 'Server port', '3030')
   .option('--no-open', "Don't open browser automatically")
   .action(async (options) => {
     console.log(chalk.blue.bold('\n🌐 Repomap - Documentation Server\n'));
 
     try {
-      const cwd = process.cwd();
-      const config = await loadConfig(options.config, cwd);
+      const targetPath = options.path || process.cwd();
+      const config = await loadConfig(options.config, targetPath);
 
       const server = new DocServer(config, parseInt(options.port));
       await server.start(!options.open);

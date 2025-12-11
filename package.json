@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/cli.ts",
+    "dev:serve": "tsx watch --clear-screen=false src/cli.ts serve",
     "prepublishOnly": "npm run build",
     "generate": "tsx src/cli.ts generate",
     "serve": "tsx src/cli.ts serve",
