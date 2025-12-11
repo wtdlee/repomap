@@ -1,0 +1,26 @@
+# Source (we publish dist)
+src/
+
+# Config files
+tsconfig.json
+.eslintrc*
+.prettierrc*
+vitest.config.*
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+coverage/
+
+# Dev files
+.vscode/
+.idea/
+.github/
+
+# Generated during dev
+.repomap/
+generated-docs/
+
+# Misc
+*.log
+.DS_Store
