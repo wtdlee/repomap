@@ -23,7 +23,6 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
 
   try {
     const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
-    const name = packageJson.name || path.basename(dir);
 
     // Detect project type
     const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
@@ -66,9 +65,11 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
       } catch {}
     }
 
+    // Use directory name as the repository name (not package.json name)
+    const dirName = path.basename(dir);
     return {
-      name,
-      displayName: packageJson.name || path.basename(dir),
+      name: dirName,
+      displayName: dirName,
       description: packageJson.description || '',
       path: dir,
       branch: 'main',

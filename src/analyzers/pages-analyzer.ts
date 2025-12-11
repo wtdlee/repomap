@@ -122,13 +122,73 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Find default export
     const defaultExport = sourceFile.getDefaultExportSymbol();
     if (defaultExport) {
-      return defaultExport.getName();
+      const name = defaultExport.getName();
+      // Handle 'default' export name
+      if (name !== 'default') {
+        return name;
+      }
+    }
+
+    // Check for export default function/const
+    const exportAssignment = sourceFile.getExportAssignment((e) => !e.isExportEquals());
+    if (exportAssignment) {
+      const expr = exportAssignment.getExpression();
+      if (expr) {
+        const text = expr.getText();
+        // If it's a simple identifier, return it
+        if (/^[A-Z][a-zA-Z0-9]*$/.test(text)) {
+          return text;
+        }
+        // If it's a function expression, try to find the function name
+        if (Node.isFunctionExpression(expr) || Node.isArrowFunction(expr)) {
+          return 'default';
+        }
+      }
+    }
+
+    // Find export default function declaration
+    const functions = sourceFile.getFunctions();
+    for (const func of functions) {
+      if (func.isDefaultExport()) {
+        return func.getName() || 'default';
+      }
     }
 
     // Find Page variable
     const pageVar = sourceFile.getVariableDeclaration('Page');
     if (pageVar) {
       return 'Page';
+    }
+
+    // Find NextPage typed variable (even without default export)
+    const varDeclarations = sourceFile.getVariableDeclarations();
+    for (const varDecl of varDeclarations) {
+      const typeNode = varDecl.getTypeNode();
+      if (typeNode) {
+        const typeText = typeNode.getText();
+        if (
+          typeText.includes('NextPage') ||
+          typeText.includes('FC') ||
+          typeText.includes('React.FC')
+        ) {
+          return varDecl.getName();
+        }
+      }
+    }
+
+    // Find any PascalCase exported function/const that looks like a component
+    for (const varDecl of varDeclarations) {
+      const name = varDecl.getName();
+      if (/^[A-Z][a-zA-Z0-9]*$/.test(name)) {
+        const init = varDecl.getInitializer();
+        if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
+          // Check if it returns JSX
+          const text = init.getText();
+          if (text.includes('return') && (text.includes('<') || text.includes('jsx'))) {
+            return name;
+          }
+        }
+      }
     }
 
     return null;

@@ -520,17 +520,17 @@ export class PageMapGenerator {
       
       let relsHtml = '';
       if (parent) {
-        relsHtml += '<div class="rel-item" onclick="selectPage(\\''+parent.path+'\\')">' +
+        relsHtml += '<div class="rel-item" onclick="event.stopPropagation(); selectPage(\\''+parent.path+'\\')">' +
           '<div class="rel-header"><span class="rel-type rel-type-parent">PARENT</span><span class="rel-path">'+parent.path+'</span></div>' +
           '<div class="rel-desc">This page is inside '+parent.path+'</div></div>';
       }
       children.forEach(c => {
-        relsHtml += '<div class="rel-item" onclick="selectPage(\\''+c.path+'\\')">' +
+        relsHtml += '<div class="rel-item" onclick="event.stopPropagation(); selectPage(\\''+c.path+'\\')">' +
           '<div class="rel-header"><span class="rel-type rel-type-child">CHILD</span><span class="rel-path">'+c.path+'</span></div>' +
           '<div class="rel-desc">Sub-page of current page</div></div>';
       });
       sameLayout.forEach(p => {
-        relsHtml += '<div class="rel-item" onclick="selectPage(\\''+p+'\\')">' +
+        relsHtml += '<div class="rel-item" onclick="event.stopPropagation(); selectPage(\\''+p+'\\')">' +
           '<div class="rel-header"><span class="rel-type rel-type-layout">LAYOUT</span><span class="rel-path">'+p+'</span></div>' +
           '<div class="rel-desc">Uses same layout: '+(page.layout||'')+'</div></div>';
       });
