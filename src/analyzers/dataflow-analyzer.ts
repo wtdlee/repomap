@@ -47,11 +47,30 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
   private async analyzeComponents(): Promise<ComponentInfo[]> {
     const components: ComponentInfo[] = [];
 
-    const dirs = [
-      this.getSetting('featuresDir', 'src/features'),
-      this.getSetting('componentsDir', 'src/common/components'),
-      this.getSetting('pagesDir', 'src/pages'),
+    // Use configured directories with common fallbacks
+    const configuredDirs = [
+      this.getSetting('featuresDir', ''),
+      this.getSetting('componentsDir', ''),
+      this.getSetting('pagesDir', ''),
+    ].filter(Boolean);
+
+    // Common directory patterns to scan (will skip non-existent)
+    const commonDirs = [
+      'src/features',
+      'src/components',
+      'src/common/components',
+      'src/common',
+      'src/pages',
+      'src/app',
+      'src/modules',
+      'src/views',
+      'src/screens',
+      'components',
+      'pages',
+      'app',
     ];
+
+    const dirs = [...new Set([...configuredDirs, ...commonDirs])];
 
     for (const dir of dirs) {
       const files = await fg(['**/*.tsx'], {
@@ -133,9 +152,12 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
   private extractComponentInfo(node: Node, name: string, filePath: string): ComponentInfo {
     const sourceFile = node.getSourceFile();
 
-    // Determine component type
+    // Determine component type based on path and naming conventions
     let type: ComponentInfo['type'] = 'presentational';
-    if (filePath.includes('/pages/')) {
+
+    // Page detection - common patterns for page components
+    const pagePathPatterns = ['/pages/', '/app/', '/routes/', '/views/', '/screens/'];
+    if (pagePathPatterns.some((pattern) => filePath.includes(pattern))) {
       type = 'page';
     } else if (name.includes('Container') || name.includes('Provider')) {
       type = 'container';

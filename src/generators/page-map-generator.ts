@@ -579,12 +579,13 @@ export class PageMapGenerator {
     
     // Filter by stat type
     let currentFilter = null;
-    function filterByType(type, el) {
+    window.filterByType = function(type, el) {
       // Toggle filter
       if (currentFilter === type) {
         currentFilter = null;
         document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
         showAllPages();
+        closeDetail();
         return;
       }
       
@@ -598,10 +599,12 @@ export class PageMapGenerator {
         showRestApiList();
       } else if (type === 'pages') {
         showAllPages();
+        closeDetail();
       } else if (type === 'hierarchies') {
-        showAllPages(); // Just show pages, could be enhanced later
+        showAllPages();
+        closeDetail();
       }
-    }
+    };
     
     function showAllPages() {
       document.querySelectorAll('.group').forEach(g => g.style.display = '');

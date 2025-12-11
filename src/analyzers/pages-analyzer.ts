@@ -235,22 +235,41 @@ export class PagesAnalyzer extends BaseAnalyzer {
     };
 
     try {
-      // Look for RequiredConditionWithSession for additional permission checks
-      const requiredCondition = sourceFile
-        .getDescendantsOfKind(SyntaxKind.JsxOpeningElement)
-        .find((node) => node.getTagNameNode().getText().includes('RequiredCondition'));
+      // Look for common auth/permission wrapper components (generic patterns)
+      const authPatterns = [
+        'RequiredCondition',
+        'ProtectedRoute',
+        'AuthGuard',
+        'PrivateRoute',
+        'WithAuth',
+        'RequireAuth',
+        'Authenticated',
+        'Authorized',
+      ];
 
-      if (requiredCondition) {
+      const authWrapper = sourceFile
+        .getDescendantsOfKind(SyntaxKind.JsxOpeningElement)
+        .find((node) => {
+          const tagName = node.getTagNameNode().getText();
+          return authPatterns.some((pattern) => tagName.includes(pattern));
+        });
+
+      if (authWrapper) {
         // Has additional permission requirements beyond basic auth
         result.condition = 'Additional permissions required';
 
-        // Extract condition - safely iterate attributes
-        const attributes = requiredCondition.getAttributes();
+        // Extract condition/roles - safely iterate attributes
+        const attributes = authWrapper.getAttributes();
         for (const attr of attributes) {
           if (attr.isKind(SyntaxKind.JsxAttribute)) {
             try {
               const name = attr.getNameNode().getText();
-              if (name === 'condition') {
+              // Common attribute names for conditions/roles
+              if (
+                ['condition', 'roles', 'permissions', 'requiredRoles', 'allowedRoles'].includes(
+                  name
+                )
+              ) {
                 const initializer = attr.getInitializer();
                 if (initializer) {
                   result.condition = initializer.getText();
@@ -277,12 +296,36 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   private extractRolesFromCondition(condition: string): string[] {
     const roles: string[] = [];
-    const roleRegex = /MembershipVisitRole\.(\w+)/g;
+
+    // Generic patterns for role extraction:
+    // - EnumName.RoleName (e.g., UserRole.Admin, MembershipRole.Owner)
+    // - 'role-name' or "role-name" string literals
+    // - ROLE_NAME constants
+
+    // Pattern 1: Enum-style roles (SomeEnum.RoleName)
+    const enumRoleRegex = /(\w+Role|\w+Permission)\.(\w+)/g;
     let match;
-    while ((match = roleRegex.exec(condition)) !== null) {
+    while ((match = enumRoleRegex.exec(condition)) !== null) {
+      roles.push(match[2]);
+    }
+
+    // Pattern 2: String literals containing 'admin', 'user', 'owner', etc.
+    const stringRoleRegex = /['"]([a-zA-Z_-]+)['"]/g;
+    while ((match = stringRoleRegex.exec(condition)) !== null) {
+      const val = match[1];
+      // Only add if it looks like a role
+      if (/admin|user|owner|member|guest|manager|editor|viewer/i.test(val)) {
+        roles.push(val);
+      }
+    }
+
+    // Pattern 3: UPPER_CASE constants
+    const constRoleRegex = /\b(ROLE_\w+|[A-Z]+_ROLE)\b/g;
+    while ((match = constRoleRegex.exec(condition)) !== null) {
       roles.push(match[1]);
     }
-    return roles;
+
+    return [...new Set(roles)]; // Remove duplicates
   }
 
   private extractPermissions(sourceFile: SourceFile): string[] {
@@ -418,22 +461,26 @@ export class PagesAnalyzer extends BaseAnalyzer {
       });
     }
 
-    // Also extract feature component imports for context
+    // Track component imports from relative paths (generic approach)
+    // This captures any non-package imports that could contain data-fetching components
     const imports = sourceFile.getImportDeclarations();
     for (const imp of imports) {
       const moduleSpec = imp.getModuleSpecifierValue();
-      // Track imports from features directory or feature-like directories
-      if (
-        moduleSpec.includes('/features/') ||
-        moduleSpec.includes('-onboarding/') ||
-        moduleSpec.includes('/common/') ||
-        moduleSpec.includes('/search/')
-      ) {
+
+      // Skip external packages (node_modules) - only track relative imports
+      const isRelativeImport = moduleSpec.startsWith('.') || moduleSpec.startsWith('/');
+      const isInternalAlias =
+        !moduleSpec.includes('node_modules') &&
+        !moduleSpec.startsWith('@types/') &&
+        moduleSpec.startsWith('@') === false; // Skip scoped packages
+
+      if (isRelativeImport || isInternalAlias) {
+        // Check named imports for component-like names (PascalCase)
         const namedImports = imp.getNamedImports();
         for (const named of namedImports) {
           const name = named.getName();
-          // Mark as feature component reference
-          if (name.includes('Container') || name.includes('Page') || name.includes('Form')) {
+          // Detect PascalCase component names that likely contain data fetching
+          if (this.isComponentName(name)) {
             dataFetching.push({
               type: 'useQuery',
               operationName: `→ ${name}`,
@@ -442,11 +489,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
           }
         }
 
-        // Default import
+        // Check default import
         const defaultImport = imp.getDefaultImport();
         if (defaultImport) {
           const name = defaultImport.getText();
-          if (name.includes('Container') || name.includes('Page') || name.includes('Form')) {
+          if (this.isComponentName(name)) {
             dataFetching.push({
               type: 'useQuery',
               operationName: `→ ${name}`,
@@ -458,6 +505,41 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     return dataFetching;
+  }
+
+  /**
+   * Check if a name looks like a React component (PascalCase with common suffixes)
+   */
+  private isComponentName(name: string): boolean {
+    // Must be PascalCase (start with uppercase)
+    if (!/^[A-Z]/.test(name)) return false;
+
+    // Common component suffixes that likely contain data fetching
+    const componentSuffixes = [
+      'Container',
+      'Page',
+      'Screen',
+      'View',
+      'Form',
+      'Modal',
+      'Dialog',
+      'Panel',
+      'Root',
+      'Provider',
+      'Wrapper',
+    ];
+
+    // Check for suffix match
+    if (componentSuffixes.some((suffix) => name.endsWith(suffix))) {
+      return true;
+    }
+
+    // Also match if it ends with Page-like patterns
+    if (/Page[A-Z]?\w*$/.test(name) || /Container[A-Z]?\w*$/.test(name)) {
+      return true;
+    }
+
+    return false;
   }
 
   private extractNavigation(sourceFile: SourceFile): NavigationInfo {
