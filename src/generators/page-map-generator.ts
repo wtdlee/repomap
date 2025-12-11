@@ -849,7 +849,7 @@ export class PageMapGenerator {
         // Found GraphQL operation
         html = '<div class="detail-section"><h4>Type</h4><span class="tag '+(op.type==='mutation'?'tag-mutation':'tag-query')+'">'+op.type.toUpperCase()+'</span></div>';
         if (op.returnType) {
-          html += '<div class="detail-section"><h4>Return Type</h4><code style="background:#f1f5f9;padding:4px 8px;border-radius:4px">'+op.returnType+'</code></div>';
+          html += '<div class="detail-section"><h4>Return Type</h4><code style="background:#0f172a;color:#93c5fd;padding:4px 8px;border-radius:4px;font-family:monospace">'+op.returnType+'</code></div>';
         }
         if (op.fields?.length) {
           // Show full GraphQL operation structure
@@ -864,7 +864,7 @@ export class PageMapGenerator {
           html += '<div class="detail-section"><h4>GraphQL</h4><pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-size:11px;overflow-x:auto;white-space:pre;max-height:300px;overflow-y:auto">' + gqlCode + '</pre></div>';
         } else if (op.variables?.length) {
           html += '<div class="detail-section"><h4>Variables</h4>';
-          op.variables.forEach(v => { html += '<div class="detail-item">'+v.name+': <code>'+v.type+'</code>'+(v.required?' (required)':'')+'</div>'; });
+          op.variables.forEach(v => { html += '<div class="detail-item">'+v.name+': <code style="background:#0f172a;color:#93c5fd;padding:2px 6px;border-radius:3px;font-family:monospace">'+v.type+'</code>'+(v.required?' (required)':'')+'</div>'; });
           html += '</div>';
         }
         if (op.usedIn?.length) {
@@ -887,7 +887,7 @@ export class PageMapGenerator {
         
         html = '<div class="detail-section"><h4>Component</h4>' +
           '<div class="detail-item"><div class="detail-label">NAME</div><strong>'+comp.name+'</strong></div>' +
-          '<div class="detail-item"><div class="detail-label">FILE</div><code>'+comp.filePath+'</code></div>' +
+          '<div class="detail-item"><div class="detail-label">FILE</div><code style="background:#0f172a;color:#93c5fd;padding:2px 6px;border-radius:3px;font-family:monospace;font-size:11px">'+comp.filePath+'</code></div>' +
           '<div class="detail-item"><div class="detail-label">TYPE</div>'+comp.type+'</div>' +
           '</div>';
         
