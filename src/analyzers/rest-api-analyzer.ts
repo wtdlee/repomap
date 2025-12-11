@@ -174,8 +174,15 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     if (args.length === 0) return null;
 
     const urlArg = args[0].getText();
-    const url = this.cleanStringLiteral(urlArg);
-    if (!url || !this.isApiUrl(url)) return null;
+    let url = this.cleanStringLiteral(urlArg);
+
+    // If not a string literal, use variable/expression as placeholder
+    if (!url) {
+      url = `[${urlArg}]`;
+    }
+
+    // Skip non-API URLs only if we have a concrete URL
+    if (!url.startsWith('[') && !this.isApiUrl(url)) return null;
 
     let method: APICall['method'] = 'GET';
     let requiresAuth = false;
@@ -217,8 +224,12 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     if (args.length === 0) return null;
 
     const urlArg = args[0].getText();
-    const url = this.cleanStringLiteral(urlArg);
-    if (!url) return null;
+    // Try to extract URL from string literal or use variable name as placeholder
+    let url = this.cleanStringLiteral(urlArg);
+    if (!url) {
+      // Use variable/expression name as placeholder
+      url = `[${urlArg}]`;
+    }
 
     let requiresAuth = false;
     if (args.length > 1) {
@@ -293,11 +304,18 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     if (keyArg.startsWith('"') || keyArg.startsWith("'") || keyArg.startsWith('`')) {
       url = this.cleanStringLiteral(keyArg);
     }
-    // Conditional: useSWR(isReady ? "/api/users" : null, fetcher)
+    // Conditional: useSWR(condition ? "/api/users" : null, fetcher) or useSWR(condition ? null : "/api/users", fetcher)
     else if (keyArg.includes('?') && keyArg.includes(':')) {
-      const match = keyArg.match(/\?\s*["'`]([^"'`]+)["'`]/);
+      // Try to find URL in true branch
+      let match = keyArg.match(/\?\s*["'`]([^"'`]+)["'`]/);
       if (match) {
         url = match[1];
+      } else {
+        // Try to find URL in false branch (after : null :)
+        match = keyArg.match(/:\s*["'`]([^"'`]+)["'`]/);
+        if (match) {
+          url = match[1];
+        }
       }
     }
     // Variable reference - try to extract meaningful name

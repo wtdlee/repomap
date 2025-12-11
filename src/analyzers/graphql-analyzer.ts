@@ -140,6 +140,57 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
           }
         }
 
+        // Find gql() function calls: gql(/* GraphQL */ `...`) or gql(`...`)
+        const callExpressions = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
+        for (const call of callExpressions) {
+          try {
+            const expression = call.getExpression();
+            const expressionText = expression.getText();
+
+            // Match gql() or graphql() function calls
+            if (expressionText === 'gql' || expressionText === 'graphql') {
+              const args = call.getArguments();
+              if (args.length > 0) {
+                const firstArg = args[0];
+                let content = '';
+
+                // Handle template literal argument
+                if (firstArg.isKind(SyntaxKind.NoSubstitutionTemplateLiteral)) {
+                  content = firstArg.getLiteralValue();
+                } else if (firstArg.isKind(SyntaxKind.TemplateExpression)) {
+                  const fullText = firstArg.getText();
+                  content = fullText.slice(1, -1).replace(/\$\{[^}]*\}/g, 'PLACEHOLDER');
+                } else {
+                  // Try to get text content (might be a variable or other expression)
+                  const argText = firstArg.getText();
+                  // Check if it's a template literal wrapped in comments
+                  if (argText.includes('`')) {
+                    const match = argText.match(/`([^`]*)`/);
+                    if (match) {
+                      content = match[1];
+                    }
+                  }
+                }
+
+                if (content && content.trim()) {
+                  try {
+                    const document = parseGraphQL(content);
+                    const fileOperations = this.extractOperationsFromDocument(
+                      document,
+                      relativePath
+                    );
+                    operations.push(...fileOperations);
+                  } catch {
+                    // Skip unparseable GraphQL
+                  }
+                }
+              }
+            }
+          } catch {
+            // Skip calls that can't be processed
+          }
+        }
+
         // Also find exported const queries
         const variableDeclarations = sourceFile.getVariableDeclarations();
         for (const varDecl of variableDeclarations) {
