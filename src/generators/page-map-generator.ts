@@ -816,9 +816,9 @@ export class PageMapGenerator {
       if (e.target.closest('.page-item')) return;
       if (e.target.closest('.node-circle')) return;
       if (e.target.closest('.modal')) return;
-      if (e.target.closest('#graph-canvas')) return;
-      if (e.target.closest('.graph-view')) return;
       if (e.target.closest('.stat')) return;
+      if (e.target.closest('.data-op')) return;
+      if (e.target.closest('#graph-canvas')) return; // Handled by canvas.onmousedown
       
       closeDetail();
     });
@@ -1202,6 +1202,10 @@ export class PageMapGenerator {
           selectedNode = clicked;
           drawGraph(); // Immediately reflect selection
         } else {
+          // Clicked on empty space - close detail panel and start dragging
+          closeDetail();
+          selectedNode = null;
+          drawGraph();
           dragging = true;
           lastX = e.clientX;
           lastY = e.clientY;
