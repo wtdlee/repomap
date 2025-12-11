@@ -362,18 +362,56 @@ export class PagesAnalyzer extends BaseAnalyzer {
       dataFetching.push({ type, operationName, variables });
     }
 
-    // Find getServerSideProps
-    const getServerSideProps = sourceFile.getFunction('getServerSideProps');
-    if (getServerSideProps) {
-      dataFetching.push({
-        type: 'getServerSideProps',
-        operationName: 'getServerSideProps',
-      });
+    // Find getServerSideProps and extract GraphQL queries
+    const getServerSidePropsVar = sourceFile.getVariableDeclaration('getServerSideProps');
+    const getServerSidePropsFunc = sourceFile.getFunction('getServerSideProps');
+    const ssrNode = getServerSidePropsVar || getServerSidePropsFunc;
+
+    if (ssrNode) {
+      // Look for imported Document patterns (e.g., GetUserOnboardingUserDocument)
+      const imports = sourceFile.getImportDeclarations();
+      for (const imp of imports) {
+        const namedImports = imp.getNamedImports();
+        for (const named of namedImports) {
+          const name = named.getName();
+          if (name.endsWith('Document')) {
+            // Check if this document is used in the file
+            const usages = sourceFile
+              .getDescendantsOfKind(SyntaxKind.Identifier)
+              .filter((id) => id.getText() === name);
+            if (usages.length > 0) {
+              const operationName = name.replace(/Document$/, '');
+              dataFetching.push({
+                type: 'getServerSideProps',
+                operationName: `→ ${operationName}`,
+              });
+            }
+          }
+        }
+      }
+
+      // Also look for inline query patterns: graphqlClient.query({ query: ... })
+      const text = ssrNode.getText();
+      const queryMatches = text.match(/query:\s*(\w+)/g);
+      if (queryMatches) {
+        for (const match of queryMatches) {
+          const docName = match.replace(/query:\s*/, '');
+          if (
+            !dataFetching.some((d) => d.operationName?.includes(docName.replace(/Document$/, '')))
+          ) {
+            dataFetching.push({
+              type: 'getServerSideProps',
+              operationName: `→ ${docName.replace(/Document$/, '')}`,
+            });
+          }
+        }
+      }
     }
 
     // Find getStaticProps
-    const getStaticProps = sourceFile.getFunction('getStaticProps');
-    if (getStaticProps) {
+    const getStaticPropsVar = sourceFile.getVariableDeclaration('getStaticProps');
+    const getStaticPropsFunc = sourceFile.getFunction('getStaticProps');
+    if (getStaticPropsVar || getStaticPropsFunc) {
       dataFetching.push({
         type: 'getStaticProps',
         operationName: 'getStaticProps',
@@ -384,8 +422,13 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const imports = sourceFile.getImportDeclarations();
     for (const imp of imports) {
       const moduleSpec = imp.getModuleSpecifierValue();
-      // Track imports from features directory
-      if (moduleSpec.includes('/features/')) {
+      // Track imports from features directory or feature-like directories
+      if (
+        moduleSpec.includes('/features/') ||
+        moduleSpec.includes('-onboarding/') ||
+        moduleSpec.includes('/common/') ||
+        moduleSpec.includes('/search/')
+      ) {
         const namedImports = imp.getNamedImports();
         for (const named of namedImports) {
           const name = named.getName();

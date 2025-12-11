@@ -222,7 +222,9 @@ export class PageMapGenerator {
     .legend-color { width: 12px; height: 12px; border-radius: 2px; }
     
     .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
-    .stat { background: var(--bg3); padding: 10px; border-radius: 6px; text-align: center; }
+    .stat { background: var(--bg3); padding: 10px; border-radius: 6px; text-align: center; cursor: pointer; transition: all 0.2s; border: 2px solid transparent; }
+    .stat:hover { background: #475569; }
+    .stat.active { border-color: var(--accent); background: #1e3a5f; }
     .stat-val { font-size: 20px; font-weight: 600; }
     .stat-label { font-size: 10px; color: var(--text2); }
     
@@ -426,14 +428,14 @@ export class PageMapGenerator {
       </div>
       
       <div class="stats">
-        <div class="stat"><div class="stat-val">${allPages.length}</div><div class="stat-label">Pages</div></div>
-        <div class="stat"><div class="stat-val">${
+        <div class="stat" data-filter="pages" onclick="filterByType('pages', this)"><div class="stat-val">${allPages.length}</div><div class="stat-label">Pages</div></div>
+        <div class="stat" data-filter="hierarchies" onclick="filterByType('hierarchies', this)"><div class="stat-val">${
           relations.filter((r) => r.type === 'parent-child').length
         }</div><div class="stat-label">Hierarchies</div></div>
-        <div class="stat"><div class="stat-val">${
+        <div class="stat" data-filter="graphql" onclick="filterByType('graphql', this)"><div class="stat-val">${
           this.graphqlOps.length
         }</div><div class="stat-label">GraphQL</div></div>
-        <div class="stat"><div class="stat-val">${
+        <div class="stat" data-filter="restapi" onclick="filterByType('restapi', this)"><div class="stat-val">${
           this.apiCalls.length
         }</div><div class="stat-label">REST API</div></div>
       </div>
@@ -484,6 +486,8 @@ export class PageMapGenerator {
     const relations = ${JSON.stringify(relations)};
     const graphqlOps = ${graphqlOpsJson};
     const components = ${componentsJson};
+    const apiCallsData = ${JSON.stringify(this.apiCalls)};
+    window.apiCalls = apiCallsData;
     const pageMap = new Map(pages.map(p => [p.path, p]));
     const gqlMap = new Map(graphqlOps.map(op => [op.name, op]));
     const compMap = new Map(components.map(c => [c.name, c]));
@@ -571,6 +575,133 @@ export class PageMapGenerator {
     function closeDetail() {
       document.getElementById('detail').classList.remove('open');
       document.querySelectorAll('.page-item').forEach(p => p.classList.remove('selected'));
+    }
+    
+    // Filter by stat type
+    let currentFilter = null;
+    function filterByType(type, el) {
+      // Toggle filter
+      if (currentFilter === type) {
+        currentFilter = null;
+        document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
+        showAllPages();
+        return;
+      }
+      
+      currentFilter = type;
+      document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
+      el.classList.add('active');
+      
+      if (type === 'graphql') {
+        showGraphQLList();
+      } else if (type === 'restapi') {
+        showRestApiList();
+      } else if (type === 'pages') {
+        showAllPages();
+      } else if (type === 'hierarchies') {
+        showAllPages(); // Just show pages, could be enhanced later
+      }
+    }
+    
+    function showAllPages() {
+      document.querySelectorAll('.group').forEach(g => g.style.display = '');
+      document.querySelectorAll('.page-item').forEach(p => p.style.display = '');
+    }
+    
+    function showGraphQLList() {
+      // Show GraphQL operations in detail panel
+      let html = '<div class="detail-section"><h4>All GraphQL Operations ('+Object.keys(Object.fromEntries(gqlMap)).length+')</h4>';
+      
+      const queries = Array.from(gqlMap.values()).filter(o => o.type === 'query');
+      const mutations = Array.from(gqlMap.values()).filter(o => o.type === 'mutation');
+      const fragments = Array.from(gqlMap.values()).filter(o => o.type === 'fragment');
+      
+      if (queries.length > 0) {
+        html += '<div style="margin:8px 0;font-size:11px;color:var(--accent)">Queries ('+queries.length+')</div>';
+        queries.slice(0, 20).forEach(op => {
+          html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
+            '<span class="tag tag-query">QUERY</span> '+op.name+'</div>';
+        });
+        if (queries.length > 20) {
+          html += '<div style="color:var(--text2);font-size:10px;padding:4px">... and '+(queries.length-20)+' more queries</div>';
+        }
+      }
+      
+      if (mutations.length > 0) {
+        html += '<div style="margin:8px 0;font-size:11px;color:var(--accent)">Mutations ('+mutations.length+')</div>';
+        mutations.slice(0, 10).forEach(op => {
+          html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
+            '<span class="tag tag-mutation">MUTATION</span> '+op.name+'</div>';
+        });
+        if (mutations.length > 10) {
+          html += '<div style="color:var(--text2);font-size:10px;padding:4px">... and '+(mutations.length-10)+' more mutations</div>';
+        }
+      }
+      
+      if (fragments.length > 0) {
+        html += '<div style="margin:8px 0;font-size:11px;color:var(--accent)">Fragments ('+fragments.length+')</div>';
+        fragments.slice(0, 5).forEach(op => {
+          html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
+            '<span class="tag" style="background:#6b7280">FRAGMENT</span> '+op.name+'</div>';
+        });
+        if (fragments.length > 5) {
+          html += '<div style="color:var(--text2);font-size:10px;padding:4px">... and '+(fragments.length-5)+' more fragments</div>';
+        }
+      }
+      
+      html += '</div>';
+      
+      document.getElementById('detail-title').textContent = 'GraphQL Operations';
+      document.getElementById('detail-body').innerHTML = html;
+      document.getElementById('detail').classList.add('open');
+    }
+    
+    function showRestApiList() {
+      const apis = window.apiCalls || [];
+      let html = '<div class="detail-section"><h4>REST API Calls ('+apis.length+')</h4>';
+      
+      if (apis.length === 0) {
+        html += '<div style="color:var(--text2);font-size:12px">No REST API calls detected</div>';
+      } else {
+        apis.forEach(api => {
+          const methodColors = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',DELETE:'#ef4444',PATCH:'#8b5cf6'};
+          const color = methodColors[api.method] || '#6b7280';
+          html += '<div class="detail-item" style="cursor:pointer" onclick="event.stopPropagation(); showApiDetail(\\''+api.id.replace(/'/g, "\\\\'")+'\\')">' +
+            '<span class="tag" style="background:'+color+';color:white">'+api.method+'</span> ' +
+            '<span style="font-family:monospace;font-size:11px">'+api.url+'</span>' +
+            '<div style="font-size:9px;color:var(--text2);margin-top:2px">'+api.callType+' in '+api.filePath+'</div>' +
+            '</div>';
+        });
+      }
+      
+      html += '</div>';
+      
+      document.getElementById('detail-title').textContent = 'REST API Calls';
+      document.getElementById('detail-body').innerHTML = html;
+      document.getElementById('detail').classList.add('open');
+    }
+    
+    function showApiDetail(id) {
+      const api = (window.apiCalls || []).find(a => a.id === id);
+      if (!api) return;
+      
+      const methodColors = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',DELETE:'#ef4444',PATCH:'#8b5cf6'};
+      const color = methodColors[api.method] || '#6b7280';
+      
+      let html = '<div class="detail-section"><h4>API Call Details</h4>' +
+        '<div class="detail-item"><div class="detail-label">METHOD</div>' +
+        '<span class="tag" style="background:'+color+';color:white">'+api.method+'</span></div>' +
+        '<div class="detail-item"><div class="detail-label">URL</div>' +
+        '<span style="font-family:monospace;word-break:break-all">'+api.url+'</span></div>' +
+        '<div class="detail-item"><div class="detail-label">TYPE</div>'+api.callType+'</div>' +
+        '<div class="detail-item"><div class="detail-label">FILE</div>'+api.filePath+'</div>' +
+        (api.line ? '<div class="detail-item"><div class="detail-label">LINE</div>'+api.line+'</div>' : '') +
+        (api.containingFunction ? '<div class="detail-item"><div class="detail-label">FUNCTION</div>'+api.containingFunction+'</div>' : '') +
+        '</div>';
+      
+      document.getElementById('detail-title').textContent = api.method + ' ' + api.url;
+      document.getElementById('detail-body').innerHTML = html;
+      document.getElementById('detail').classList.add('open');
     }
     
     // Close detail when clicking outside
