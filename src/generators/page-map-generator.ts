@@ -1197,6 +1197,7 @@ export class PageMapGenerator {
         if (clicked) {
           selectPage(clicked.path);
           selectedNode = clicked;
+          drawGraph(); // Immediately reflect selection
         } else {
           dragging = true;
           lastX = e.clientX;
@@ -1205,6 +1206,19 @@ export class PageMapGenerator {
       };
       
       canvas.onmousemove = e => {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - graphState.panX) / graphState.zoom;
+        const y = (e.clientY - rect.top - graphState.panY) / graphState.zoom;
+        
+        // Check if hovering over a node
+        const hovered = graphState.nodes.find(n => {
+          const dx = n.x - x, dy = n.y - y;
+          return Math.sqrt(dx*dx + dy*dy) < n.radius + 5;
+        });
+        
+        // Update cursor style
+        canvas.style.cursor = hovered ? 'pointer' : (dragging ? 'grabbing' : 'grab');
+        
         if (!dragging) return;
         graphState.panX += e.clientX - lastX;
         graphState.panY += e.clientY - lastY;
