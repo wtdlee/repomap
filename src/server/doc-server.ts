@@ -799,6 +799,7 @@ export class DocServer {
       position: sticky;
       top: 0;
       z-index: 200;
+      line-height: 1;
     }
     .header h1 { 
       font-size: 18px;
