@@ -7,6 +7,10 @@ import { Parser, Node, Tree, Language } from 'web-tree-sitter';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+// Create require for ESM compatibility
+const require = createRequire(import.meta.url);
 
 // Re-export types for compatibility
 export type SyntaxNode = Node;
@@ -34,25 +38,28 @@ export async function initRubyParser(): Promise<Parser> {
 
   parser = new Parser();
 
-  // Find WASM file - try multiple locations
-  const possiblePaths = [
-    // When running from source
-    path.join(process.cwd(), 'node_modules/tree-sitter-wasms/out/tree-sitter-ruby.wasm'),
-    // When installed as dependency
-    path.join(__dirname, '../../../node_modules/tree-sitter-wasms/out/tree-sitter-ruby.wasm'),
-    path.join(__dirname, '../../../../tree-sitter-wasms/out/tree-sitter-ruby.wasm'),
-  ];
-
+  // Find WASM file using Node.js module resolution
   let wasmPath: string | null = null;
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      wasmPath = p;
-      break;
+
+  try {
+    // Best approach: Use require.resolve to find the package location
+    const wasmPkgPath = require.resolve('tree-sitter-wasms/package.json');
+    wasmPath = path.join(path.dirname(wasmPkgPath), 'out/tree-sitter-ruby.wasm');
+  } catch {
+    // Fallback: Try cwd for development environments
+    const cwdPath = path.join(
+      process.cwd(),
+      'node_modules/tree-sitter-wasms/out/tree-sitter-ruby.wasm'
+    );
+    if (fs.existsSync(cwdPath)) {
+      wasmPath = cwdPath;
     }
   }
 
-  if (!wasmPath) {
-    throw new Error('tree-sitter-ruby.wasm not found. Please install tree-sitter-wasms package.');
+  if (!wasmPath || !fs.existsSync(wasmPath)) {
+    throw new Error(
+      'tree-sitter-ruby.wasm not found. Please ensure tree-sitter-wasms package is installed.'
+    );
   }
 
   rubyLanguage = await Language.load(wasmPath);
