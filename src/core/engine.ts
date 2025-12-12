@@ -106,9 +106,12 @@ export class DocGeneratorEngine {
     const cacheKey = `analysis_${repoConfig.name}_${commitHash}`;
 
     // Check cache (skip if noCache is enabled)
+    if (this.noCache) {
+      console.log(`  🔄 Cache disabled, analyzing from scratch...`);
+    }
     const cachedResult = this.noCache ? null : cache.get<AnalysisResult>(cacheKey, contentHash);
     if (cachedResult) {
-      console.log(`  ⚡ Using cached analysis`);
+      console.log(`  ⚡ Using cached analysis (hash: ${contentHash.slice(0, 8)}...)`);
 
       const summary = {
         totalPages: cachedResult.pages.length,
@@ -152,7 +155,7 @@ export class DocGeneratorEngine {
     // Save to cache
     cache.set(cacheKey, contentHash, analysis);
     await cache.save();
-    console.log(`  💾 Analysis cached for future runs`);
+    console.log(`  💾 Analysis cached (hash: ${contentHash.slice(0, 8)}...)`);
 
     // Calculate summary
     const summary = {

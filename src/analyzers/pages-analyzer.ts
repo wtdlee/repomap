@@ -359,7 +359,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // e.g., import { useQuery as getQuery } from '@apollo/client'
     const apolloHookAliases = new Map<string, string>();
     const apolloHooks = ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'];
-    
+
     for (const imp of sourceFile.getImportDeclarations()) {
       const moduleSpec = imp.getModuleSpecifierValue();
       if (moduleSpec.includes('@apollo/client') || moduleSpec.includes('apollo')) {
@@ -374,37 +374,43 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     // Check if this file uses Apollo Client
-    const hasApolloImport = apolloHookAliases.size > 0 || sourceFile.getImportDeclarations().some((imp) => {
-      const moduleSpecifier = imp.getModuleSpecifierValue();
-      return moduleSpecifier.includes('@apollo/client') || moduleSpecifier.includes('apollo');
-    });
+    const hasApolloImport =
+      apolloHookAliases.size > 0 ||
+      sourceFile.getImportDeclarations().some((imp) => {
+        const moduleSpecifier = imp.getModuleSpecifierValue();
+        return moduleSpecifier.includes('@apollo/client') || moduleSpecifier.includes('apollo');
+      });
 
     // Find GraphQL hook calls - including aliases and custom hooks that wrap Apollo hooks
     const graphqlHookCalls = sourceFile
       .getDescendantsOfKind(SyntaxKind.CallExpression)
       .filter((call) => {
         const expression = call.getExpression().getText();
-        
+
         // Direct Apollo hook or alias
         if (apolloHookAliases.has(expression) || apolloHooks.includes(expression)) {
           return true;
         }
-        
+
         // Custom hooks pattern: use*Query, use*Mutation (e.g., useUserQuery, useFetchPosts)
         // But exclude non-GraphQL hooks like useQueryParams, useQueryString
-        if (/^use[A-Z].*Query$/.test(expression) && !expression.includes('Params') && !expression.includes('String')) {
+        if (
+          /^use[A-Z].*Query$/.test(expression) &&
+          !expression.includes('Params') &&
+          !expression.includes('String')
+        ) {
           return true;
         }
         if (/^use[A-Z].*Mutation$/.test(expression)) {
           return true;
         }
-        
+
         return false;
       });
 
     for (const call of graphqlHookCalls) {
       const hookName = call.getExpression().getText();
-      
+
       // Determine the actual type (resolve alias to original name)
       let resolvedType: DataFetchingInfo['type'];
       if (apolloHookAliases.has(hookName)) {
