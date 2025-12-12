@@ -88,16 +88,17 @@ export class DocGeneratorEngine {
     // Get repository info
     const { version, commitHash } = await this.getRepoInfo(repoConfig);
 
-    // Run analyzers
-    const analysisResults: Partial<AnalysisResult>[] = [];
+    // Run analyzers in PARALLEL for faster analysis
+    const analyzers = repoConfig.analyzers
+      .map((analyzerType) => this.createAnalyzer(analyzerType, repoConfig))
+      .filter((a): a is NonNullable<typeof a> => a !== null);
 
-    for (const analyzerType of repoConfig.analyzers) {
-      const analyzer = this.createAnalyzer(analyzerType, repoConfig);
-      if (analyzer) {
-        const result = await analyzer.analyze();
-        analysisResults.push(result);
-      }
-    }
+    console.log(`  Running ${analyzers.length} analyzers in parallel...`);
+    const startTime = Date.now();
+
+    const analysisResults = await Promise.all(analyzers.map((analyzer) => analyzer.analyze()));
+
+    console.log(`  Analysis completed in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
     // Merge results
     const analysis = this.mergeAnalysisResults(
