@@ -704,7 +704,31 @@ export class PagesAnalyzer extends BaseAnalyzer {
         );
       });
 
-      if (!hasGraphQLImport) {
+      // Also check for custom hooks that might use GraphQL internally
+      const customHookImports = componentFile.getImportDeclarations().filter((imp) => {
+        const spec = imp.getModuleSpecifierValue();
+        if (!spec.startsWith('./') && !spec.startsWith('../')) return false;
+        // Look for hook imports
+        const namedImports = imp.getNamedImports().map((n) => n.getName());
+        return namedImports.some((n) => /^use[A-Z]/.test(n));
+      });
+
+      // Analyze custom hooks for GraphQL usage
+      for (const hookImp of customHookImports) {
+        const hookSpec = hookImp.getModuleSpecifierValue();
+        const hookNames = hookImp.getNamedImports().map((n) => n.getName()).filter((n) => /^use[A-Z]/.test(n));
+
+        for (const hookName of hookNames) {
+          const hookQueries = this.analyzeCustomHook(
+            path.dirname(componentFile.getFilePath()),
+            hookSpec,
+            hookName
+          );
+          queries.push(...hookQueries);
+        }
+      }
+
+      if (!hasGraphQLImport && queries.length === 0) {
         // No direct GraphQL import, but check imported components (one level deeper)
         // This handles: Page → WrapperComponent → ContainerWithGraphQL pattern
         const nestedComponentImports = componentFile.getImportDeclarations().filter((imp) => {
@@ -732,9 +756,6 @@ export class PagesAnalyzer extends BaseAnalyzer {
           }
         }
 
-        if (queries.length === 0) {
-          // console.log(`[PagesAnalyzer] ${componentName} → no GraphQL found after nested search`);
-        }
         return queries;
       }
 
@@ -760,8 +781,12 @@ export class PagesAnalyzer extends BaseAnalyzer {
         // Extract operation name from the first argument
         let operationName = firstArgText;
 
+        // Handle codegen Document pattern: SomeQueryDocument → SomeQuery
+        if (firstArgText.endsWith('Document')) {
+          operationName = firstArgText.replace(/Document$/, '');
+        }
         // If it's a variable reference, try to find the actual query name
-        if (/^[A-Z]/.test(firstArgText) || /^[a-z]/.test(firstArgText)) {
+        else if (/^[A-Z]/.test(firstArgText) || /^[a-z]/.test(firstArgText)) {
           // Look for gql template literals assigned to this variable
           const varDecl = componentFile.getVariableDeclaration(firstArgText);
           if (varDecl) {
@@ -794,6 +819,111 @@ export class PagesAnalyzer extends BaseAnalyzer {
       }
     } catch {
       // Failed to analyze imported component, skip
+    }
+
+    return queries;
+  }
+
+  /**
+   * Analyze a custom hook file for GraphQL queries
+   */
+  private analyzeCustomHook(
+    sourceFileDir: string,
+    moduleSpec: string,
+    hookName: string
+  ): DataFetchingInfo[] {
+    const queries: DataFetchingInfo[] = [];
+
+    try {
+      // Resolve the import path
+      const resolvedPath = path.resolve(sourceFileDir, moduleSpec);
+      const possiblePaths = [
+        `${resolvedPath}.tsx`,
+        `${resolvedPath}.ts`,
+        `${resolvedPath}/${hookName}.tsx`,
+        `${resolvedPath}/${hookName}.ts`,
+        `${resolvedPath}/index.tsx`,
+        `${resolvedPath}/index.ts`,
+      ];
+
+      let hookFile: SourceFile | undefined;
+
+      for (const tryPath of possiblePaths) {
+        try {
+          hookFile = this.project.addSourceFileAtPath(tryPath);
+          if (hookFile) break;
+        } catch {
+          // File doesn't exist, try next
+        }
+      }
+
+      if (!hookFile) return queries;
+
+      // Check for Apollo Client imports
+      const hasGraphQLImport = hookFile.getImportDeclarations().some((imp) => {
+        const spec = imp.getModuleSpecifierValue();
+        return (
+          spec.includes('@apollo/client') ||
+          spec.includes('apollo') ||
+          spec.includes('graphql') ||
+          spec.includes('__generated__')
+        );
+      });
+
+      if (!hasGraphQLImport) return queries;
+
+      // Find useQuery/useMutation calls in the hook
+      const hookCalls = hookFile
+        .getDescendantsOfKind(SyntaxKind.CallExpression)
+        .filter((call) => {
+          const expression = call.getExpression().getText();
+          return ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'].includes(expression);
+        });
+
+      for (const call of hookCalls) {
+        const callHookName = call.getExpression().getText();
+        const args = call.getArguments();
+
+        if (args.length === 0) continue;
+
+        const firstArgText = args[0].getText();
+        let operationName = firstArgText;
+
+        // Handle codegen Document pattern: SomeQueryDocument → SomeQuery
+        if (firstArgText.endsWith('Document')) {
+          operationName = firstArgText.replace(/Document$/, '');
+        } else {
+          // Try to find gql template literal
+          const varDecl = hookFile.getVariableDeclaration(firstArgText);
+          if (varDecl) {
+            const initializer = varDecl.getInitializer();
+            if (initializer) {
+              const text = initializer.getText();
+              const match = text.match(/(?:query|mutation|subscription)\s+(\w+)/);
+              if (match) {
+                operationName = match[1];
+              }
+            }
+          }
+        }
+
+        // Clean up operation name
+        operationName = operationName.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
+
+        const type = callHookName.includes('Mutation')
+          ? 'useMutation'
+          : callHookName.includes('Lazy')
+            ? 'useLazyQuery'
+            : 'useQuery';
+
+        queries.push({
+          type: type as DataFetchingInfo['type'],
+          operationName: `→ ${operationName} (via ${hookName})`,
+          variables: [],
+        });
+      }
+    } catch {
+      // Failed to analyze hook
     }
 
     return queries;
