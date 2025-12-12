@@ -1007,7 +1007,20 @@ export class PageMapGenerator {
         .replace(/^[→\\->\\s]+/, '')
         .replace(/\\s*\\([^)]+\\)\\s*$/, '');
       
-      const op = gqlMap.get(name);
+      // Try to find GraphQL operation with various name patterns
+      let op = gqlMap.get(name);
+      
+      // If not found, try removing common suffixes (Query, Mutation, Document)
+      if (!op) {
+        const baseName = name.replace(/Query$|Mutation$|Document$/, '');
+        op = gqlMap.get(baseName);
+      }
+      
+      // Also try with suffix if original didn't have one
+      if (!op && !name.match(/Query$|Mutation$/)) {
+        op = gqlMap.get(name + 'Query') || gqlMap.get(name + 'Mutation');
+      }
+      
       let html = '';
       
       // Check if this is a known component
