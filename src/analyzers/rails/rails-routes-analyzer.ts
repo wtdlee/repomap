@@ -5,14 +5,14 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { 
-  parseRubyFile, 
-  findNodes, 
-  getChildText, 
+import {
+  parseRubyFile,
+  findNodes,
+  getChildText,
   getChildByType,
   getChildrenByType,
   getCallArguments,
-  type SyntaxNode 
+  type SyntaxNode,
 } from './ruby-parser.js';
 
 export interface RailsRoute {
@@ -67,7 +67,7 @@ export class RailsRoutesAnalyzer {
 
   async analyze(): Promise<RailsRoutesResult> {
     const mainRoutesFile = path.join(this.rootPath, 'config', 'routes.rb');
-    
+
     if (!fs.existsSync(mainRoutesFile)) {
       return {
         routes: [],
@@ -84,7 +84,7 @@ export class RailsRoutesAnalyzer {
     } catch (error) {
       this.errors.push(`Error parsing ${mainRoutesFile}: ${error}`);
     }
-    
+
     return {
       routes: this.routes,
       namespaces: [...new Set(this.namespaces)],
@@ -101,11 +101,11 @@ export class RailsRoutesAnalyzer {
 
     // Find all method calls
     const calls = findNodes(rootNode, 'call');
-    
+
     for (const call of calls) {
       const methodNode = call.childForFieldName('method');
       if (!methodNode) continue;
-      
+
       const methodName = methodNode.text;
       const line = call.startPosition.row + 1;
 
@@ -118,28 +118,28 @@ export class RailsRoutesAnalyzer {
         case 'match':
           this.parseHttpRoute(call, methodName, currentNamespaces, line);
           break;
-        
+
         case 'resources':
         case 'resource':
           await this.parseResources(call, currentNamespaces, line, methodName === 'resource');
           break;
-        
+
         case 'namespace':
           await this.parseNamespace(call, currentNamespaces, filePath);
           break;
-        
+
         case 'mount':
           this.parseMount(call, line);
           break;
-        
+
         case 'draw':
           await this.parseDraw(call, currentNamespaces);
           break;
-        
+
         case 'devise_for':
           this.parseDeviseFor(call, currentNamespaces, line);
           break;
-        
+
         case 'root':
           this.parseRoot(call, currentNamespaces, line);
           break;
@@ -148,9 +148,9 @@ export class RailsRoutesAnalyzer {
   }
 
   private parseHttpRoute(
-    call: SyntaxNode, 
-    method: string, 
-    namespaces: string[], 
+    call: SyntaxNode,
+    method: string,
+    namespaces: string[],
     line: number
   ): void {
     const args = getCallArguments(call);
@@ -172,7 +172,7 @@ export class RailsRoutesAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key === 'to' && value) {
             const toValue = this.extractStringValue(value);
             if (toValue && toValue.includes('#')) {
@@ -204,7 +204,7 @@ export class RailsRoutesAnalyzer {
     const fullPath = this.buildPath(namespaces, routePath);
 
     this.routes.push({
-      method: method === 'match' ? 'ALL' : method.toUpperCase() as RailsRoute['method'],
+      method: method === 'match' ? 'ALL' : (method.toUpperCase() as RailsRoute['method']),
       path: fullPath,
       controller,
       action,
@@ -214,8 +214,8 @@ export class RailsRoutesAnalyzer {
   }
 
   private async parseResources(
-    call: SyntaxNode, 
-    namespaces: string[], 
+    call: SyntaxNode,
+    namespaces: string[],
     line: number,
     singular: boolean
   ): Promise<void> {
@@ -225,12 +225,10 @@ export class RailsRoutesAnalyzer {
     // First argument is the resource name (symbol)
     const nameArg = args[0];
     let resourceName = nameArg.text.replace(/^:/, '');
-    
+
     const resource: ResourceInfo = {
       name: resourceName,
-      controller: namespaces.length > 0 
-        ? `${namespaces.join('/')}/${resourceName}`
-        : resourceName,
+      controller: namespaces.length > 0 ? `${namespaces.join('/')}/${resourceName}` : resourceName,
       nested: [],
       memberRoutes: [],
       collectionRoutes: [],
@@ -244,7 +242,7 @@ export class RailsRoutesAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key === 'only' && value) {
             resource.only = this.extractArrayValues(value);
           } else if (key === 'except' && value) {
@@ -265,7 +263,7 @@ export class RailsRoutesAnalyzer {
       const nestedCalls = findNodes(block, 'call');
       for (const nestedCall of nestedCalls) {
         const nestedMethod = nestedCall.childForFieldName('method')?.text;
-        
+
         if (nestedMethod === 'member') {
           // Parse member routes
           const memberBlock = nestedCall.childForFieldName('block');
@@ -284,17 +282,17 @@ export class RailsRoutesAnalyzer {
   }
 
   private parseMemberCollectionRoutes(
-    block: SyntaxNode, 
-    resource: ResourceInfo, 
+    block: SyntaxNode,
+    resource: ResourceInfo,
     namespaces: string[],
     type: 'member' | 'collection'
   ): void {
     const calls = findNodes(block, 'call');
-    
+
     for (const call of calls) {
       const methodNode = call.childForFieldName('method');
       if (!methodNode) continue;
-      
+
       const method = methodNode.text;
       if (!['get', 'post', 'put', 'patch', 'delete'].includes(method)) continue;
 
@@ -302,9 +300,10 @@ export class RailsRoutesAnalyzer {
       if (args.length === 0) continue;
 
       const actionName = args[0].text.replace(/^:/, '');
-      const basePath = type === 'member' 
-        ? `/${resource.name}/:id/${actionName}`
-        : `/${resource.name}/${actionName}`;
+      const basePath =
+        type === 'member'
+          ? `/${resource.name}/:id/${actionName}`
+          : `/${resource.name}/${actionName}`;
 
       const route: RailsRoute = {
         method: method.toUpperCase() as RailsRoute['method'],
@@ -325,7 +324,7 @@ export class RailsRoutesAnalyzer {
   }
 
   private async parseNamespace(
-    call: SyntaxNode, 
+    call: SyntaxNode,
     currentNamespaces: string[],
     currentFile: string
   ): Promise<void> {
@@ -336,17 +335,17 @@ export class RailsRoutesAnalyzer {
     this.namespaces.push(nsName);
 
     const newNamespaces = [...currentNamespaces, nsName];
-    
+
     // Parse the namespace block
     const block = call.childForFieldName('block');
     if (block) {
       // Look for draw calls or nested route definitions
       const nestedCalls = findNodes(block, 'call');
-      
+
       for (const nestedCall of nestedCalls) {
         const methodNode = nestedCall.childForFieldName('method');
         if (!methodNode) continue;
-        
+
         const methodName = methodNode.text;
         const line = nestedCall.startPosition.row + 1;
 
@@ -359,12 +358,12 @@ export class RailsRoutesAnalyzer {
           case 'match':
             this.parseHttpRoute(nestedCall, methodName, newNamespaces, line);
             break;
-          
+
           case 'resources':
           case 'resource':
             await this.parseResources(nestedCall, newNamespaces, line, methodName === 'resource');
             break;
-          
+
           case 'draw':
             await this.parseDraw(nestedCall, newNamespaces);
             break;
@@ -383,14 +382,14 @@ export class RailsRoutesAnalyzer {
 
     // Find mount path from 'at:' option or '=>' syntax
     let mountPath = '/';
-    
+
     for (const arg of args) {
       if (arg.type === 'hash' || arg.type === 'pair') {
         const pairs = arg.type === 'hash' ? getChildrenByType(arg, 'pair') : [arg];
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key === 'at' && value) {
             mountPath = this.extractStringValue(value) || mountPath;
           }
@@ -417,7 +416,7 @@ export class RailsRoutesAnalyzer {
 
     const drawName = args[0].text.replace(/^:/, '');
     const drawFile = path.join(this.routesDir, `${drawName}.rb`);
-    
+
     if (fs.existsSync(drawFile)) {
       this.drawnFiles.push(drawFile);
       try {
@@ -433,16 +432,51 @@ export class RailsRoutesAnalyzer {
     if (args.length === 0) return;
 
     const resource = args[0].text.replace(/^:/, '');
-    
+
     // Generate standard Devise routes
-    const deviseRoutes: Array<{method: RailsRoute['method']; path: string; action: string; controller: string}> = [
+    const deviseRoutes: Array<{
+      method: RailsRoute['method'];
+      path: string;
+      action: string;
+      controller: string;
+    }> = [
       { method: 'GET', path: `/${resource}/sign_in`, action: 'new', controller: 'devise/sessions' },
-      { method: 'POST', path: `/${resource}/sign_in`, action: 'create', controller: 'devise/sessions' },
-      { method: 'DELETE', path: `/${resource}/sign_out`, action: 'destroy', controller: 'devise/sessions' },
-      { method: 'GET', path: `/${resource}/password/new`, action: 'new', controller: 'devise/passwords' },
-      { method: 'POST', path: `/${resource}/password`, action: 'create', controller: 'devise/passwords' },
-      { method: 'GET', path: `/${resource}/sign_up`, action: 'new', controller: 'devise/registrations' },
-      { method: 'POST', path: `/${resource}`, action: 'create', controller: 'devise/registrations' },
+      {
+        method: 'POST',
+        path: `/${resource}/sign_in`,
+        action: 'create',
+        controller: 'devise/sessions',
+      },
+      {
+        method: 'DELETE',
+        path: `/${resource}/sign_out`,
+        action: 'destroy',
+        controller: 'devise/sessions',
+      },
+      {
+        method: 'GET',
+        path: `/${resource}/password/new`,
+        action: 'new',
+        controller: 'devise/passwords',
+      },
+      {
+        method: 'POST',
+        path: `/${resource}/password`,
+        action: 'create',
+        controller: 'devise/passwords',
+      },
+      {
+        method: 'GET',
+        path: `/${resource}/sign_up`,
+        action: 'new',
+        controller: 'devise/registrations',
+      },
+      {
+        method: 'POST',
+        path: `/${resource}`,
+        action: 'create',
+        controller: 'devise/registrations',
+      },
     ];
 
     for (const dr of deviseRoutes) {
@@ -460,7 +494,7 @@ export class RailsRoutesAnalyzer {
 
   private parseRoot(call: SyntaxNode, namespaces: string[], line: number): void {
     const args = getCallArguments(call);
-    
+
     let controller = '';
     let action = 'index';
 
@@ -475,7 +509,7 @@ export class RailsRoutesAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key === 'to' && value) {
             const toValue = this.extractStringValue(value);
             if (toValue && toValue.includes('#')) {
@@ -499,36 +533,35 @@ export class RailsRoutesAnalyzer {
   }
 
   private generateResourceRoutes(
-    resource: ResourceInfo, 
+    resource: ResourceInfo,
     namespaces: string[],
     singular: boolean
   ): void {
     const basePath = this.buildPath(namespaces, `/${resource.name}`);
-    
+
     const allActions = singular
       ? ['show', 'new', 'create', 'edit', 'update', 'destroy']
       : ['index', 'show', 'new', 'create', 'edit', 'update', 'destroy'];
 
-    const actions = resource.only || 
-      (resource.except 
-        ? allActions.filter(a => !resource.except!.includes(a))
-        : allActions);
+    const actions =
+      resource.only ||
+      (resource.except ? allActions.filter((a) => !resource.except!.includes(a)) : allActions);
 
-    const restfulRoutes: Array<{method: RailsRoute['method']; path: string; action: string}> = [];
+    const restfulRoutes: Array<{ method: RailsRoute['method']; path: string; action: string }> = [];
 
     if (!singular) {
       if (actions.includes('index')) {
         restfulRoutes.push({ method: 'GET', path: basePath, action: 'index' });
       }
     }
-    
+
     if (actions.includes('new')) {
       restfulRoutes.push({ method: 'GET', path: `${basePath}/new`, action: 'new' });
     }
     if (actions.includes('create')) {
       restfulRoutes.push({ method: 'POST', path: basePath, action: 'create' });
     }
-    
+
     const showPath = singular ? basePath : `${basePath}/:id`;
     if (actions.includes('show')) {
       restfulRoutes.push({ method: 'GET', path: showPath, action: 'show' });
@@ -560,7 +593,7 @@ export class RailsRoutesAnalyzer {
     if (routePath.startsWith('/')) {
       return routePath;
     }
-    
+
     const nsPath = namespaces.length > 0 ? `/${namespaces.join('/')}` : '';
     return `${nsPath}/${routePath}`;
   }
@@ -582,7 +615,7 @@ export class RailsRoutesAnalyzer {
 
   private extractArrayValues(node: SyntaxNode): string[] {
     const values: string[] = [];
-    
+
     if (node.type === 'array') {
       for (let i = 0; i < node.childCount; i++) {
         const child = node.child(i);
@@ -596,7 +629,7 @@ export class RailsRoutesAnalyzer {
       const value = this.extractStringValue(node);
       if (value) values.push(value);
     }
-    
+
     return values;
   }
 }
@@ -605,29 +638,31 @@ export class RailsRoutesAnalyzer {
 async function main() {
   const targetPath = process.argv[2] || process.cwd();
   console.log(`Analyzing routes in: ${targetPath}`);
-  
+
   const analyzer = new RailsRoutesAnalyzer(targetPath);
   const result = await analyzer.analyze();
-  
+
   console.log('\n=== Rails Routes Analysis ===\n');
   console.log(`Total routes: ${result.routes.length}`);
   console.log(`Namespaces: ${result.namespaces.join(', ') || '(none)'}`);
   console.log(`Resources: ${result.resources.length}`);
   console.log(`Mounted engines: ${result.mountedEngines.length}`);
   console.log(`External route files: ${result.drawnFiles.length}`);
-  
+
   if (result.errors.length > 0) {
     console.log(`\n--- Errors ---`);
     for (const error of result.errors) {
       console.log(`  ❌ ${error}`);
     }
   }
-  
+
   console.log('\n--- Sample Routes (first 30) ---');
   for (const route of result.routes.slice(0, 30)) {
-    console.log(`  ${route.method.padEnd(7)} ${route.path.padEnd(50)} => ${route.controller}#${route.action}`);
+    console.log(
+      `  ${route.method.padEnd(7)} ${route.path.padEnd(50)} => ${route.controller}#${route.action}`
+    );
   }
-  
+
   console.log('\n--- Mounted Engines ---');
   for (const engine of result.mountedEngines) {
     console.log(`  ${engine.engine} => ${engine.mountPath}`);
