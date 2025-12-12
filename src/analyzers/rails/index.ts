@@ -6,16 +6,19 @@
 export { RailsRoutesAnalyzer, type RailsRoute, type RailsRoutesResult, type ResourceInfo, type MountedEngine } from './rails-routes-analyzer.js';
 export { RailsControllerAnalyzer, type ControllerInfo, type ActionInfo, type FilterInfo, type RailsControllersResult } from './rails-controller-analyzer.js';
 export { RailsModelAnalyzer, type ModelInfo, type AssociationInfo, type ValidationInfo, type RailsModelsResult } from './rails-model-analyzer.js';
+export { RailsGrpcAnalyzer, type GrpcServiceInfo, type RpcMethodInfo, type RailsGrpcResult } from './rails-grpc-analyzer.js';
 export { initRubyParser, parseRuby, parseRubyFile, findNodes, type SyntaxNode, type Tree } from './ruby-parser.js';
 
 import { RailsRoutesAnalyzer, type RailsRoutesResult } from './rails-routes-analyzer.js';
 import { RailsControllerAnalyzer, type RailsControllersResult } from './rails-controller-analyzer.js';
 import { RailsModelAnalyzer, type RailsModelsResult } from './rails-model-analyzer.js';
+import { RailsGrpcAnalyzer, type RailsGrpcResult } from './rails-grpc-analyzer.js';
 
 export interface RailsAnalysisResult {
   routes: RailsRoutesResult;
   controllers: RailsControllersResult;
   models: RailsModelsResult;
+  grpc: RailsGrpcResult;
   summary: RailsSummary;
 }
 
@@ -26,6 +29,8 @@ export interface RailsSummary {
   totalModels: number;
   totalAssociations: number;
   totalValidations: number;
+  totalGrpcServices: number;
+  totalRpcs: number;
   namespaces: string[];
   concerns: string[];
 }
@@ -54,11 +59,18 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
   const models = await modelsAnalyzer.analyze();
   console.log(`   ✅ Found ${models.models.length} models with ${models.totalAssociations} associations`);
 
+  // gRPC Services
+  console.log('🔄 Analyzing gRPC services...');
+  const grpcAnalyzer = new RailsGrpcAnalyzer(rootPath);
+  const grpc = await grpcAnalyzer.analyze();
+  console.log(`   ✅ Found ${grpc.services.length} gRPC services with ${grpc.totalRpcs} RPCs`);
+
   // Combine all namespaces
   const allNamespaces = [...new Set([
     ...routes.namespaces,
     ...controllers.namespaces,
     ...models.namespaces,
+    ...grpc.namespaces,
   ])];
 
   // Combine all concerns
@@ -74,6 +86,8 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
     totalModels: models.models.length,
     totalAssociations: models.totalAssociations,
     totalValidations: models.totalValidations,
+    totalGrpcServices: grpc.services.length,
+    totalRpcs: grpc.totalRpcs,
     namespaces: allNamespaces,
     concerns: allConcerns,
   };
@@ -82,6 +96,7 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
     routes,
     controllers,
     models,
+    grpc,
     summary,
   };
 }
@@ -120,6 +135,13 @@ async function main() {
   console.log(`│  Associations:         ${String(result.summary.totalAssociations).padStart(6)}                      │`);
   console.log(`│  Validations:          ${String(result.summary.totalValidations).padStart(6)}                      │`);
   console.log('└─────────────────────────────────────────────────────┘');
+
+  console.log('┌─────────────────────────────────────────────────────┐');
+  console.log('│ gRPC Services                                       │');
+  console.log('├─────────────────────────────────────────────────────┤');
+  console.log(`│  Total services:       ${String(result.summary.totalGrpcServices).padStart(6)}                      │`);
+  console.log(`│  Total RPCs:           ${String(result.summary.totalRpcs).padStart(6)}                      │`);
+  console.log('└─────────────────────────────────────────────────────┘');
   
   console.log('┌─────────────────────────────────────────────────────┐');
   console.log('│ Shared                                              │');
@@ -131,7 +153,8 @@ async function main() {
   // Errors summary
   const totalErrors = result.routes.errors.length + 
                       result.controllers.errors.length + 
-                      result.models.errors.length;
+                      result.models.errors.length +
+                      result.grpc.errors.length;
   
   if (totalErrors > 0) {
     console.log(`\n⚠️  Total errors: ${totalErrors}`);
