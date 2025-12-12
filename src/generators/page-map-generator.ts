@@ -390,6 +390,9 @@ export class PageMapGenerator {
     .modal-back:hover { opacity: 0.9; }
     .modal-body { padding: 16px; }
     .field-tree { font-family: monospace; font-size: 11px; background: var(--bg3); padding: 10px; border-radius: 4px; white-space: pre; overflow-x: auto; }
+    .copy-btn { background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 4px; opacity: 0.7; transition: all 0.2s; }
+    .copy-btn:hover { opacity: 1; background: var(--bg3); }
+    .copy-btn.copied { background: #22c55e; opacity: 1; }
   </style>
 </head>
 <body>
@@ -983,6 +986,11 @@ export class PageMapGenerator {
       if (op) {
         // Found GraphQL operation
         html = '<div class="detail-section"><h4>Type</h4><span class="tag '+(op.type==='mutation'?'tag-mutation':'tag-query')+'">'+op.type.toUpperCase()+'</span></div>';
+        
+        // Operation Name with copy button
+        html += '<div class="detail-section"><h4 style="display:flex;justify-content:space-between;align-items:center">Operation Name<button class="copy-btn" onclick="copyToClipboard(\\''+op.name+'\\', this)" title="Copy operation name">📋</button></h4>';
+        html += '<code style="background:#0f172a;color:#93c5fd;padding:4px 8px;border-radius:4px;font-family:monospace">'+op.name+'</code></div>';
+        
         if (op.returnType) {
           html += '<div class="detail-section"><h4>Return Type</h4><code style="background:#0f172a;color:#93c5fd;padding:4px 8px;border-radius:4px;font-family:monospace">'+op.returnType+'</code></div>';
         }
@@ -995,8 +1003,12 @@ export class PageMapGenerator {
           let gqlCode = opKeyword + ' ' + op.name + varStr + fragmentOn + ' {\\n';
           gqlCode += formatFields(op.fields, 1);
           gqlCode += '\\n}';
+          
+          // Escape for data attribute
+          const gqlCodeEscaped = gqlCode.replace(/'/g, "\\\\'").replace(/"/g, '&quot;');
 
-          html += '<div class="detail-section"><h4>GraphQL</h4><pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-size:11px;overflow-x:auto;white-space:pre;max-height:300px;overflow-y:auto">' + gqlCode + '</pre></div>';
+          html += '<div class="detail-section"><h4 style="display:flex;justify-content:space-between;align-items:center">GraphQL<button class="copy-btn" onclick="copyGqlCode(this)" data-code="'+gqlCodeEscaped+'" title="Copy GraphQL">📋</button></h4>';
+          html += '<pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-size:11px;overflow-x:auto;white-space:pre;max-height:300px;overflow-y:auto">' + gqlCode + '</pre></div>';
         } else if (op.variables?.length) {
           html += '<div class="detail-section"><h4>Variables</h4>';
           op.variables.forEach(v => { html += '<div class="detail-item">'+v.name+': <code style="background:#0f172a;color:#93c5fd;padding:2px 6px;border-radius:3px;font-family:monospace">'+v.type+'</code>'+(v.required?' (required)':'')+'</div>'; });
@@ -1261,6 +1273,29 @@ export class PageMapGenerator {
       modalHistory.length = 0; // Clear history when closing
       document.getElementById('modal-back').style.display = 'none';
     }
+    
+    // Copy functions
+    window.copyToClipboard = function(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const originalText = btn.textContent;
+        btn.textContent = '✓';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = originalText;
+          btn.classList.remove('copied');
+        }, 1500);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+      });
+    };
+    
+    window.copyGqlCode = function(btn) {
+      const code = btn.getAttribute('data-code')
+        .replace(/&quot;/g, '"')
+        .replace(/\\\\'/g, "'")
+        .replace(/\\\\n/g, '\\n');
+      copyToClipboard(code, btn);
+    };
     
     function handleModalOutsideClick() {
       // If there's history, go back instead of closing
