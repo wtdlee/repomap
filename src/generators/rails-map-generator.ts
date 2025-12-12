@@ -318,8 +318,8 @@ export class RailsMapGenerator {
           c.actions.some(a => a.name.toLowerCase().includes(searchQuery))
         );
       }
-      if (selectedNamespace !== 'all') {
-        filtered = filtered.filter(c => c.namespace === selectedNamespace);
+      if (!selectedNamespaces.has('all')) {
+        filtered = filtered.filter(c => selectedNamespaces.has(c.namespace || ''));
       }
 
       return \`
