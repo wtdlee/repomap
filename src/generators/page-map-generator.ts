@@ -614,13 +614,28 @@ export class PageMapGenerator {
     // Filter by stat type
     let currentFilter = null;
     
+    // Build sets for filtering
+    const pagesWithGraphQL = new Set(pages.filter(p => 
+      p.dataFetching && p.dataFetching.some(df => 
+        df.type === 'useQuery' || df.type === 'useMutation' || df.type === 'useLazyQuery'
+      )
+    ).map(p => p.path));
+    
+    const pagesWithRestApi = new Set(pages.filter(p => {
+      // Check if any API call is in this page's file
+      return apiCalls.some(api => api.filePath && api.filePath.includes(p.filePath?.replace(/\\/[^/]+$/, '')));
+    }).map(p => p.path));
+    
+    const pagesWithHierarchy = new Set(pages.filter(p => p.parent || (p.children && p.children.length > 0)).map(p => p.path));
+    
     function handleStatClick(type, el) {
-      console.log('handleStatClick called with:', type);
-      // Toggle filter
+      // Always reset filter first
+      showAllPages();
+      
+      // Toggle filter - if same type clicked, just deactivate
       if (currentFilter === type) {
         currentFilter = null;
         document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
-        showAllPages();
         closeDetail();
         return;
       }
@@ -629,6 +644,10 @@ export class PageMapGenerator {
       document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
       el.classList.add('active');
       
+      // Apply filter to page list
+      filterPageList(type);
+      
+      // Show detail panel
       if (type === 'graphql') {
         showGraphQLList();
       } else if (type === 'restapi') {
@@ -638,6 +657,34 @@ export class PageMapGenerator {
       } else if (type === 'hierarchies') {
         showHierarchiesList();
       }
+    }
+    
+    function filterPageList(type) {
+      let visiblePaths;
+      
+      if (type === 'graphql') {
+        visiblePaths = pagesWithGraphQL;
+      } else if (type === 'restapi') {
+        visiblePaths = pagesWithRestApi;
+      } else if (type === 'hierarchies') {
+        visiblePaths = pagesWithHierarchy;
+      } else {
+        // 'pages' - show all
+        return;
+      }
+      
+      // Filter page items
+      document.querySelectorAll('.page-item').forEach(el => {
+        const path = el.getAttribute('data-path');
+        el.style.display = visiblePaths.has(path) ? '' : 'none';
+      });
+      
+      // Hide empty groups
+      document.querySelectorAll('.group').forEach(g => {
+        const visibleItems = g.querySelectorAll('.page-item[style=""], .page-item:not([style])');
+        const hasVisibleItems = Array.from(g.querySelectorAll('.page-item')).some(item => item.style.display !== 'none');
+        g.style.display = hasVisibleItems ? '' : 'none';
+      });
     }
     
     function showPagesSummary() {
