@@ -103,20 +103,20 @@ export class RailsMapGenerator {
       </div>
       
       <div class="sidebar-section">
-        <div class="sidebar-title">Namespaces (${summary.namespaces.length})</div>
-        <div class="namespace-list">
-          <div class="namespace-item active" data-namespace="all">
-            <span>📁 All</span>
-            <span class="namespace-count">${routes.routes.length}</span>
-          </div>
-          ${this.generateNamespaceList(routes.routes)}
-        </div>
-      </div>
-
-      <div class="sidebar-section">
         <div class="sidebar-title">HTTP Methods</div>
         <div class="namespace-list">
           ${this.generateMethodFilters(routes.routes)}
+        </div>
+      </div>
+
+      <div class="sidebar-section namespaces">
+        <div class="sidebar-title">Namespaces (${summary.namespaces.length})</div>
+        <div class="namespace-list">
+          <div class="namespace-item active" data-namespace="all">
+            <span>All</span>
+            <span class="namespace-count">${routes.routes.length}</span>
+          </div>
+          ${this.generateNamespaceList(routes.routes)}
         </div>
       </div>
     </aside>

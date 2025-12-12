@@ -26,22 +26,25 @@ body {
   line-height: 1.5;
 }
 
-/* Header */
+/* Header - matching common.css exactly */
 header {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  padding: 16px 24px;
+  padding: 0 20px;
+  height: 54px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   position: sticky;
   top: 0;
   z-index: 100;
+  line-height: 1;
 }
 
 header h1 {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
+  height: 28px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -76,19 +79,34 @@ header h1 {
 .container {
   display: grid;
   grid-template-columns: 280px 1fr 350px;
-  height: calc(100vh - 65px);
+  height: calc(100vh - 54px);
 }
 
 /* Sidebar */
 .sidebar {
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-section {
   padding: 12px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.sidebar-section.namespaces {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-section.namespaces .namespace-list {
+  flex: 1;
+  overflow-y: auto;
 }
 
 .sidebar-title {
