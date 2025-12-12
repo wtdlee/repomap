@@ -30,8 +30,8 @@ dependencies:
     specifier: ^16.8.1
     version: 16.12.0
   marked:
-    specifier: ^11.1.0
-    version: 11.2.0
+    specifier: ^17.0.1
+    version: 17.0.1
   open:
     specifier: ^11.0.0
     version: 11.0.0
@@ -2812,9 +2812,9 @@ packages:
       '@jridgewell/sourcemap-codec': 1.5.5
     dev: true
 
-  /marked@11.2.0:
-    resolution: {integrity: sha512-HR0m3bvu0jAPYiIvLUUQtdg1g6D247//lvcekpHO1WMvbwDlwSkZAX9Lw4F4YHE1T0HaaNve0tuAWuV1UJ6vtw==}
-    engines: {node: '>= 18'}
+  /marked@17.0.1:
+    resolution: {integrity: sha512-boeBdiS0ghpWcSwoNm/jJBwdpFaMnZWRzjA6SkUMYb40SVaN1x7mmfGKp0jvexGcx+7y2La5zRZsYFZI6Qpypg==}
+    engines: {node: '>= 20'}
     hasBin: true
     dev: false
 
