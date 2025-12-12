@@ -102,13 +102,6 @@ export class RailsMapGenerator {
         <input type="text" class="search-box" id="searchBox" placeholder="Search routes, controllers...">
       </div>
       
-      <div class="sidebar-section">
-        <div class="sidebar-title">HTTP Methods</div>
-        <div class="namespace-list">
-          ${this.generateMethodFilters(routes.routes)}
-        </div>
-      </div>
-
       <div class="sidebar-section namespaces">
         <div class="sidebar-title">Namespaces (${summary.namespaces.length})</div>
         <div class="namespace-list">
@@ -117,6 +110,13 @@ export class RailsMapGenerator {
             <span class="namespace-count">${routes.routes.length}</span>
           </div>
           ${this.generateNamespaceList(routes.routes)}
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-title">HTTP Methods</div>
+        <div class="namespace-list methods-list">
+          ${this.generateMethodFilters(routes.routes)}
         </div>
       </div>
     </aside>
@@ -221,7 +221,8 @@ export class RailsMapGenerator {
         item.classList.toggle('active', selectedNamespaces.has(item.dataset.namespace));
       });
       document.querySelectorAll('.namespace-item[data-method]').forEach(item => {
-        item.classList.toggle('active', selectedMethods.has('all') || selectedMethods.has(item.dataset.method));
+        // Only highlight selected methods, not all when 'all' is selected
+        item.classList.toggle('active', selectedMethods.has(item.dataset.method));
       });
     }
 
@@ -444,15 +445,31 @@ export class RailsMapGenerator {
 
     // Load mermaid dynamically
     function loadMermaid() {
+      const container = document.getElementById('mermaid-diagram');
+      if (!container) return;
+      
       if (window.mermaid) {
-        window.mermaid.contentLoaded();
+        try {
+          // Re-render mermaid diagram
+          container.removeAttribute('data-processed');
+          window.mermaid.init(undefined, container);
+        } catch (e) {
+          console.error('Mermaid error:', e);
+        }
         return;
       }
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js';
       script.onload = () => {
-        window.mermaid.initialize({ startOnLoad: false, theme: 'dark' });
-        window.mermaid.contentLoaded();
+        window.mermaid.initialize({ 
+          startOnLoad: false, 
+          theme: 'dark',
+          securityLevel: 'loose'
+        });
+        const diagram = document.getElementById('mermaid-diagram');
+        if (diagram) {
+          window.mermaid.init(undefined, diagram);
+        }
       };
       document.head.appendChild(script);
     }
