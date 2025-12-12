@@ -285,10 +285,10 @@ export class PageMapGenerator {
       <h3 style="margin-top:16px;font-size:10px;text-transform:uppercase;color:var(--text2);letter-spacing:1px;cursor:pointer" onclick="switchToRailsTab()">Rails Backend</h3>
       <div class="stats" id="rails-stats">
         <div class="stat" data-filter="rails-routes" onclick="switchToRailsTab()"><div class="stat-val">${railsAnalysis.summary.totalRoutes}</div><div class="stat-label">Routes</div></div>
-        <div class="stat" data-filter="rails-controllers" onclick="showRailsControllers()"><div class="stat-val">${railsAnalysis.summary.totalControllers}</div><div class="stat-label">Controllers</div></div>
-        <div class="stat" data-filter="rails-models" onclick="showRailsModels()"><div class="stat-val">${railsAnalysis.summary.totalModels}</div><div class="stat-label">Models</div></div>
-        <div class="stat" data-filter="rails-grpc" onclick="showRailsGrpc()"><div class="stat-val">${railsAnalysis.summary.totalGrpcServices}</div><div class="stat-label">gRPC</div></div>
-        <div class="stat" data-filter="rails-react" onclick="showReactComponents()"><div class="stat-val">${railsAnalysis.summary.totalReactComponents}</div><div class="stat-label">⚛ React</div></div>
+        <div class="stat" data-filter="rails-controllers" onclick="showRailsControllers(); this.blur();"><div class="stat-val">${railsAnalysis.summary.totalControllers}</div><div class="stat-label">Controllers</div></div>
+        <div class="stat" data-filter="rails-models" onclick="showRailsModels(); this.blur();"><div class="stat-val">${railsAnalysis.summary.totalModels}</div><div class="stat-label">Models</div></div>
+        <div class="stat" data-filter="rails-grpc" onclick="showRailsGrpc(); this.blur();"><div class="stat-val">${railsAnalysis.summary.totalGrpcServices}</div><div class="stat-label">gRPC</div></div>
+        <div class="stat" data-filter="rails-react" onclick="showReactComponents(); this.blur();"><div class="stat-val">${railsAnalysis.summary.totalReactComponents}</div><div class="stat-label">⚛ React</div></div>
       </div>
       `
           : ''

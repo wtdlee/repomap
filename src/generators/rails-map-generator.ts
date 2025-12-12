@@ -49,7 +49,7 @@ export class RailsMapGenerator {
   private generateHTML(title: string): string {
     if (!this.result) throw new Error('Analysis not run');
 
-    const { routes, controllers, models, summary } = this.result;
+    const { routes, controllers, models, grpc, summary } = this.result;
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -84,6 +84,12 @@ export class RailsMapGenerator {
         <div>
           <div class="stat-value">${summary.totalModels}</div>
           <div class="stat-label">Models</div>
+        </div>
+      </div>
+      <div class="stat" data-view="grpc">
+        <div>
+          <div class="stat-value">${summary.totalGrpcServices}</div>
+          <div class="stat-label">gRPC</div>
         </div>
       </div>
       <div class="stat" data-view="diagram">
@@ -138,6 +144,7 @@ export class RailsMapGenerator {
     const routes = ${JSON.stringify(routes.routes)};
     const controllers = ${JSON.stringify(controllers.controllers)};
     const models = ${JSON.stringify(models.models)};
+    const grpcServices = ${JSON.stringify(grpc.services)};
 
     // State
     let currentView = 'routes';
@@ -299,6 +306,9 @@ export class RailsMapGenerator {
           break;
         case 'models':
           mainPanel.innerHTML = renderModelsView();
+          break;
+        case 'grpc':
+          mainPanel.innerHTML = renderGrpcView();
           break;
         case 'diagram':
           mainPanel.innerHTML = renderDiagramView();
@@ -463,6 +473,88 @@ export class RailsMapGenerator {
     window.loadMoreModels = function() {
       modelsDisplayCount += 50;
       renderMainPanel();
+    };
+
+    let grpcDisplayCount = 50;
+    let filteredGrpc = grpcServices;
+
+    function renderGrpcView() {
+      filteredGrpc = grpcServices;
+      if (searchQuery) {
+        filteredGrpc = grpcServices.filter(svc =>
+          (svc.className && svc.className.toLowerCase().includes(searchQuery)) ||
+          (svc.namespace && svc.namespace.toLowerCase().includes(searchQuery)) ||
+          (svc.rpcs && svc.rpcs.some(rpc => rpc.name && rpc.name.toLowerCase().includes(searchQuery)))
+        );
+      }
+      
+      const displayedGrpc = filteredGrpc.slice(0, grpcDisplayCount);
+      
+      return \`
+        <div class="panel-header">
+          <div class="panel-title">gRPC Services <span class="panel-count">(\${Math.min(grpcDisplayCount, filteredGrpc.length)} / \${filteredGrpc.length})</span></div>
+        </div>
+        <div style="display:grid;gap:12px">
+          \${displayedGrpc.map((svc, idx) => \`
+            <div class="model-card" onclick="showGrpcDetail(\${idx})">
+              <div class="model-name">
+                🔌 \${svc.className || 'Unknown'}
+              </div>
+              <div class="model-stats">
+                \${svc.namespace ? \`<span>📁 \${svc.namespace}</span>\` : ''}
+                <span>⚡ \${svc.rpcs ? svc.rpcs.length : 0} RPCs</span>
+              </div>
+            </div>
+          \`).join('')}
+        </div>
+        \${filteredGrpc.length > grpcDisplayCount ? \`
+          <div class="show-more-container">
+            <button class="show-more-btn" onclick="loadMoreGrpc()">Show More (+50)</button>
+            <span class="show-more-count">\${grpcDisplayCount} / \${filteredGrpc.length}</span>
+          </div>
+        \` : ''}
+      \`;
+    }
+
+    window.loadMoreGrpc = function() {
+      grpcDisplayCount += 50;
+      renderMainPanel();
+    };
+
+    window.showGrpcDetail = function(idx) {
+      const svc = filteredGrpc[idx];
+      if (!svc) return;
+      
+      let detail = \`
+        <div class="detail-header">
+          <div class="detail-title">🔌 \${svc.className || 'gRPC Service'}</div>
+          <button class="close-btn" onclick="closeDetail()">×</button>
+        </div>
+        <div class="detail-content">
+          <div class="detail-section">
+            <div class="detail-section-title">Service Info</div>
+            <div class="detail-item"><span class="tag tag-purple">class</span>\${svc.className || 'N/A'}</div>
+            \${svc.namespace ? \`<div class="detail-item"><span class="tag tag-blue">namespace</span>\${svc.namespace}</div>\` : ''}
+            \${svc.filePath ? \`<div class="detail-item"><span class="tag tag-green">file</span><span style="word-break:break-all">\${svc.filePath}</span></div>\` : ''}
+          </div>
+          
+          \${svc.rpcs && svc.rpcs.length > 0 ? \`
+            <div class="detail-section">
+              <div class="detail-section-title">RPCs (\${svc.rpcs.length})</div>
+              \${svc.rpcs.map(rpc => \`
+                <div class="detail-item">
+                  <span class="tag tag-orange">rpc</span>
+                  <span>\${rpc.name || 'unknown'}</span>
+                  \${rpc.request ? \`<span style="margin-left:auto;font-size:11px;color:var(--text-secondary)">(\${rpc.request})</span>\` : ''}
+                </div>
+              \`).join('')}
+            </div>
+          \` : ''}
+        </div>
+      \`;
+      
+      detailPanel.innerHTML = detail;
+      detailPanel.classList.add('open');
     };
 
     function renderDiagramView() {
