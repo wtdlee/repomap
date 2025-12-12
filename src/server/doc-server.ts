@@ -12,6 +12,7 @@ import type {
 } from '../types.js';
 import { DocGeneratorEngine } from '../core/engine.js';
 import { PageMapGenerator } from '../generators/page-map-generator.js';
+import { RailsMapGenerator } from '../generators/rails-map-generator.js';
 import { detectEnvironments, type EnvironmentDetectionResult } from '../utils/env-detector.js';
 import { analyzeRailsApp, type RailsAnalysisResult } from '../analyzers/rails/index.js';
 
@@ -84,20 +85,14 @@ export class DocServer {
       );
     });
 
-    // Rails map (standalone view if needed)
+    // Rails map (standalone view)
     this.app.get('/rails-map', (req, res) => {
       if (!this.railsAnalysis) {
         res.status(404).send('No Rails environment detected');
         return;
       }
-      const generator = new PageMapGenerator();
-      res.send(
-        generator.generatePageMapHtml(this.currentReport!, {
-          envResult: this.envResult,
-          railsAnalysis: this.railsAnalysis,
-          activeTab: 'rails',
-        })
-      );
+      const generator = new RailsMapGenerator();
+      res.send(generator.generateFromResult(this.railsAnalysis));
     });
 
     // Markdown pages - index

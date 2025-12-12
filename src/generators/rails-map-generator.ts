@@ -22,9 +22,10 @@ export interface RailsMapOptions {
 export class RailsMapGenerator {
   private result: RailsAnalysisResult | null = null;
 
-  constructor(private rootPath: string) {}
+  constructor(private rootPath?: string) {}
 
   async generate(options: RailsMapOptions = {}): Promise<string> {
+    if (!this.rootPath) throw new Error('Root path required for analysis');
     const { title = 'Rails Application Map' } = options;
 
     // Run analysis
@@ -40,6 +41,12 @@ export class RailsMapGenerator {
     }
 
     return html;
+  }
+
+  // Generate from existing analysis result (for doc-server)
+  generateFromResult(analysisResult: RailsAnalysisResult, title = 'Rails Application Map'): string {
+    this.result = analysisResult;
+    return this.generateHTML(title);
   }
 
   private generateHTML(title: string): string {

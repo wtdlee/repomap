@@ -3096,17 +3096,17 @@ export class PageMapGenerator {
       
       // Add Rails routes as graph nodes (limit to GET routes with views for better visualization)
       if (typeof railsRoutes !== 'undefined' && railsRoutes.length > 0) {
-        const viewRoutes = railsRoutes.filter(r => r.method === 'GET' && !r.route.includes('.:format'));
+        const viewRoutes = railsRoutes.filter(r => r.method === 'GET' && r.path && !r.path.includes('.:format'));
         const uniqueRoutes = new Map();
         viewRoutes.forEach(r => {
-          const key = r.route.replace(/:[^/]+/g, ':param');
+          const key = r.path.replace(/:[^/]+/g, ':param');
           if (!uniqueRoutes.has(key)) {
             uniqueRoutes.set(key, r);
           }
         });
         Array.from(uniqueRoutes.values()).slice(0, 200).forEach(r => {
           allGraphPages.push({
-            path: 'rails:' + r.route,
+            path: 'rails:' + r.path,
             isRails: true,
             controller: r.controller,
             action: r.action,
