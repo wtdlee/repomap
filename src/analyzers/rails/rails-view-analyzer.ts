@@ -6,6 +6,13 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { glob } from 'glob';
 
+export interface ReactComponentRef {
+  name: string; // Component name (e.g., "App", "OrgPage", "UserJobs")
+  propsVar?: string; // Props variable name (e.g., "@react_state")
+  ssr?: boolean; // Server-side rendered
+  line?: number;
+}
+
 export interface RailsViewInfo {
   name: string; // View name (e.g., "index", "show")
   path: string; // File path relative to app/views
@@ -17,6 +24,7 @@ export interface RailsViewInfo {
   partials: string[]; // Used partials
   helpers: string[]; // Used helpers
   instanceVars: string[]; // Instance variables (@var)
+  reactComponents: ReactComponentRef[]; // React components loaded in this view
   line?: number;
 }
 
@@ -146,6 +154,7 @@ async function parseViewFile(
     const partials = extractPartials(content, template);
     const helpers = extractHelpers(content, template);
     const instanceVars = extractInstanceVars(content);
+    const reactComponents = extractReactComponents(content, template);
 
     return {
       name: action,
@@ -157,6 +166,7 @@ async function parseViewFile(
       partials,
       helpers,
       instanceVars,
+      reactComponents,
     };
   } catch {
     return null;
@@ -196,6 +206,54 @@ function extractHelpers(content: string, template: 'haml' | 'erb' | 'other'): st
   }
 
   return [...new Set(helpers)];
+}
+
+function extractReactComponents(
+  content: string,
+  template: 'haml' | 'erb' | 'other'
+): ReactComponentRef[] {
+  const components: ReactComponentRef[] = [];
+
+  // Pattern 1: render_react_component "ComponentName", {}, ssr: true/false
+  // e.g., = render_react_component("App", {}, ssr: true)
+  const renderReactPattern =
+    /render_react_component\s*\(?\s*["']([^"']+)["'](?:,\s*\{[^}]*\})?\s*(?:,\s*ssr:\s*(true|false))?\)?/g;
+  let match;
+  while ((match = renderReactPattern.exec(content)) !== null) {
+    components.push({
+      name: match[1],
+      ssr: match[2] === 'true',
+    });
+  }
+
+  // Pattern 2: data: { react_component: "ComponentName", react_component_props: props.to_json }
+  // e.g., %div{ data: { react_component: "OrgPage", react_component_props: @react_state.to_json } }
+  const dataReactPattern =
+    /data:\s*\{\s*react_component:\s*["']([^"']+)["'](?:,\s*react_component_props:\s*(@?\w+)(?:\.to_json)?)?/g;
+  while ((match = dataReactPattern.exec(content)) !== null) {
+    components.push({
+      name: match[1],
+      propsVar: match[2],
+      ssr: false,
+    });
+  }
+
+  // Pattern 3: ReactComponent name="ComponentName" (ERB style)
+  const reactComponentPattern = /ReactComponent\s+name=["']([^"']+)["']/g;
+  while ((match = reactComponentPattern.exec(content)) !== null) {
+    components.push({
+      name: match[1],
+      ssr: false,
+    });
+  }
+
+  // Deduplicate by name
+  const seen = new Set<string>();
+  return components.filter((c) => {
+    if (seen.has(c.name)) return false;
+    seen.add(c.name);
+    return true;
+  });
 }
 
 function extractInstanceVars(content: string): string[] {

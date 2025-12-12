@@ -1321,6 +1321,7 @@ export class PageMapGenerator {
           partials: view.partials || [],
           instanceVars: view.instanceVars || [],
           helpers: view.helpers || [],
+          reactComponents: view.reactComponents || [],
           // Route info
           path: matchingRoute?.path || '/' + view.controller + '/' + view.action,
           method: matchingRoute?.method || 'GET',
@@ -1398,6 +1399,10 @@ export class PageMapGenerator {
           // Build indicators
           let indicators = '';
           indicators += '<span title="' + view.template.toUpperCase() + ' template" style="margin-left:4px;font-size:9px;background:#6b7280;color:white;padding:1px 4px;border-radius:2px">' + view.template.toUpperCase() + '</span>';
+          if (view.reactComponents && view.reactComponents.length > 0) {
+            const rcNames = view.reactComponents.map(rc => rc.name).slice(0, 2).join(', ') + (view.reactComponents.length > 2 ? '...' : '');
+            indicators += '<span title="React: ' + rcNames + '" style="margin-left:4px;font-size:9px;background:#61dafb;color:#222;padding:1px 4px;border-radius:2px;font-weight:600">⚛ ' + view.reactComponents.length + '</span>';
+          }
           if (view.partials.length > 0) indicators += '<span title="Uses partials: ' + view.partials.slice(0,3).join(', ') + (view.partials.length > 3 ? '...' : '') + '" style="margin-left:4px;font-size:10px">🧩 ' + view.partials.length + '</span>';
           if (view.instanceVars.length > 0) indicators += '<span title="Instance vars: @' + view.instanceVars.slice(0,5).join(', @') + '" style="margin-left:4px;font-size:10px">📦 ' + view.instanceVars.length + '</span>';
           if (view.services.length > 0) indicators += '<span title="Services: ' + view.services.join(', ') + '" style="margin-left:4px;font-size:10px">⚙️</span>';
@@ -1572,6 +1577,26 @@ export class PageMapGenerator {
         }
         
         html += '</div>';
+      }
+      
+      // React Components loaded in this view
+      if (screen.reactComponents && screen.reactComponents.length > 0) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">⚛️ React Components</div>';
+        html += '<div class="detail-items">';
+        screen.reactComponents.forEach(rc => {
+          html += '<div class="detail-item">';
+          html += '<span class="tag" style="background:#61dafb;color:#222;font-size:10px;font-weight:600">React</span>';
+          html += '<span class="name" style="font-family:monospace;font-weight:500">' + rc.name + '</span>';
+          if (rc.ssr) {
+            html += '<span style="margin-left:6px;font-size:9px;background:#22c55e;color:white;padding:1px 4px;border-radius:2px">SSR</span>';
+          }
+          if (rc.propsVar) {
+            html += '<span style="margin-left:auto;font-size:10px;color:var(--text2);font-family:monospace">props: ' + rc.propsVar + '</span>';
+          }
+          html += '</div>';
+        });
+        html += '</div></div>';
       }
       
       // Partials used
