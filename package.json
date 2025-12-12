@@ -1,5 +1,5 @@
 {
-  "name": "repomap",
+  "name": "@wtdlee/repomap",
   "version": "0.1.0",
   "description": "Interactive documentation generator for code repositories - visualize pages, components, GraphQL operations, and data flows",
   "type": "module",
