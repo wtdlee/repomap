@@ -291,26 +291,7 @@ export class DocServer {
       line-height: 1.6;
     }
 
-    .container {
-      display: flex;
-      min-height: 100vh;
-    }
-
-    .sidebar {
-      width: 280px;
-      background: var(--bg-primary);
-      border-right: 1px solid var(--border);
-      padding: 24px;
-      position: fixed;
-      height: 100vh;
-      overflow-y: auto;
-    }
-
-    .sidebar h1 {
-      font-size: 18px;
-      margin-bottom: 24px;
-      color: var(--accent);
-    }
+    /* Container and sidebar styles moved to top-header section */
 
     .sidebar nav a {
       display: block;
@@ -363,7 +344,6 @@ export class DocServer {
 
     .main {
       flex: 1;
-      margin-left: 280px;
       padding: 32px;
       min-width: 0; /* Allow flex shrinking */
       max-width: calc(100vw - 280px);
@@ -808,12 +788,74 @@ export class DocServer {
     .regenerate-btn:hover {
       background: #0052a3;
     }
+    
+    /* Top header - matching page-map style */
+    .top-header {
+      background: #1e293b;
+      padding: 12px 20px;
+      border-bottom: 1px solid #334155;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 200;
+    }
+    .top-header h1 { 
+      font-size: 18px; 
+      color: #f1f5f9;
+      cursor: pointer;
+    }
+    .top-header-left {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    .top-nav {
+      display: flex;
+      gap: 4px;
+    }
+    .top-nav-link {
+      padding: 6px 12px;
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 13px;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+    .top-nav-link:hover { background: #334155; color: #f1f5f9; }
+    .top-nav-link.active { background: #3b82f6; color: white; }
+    
+    .container {
+      display: flex;
+      min-height: calc(100vh - 54px);
+    }
+    
+    .sidebar {
+      width: 280px;
+      background: var(--bg-primary);
+      border-right: 1px solid var(--border);
+      padding: 24px;
+      position: sticky;
+      top: 54px;
+      height: calc(100vh - 54px);
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
+  <header class="top-header">
+    <div class="top-header-left">
+      <h1 onclick="location.href='/'">📊 ${this.config.site.title}</h1>
+      <nav class="top-nav">
+        <a href="/page-map" class="top-nav-link">Page Map</a>
+        <a href="/docs" class="top-nav-link active">Docs</a>
+        <a href="/api/report" class="top-nav-link" target="_blank">API</a>
+      </nav>
+    </div>
+  </header>
   <div class="container">
     <aside class="sidebar">
-      <h1>${this.config.site.title}</h1>
       <nav>
         <a href="/">Home</a>
         ${this.config.repositories
