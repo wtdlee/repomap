@@ -623,69 +623,87 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   }
 
   private async findOperationUsage(operations: GraphQLOperation[]): Promise<void> {
+    if (operations.length === 0) return;
+
     const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
       ignore: ['**/node_modules/**', '**/.next/**', '**/__generated__/**'],
       absolute: true,
     });
 
-    const operationNames = new Map<string, GraphQLOperation>();
+    // Build lookup maps for O(1) access
+    const operationByName = new Map<string, GraphQLOperation>();
+    const operationByDocument = new Map<string, GraphQLOperation>();
     for (const op of operations) {
-      operationNames.set(op.name, op);
-      // Also map Document name for codegen pattern
-      operationNames.set(`${op.name}Document`, op);
+      operationByName.set(op.name, op);
+      operationByDocument.set(`${op.name}Document`, op);
     }
 
-    for (const filePath of tsFiles) {
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const relativePath = path.relative(this.basePath, filePath);
+    // Build a single regex to match all Document names at once
+    const allDocumentNames = operations.map((op) => `${op.name}Document`);
+    const documentNamesPattern = new RegExp(`\\b(${allDocumentNames.join('|')})\\b`, 'g');
 
-        for (const [name, operation] of operationNames) {
-          // Skip if this is the definition file itself
-          if (relativePath === operation.filePath) continue;
+    // Process files in parallel batches
+    const batchSize = 50;
+    for (let i = 0; i < tsFiles.length; i += batchSize) {
+      const batch = tsFiles.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (filePath) => {
+          try {
+            const content = await fs.readFile(filePath, 'utf-8');
+            const relativePath = path.relative(this.basePath, filePath);
 
-          // Check traditional patterns
-          const traditionalPatterns = [
-            `useQuery<${name}`,
-            `useMutation<${name}`,
-            `useLazyQuery<${name}`,
-            `useSubscription<${name}`,
-            `${name}Query`,
-            `${name}Mutation`,
-            `${name}Variables`,
-          ];
-
-          // Check codegen Document import patterns
-          const codegenPatterns = [
-            // Import pattern: import { XxxDocument } from
-            new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from`),
-            // useQuery(XxxDocument) or useMutation(XxxDocument)
-            new RegExp(`useQuery\\s*\\(\\s*${name}`),
-            new RegExp(`useMutation\\s*\\(\\s*${name}`),
-            new RegExp(`useLazyQuery\\s*\\(\\s*${name}`),
-            new RegExp(`useSubscription\\s*\\(\\s*${name}`),
-            // useSuspenseQuery(XxxDocument)
-            new RegExp(`useSuspenseQuery\\s*\\(\\s*${name}`),
-            // Apollo client.query({ query: XxxDocument })
-            new RegExp(`query\\s*:\\s*${name}`),
-            new RegExp(`mutation\\s*:\\s*${name}`),
-          ];
-
-          const hasTraditionalMatch = traditionalPatterns.some((pattern) =>
-            content.includes(pattern)
-          );
-          const hasCodegenMatch = codegenPatterns.some((pattern) => pattern.test(content));
-
-          if (hasTraditionalMatch || hasCodegenMatch) {
-            if (!operation.usedIn.includes(relativePath)) {
-              operation.usedIn.push(relativePath);
+            // Quick pre-filter: skip files without relevant keywords
+            if (
+              !content.includes('Document') &&
+              !content.includes('useQuery') &&
+              !content.includes('useMutation') &&
+              !content.includes('Query') &&
+              !content.includes('Mutation')
+            ) {
+              return;
             }
+
+            // Find all Document references in one pass
+            const foundDocuments = new Set<string>();
+            let match;
+            while ((match = documentNamesPattern.exec(content)) !== null) {
+              foundDocuments.add(match[1]);
+            }
+            // Reset regex state
+            documentNamesPattern.lastIndex = 0;
+
+            // Map found Documents to operations
+            for (const docName of foundDocuments) {
+              const operation = operationByDocument.get(docName);
+              if (operation && relativePath !== operation.filePath) {
+                if (!operation.usedIn.includes(relativePath)) {
+                  operation.usedIn.push(relativePath);
+                }
+              }
+            }
+
+            // Also check traditional patterns (useQuery<Name>, etc.)
+            for (const [name, operation] of operationByName) {
+              if (relativePath === operation.filePath) continue;
+              if (operation.usedIn.includes(relativePath)) continue; // Already found
+
+              if (
+                content.includes(`useQuery<${name}`) ||
+                content.includes(`useMutation<${name}`) ||
+                content.includes(`useLazyQuery<${name}`) ||
+                content.includes(`useSubscription<${name}`) ||
+                content.includes(`${name}Query`) ||
+                content.includes(`${name}Mutation`)
+              ) {
+                operation.usedIn.push(relativePath);
+              }
+            }
+          } catch {
+            // Skip unreadable files
           }
-        }
-      } catch {
-        // Skip unreadable files
-      }
+        })
+      );
     }
   }
 }
