@@ -522,6 +522,12 @@ export class PageMapGenerator {
       const children = (page.children || []).map(c => pageMap.get(c)).filter(Boolean);
       const sameLayout = rels.filter(r => r.type === 'same-layout').map(r => r.from === path ? r.to : r.from).slice(0, 5);
       
+      // Navigation links (from linkedPages)
+      const navLinks = (page.linkedPages || []).filter(lp => {
+        const normalizedPath = lp.startsWith('/') ? lp : '/' + lp;
+        return pageMap.has(normalizedPath) || pageMap.has(normalizedPath.split('?')[0]);
+      }).slice(0, 10);
+      
       let relsHtml = '';
       if (parent) {
         relsHtml += '<div class="rel-item" onclick="event.stopPropagation(); selectPage(\\''+parent.path+'\\')">' +
@@ -533,11 +539,37 @@ export class PageMapGenerator {
           '<div class="rel-header"><span class="rel-type rel-type-child">CHILD</span><span class="rel-path">'+c.path+'</span></div>' +
           '<div class="rel-desc">Sub-page of current page</div></div>';
       });
+      
+      // Navigation links
+      navLinks.forEach(link => {
+        const targetPath = link.startsWith('/') ? link.split('?')[0] : '/' + link.split('?')[0];
+        relsHtml += '<div class="rel-item" onclick="event.stopPropagation(); selectPage(\\''+targetPath+'\\')">' +
+          '<div class="rel-header"><span class="rel-type" style="background:#3b82f6;color:white">LINK</span><span class="rel-path">'+link+'</span></div>' +
+          '<div class="rel-desc">Navigation link from this page</div></div>';
+      });
+      
       sameLayout.forEach(p => {
         relsHtml += '<div class="rel-item" onclick="event.stopPropagation(); selectPage(\\''+p+'\\')">' +
           '<div class="rel-header"><span class="rel-type rel-type-layout">LAYOUT</span><span class="rel-path">'+p+'</span></div>' +
           '<div class="rel-desc">Uses same layout: '+(page.layout||'')+'</div></div>';
       });
+      
+      // Steps section
+      let stepsHtml = '';
+      if (page.steps && page.steps.length > 0) {
+        stepsHtml = '<div class="detail-section"><h4>Multi-Step Flow ('+page.steps.length+' steps)</h4>';
+        stepsHtml += '<div style="display:flex;flex-direction:column;gap:6px">';
+        page.steps.forEach((step, idx) => {
+          const stepName = step.name || 'Step ' + step.id;
+          const stepComp = step.component ? '<code style="background:#0f172a;color:#93c5fd;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:8px">'+step.component+'</code>' : '';
+          stepsHtml += '<div style="display:flex;align-items:center;padding:8px;background:#1e293b;border-radius:6px;border-left:3px solid '+(idx===0?'#22c55e':'#3b82f6')+'">' +
+            '<span style="background:#475569;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;margin-right:8px">'+(idx+1)+'</span>' +
+            '<span style="font-size:12px;color:var(--text)">'+stepName+'</span>' +
+            stepComp +
+            '</div>';
+        });
+        stepsHtml += '</div></div>';
+      }
       
       // Data operations - show component name info
       let dataHtml = '';
@@ -557,6 +589,8 @@ export class PageMapGenerator {
         dataHtml += '</div>';
       }
       
+      const totalRels = (parent ? 1 : 0) + children.length + navLinks.length + sameLayout.length;
+      
       document.getElementById('detail-title').textContent = path;
       document.getElementById('detail-body').innerHTML = 
         '<div class="detail-section"><h4>Info</h4>' +
@@ -564,8 +598,8 @@ export class PageMapGenerator {
         '<div class="detail-item"><div class="detail-label">AUTH</div>'+(page.authentication?.required?'<span class="tag tag-auth">LOGIN REQUIRED</span>':'No auth required')+'</div>' +
         (page.layout?'<div class="detail-item"><div class="detail-label">LAYOUT</div>'+page.layout+'</div>':'') +
         (page.params?.length?'<div class="detail-item"><div class="detail-label">PARAMS</div>'+page.params.map(p=>':'+p).join(', ')+'</div>':'') +
-        '</div>' + dataHtml +
-        '<div class="detail-section"><h4>Related Pages ('+rels.length+')</h4>' +
+        '</div>' + stepsHtml + dataHtml +
+        '<div class="detail-section"><h4>Related Pages ('+totalRels+')</h4>' +
         (relsHtml || '<div style="color:var(--text2);font-size:12px">No related pages</div>') +
         '</div>';
       
@@ -1179,12 +1213,48 @@ export class PageMapGenerator {
         });
       });
       
-      // Build edges - only parent-child for visual clarity
+      // Build edges - parent-child hierarchy
       graphState.edges = relations.filter(r => r.type === 'parent-child').map(r => ({
         from: r.from,
         to: r.to,
-        color: '#475569'
+        color: '#475569',
+        type: 'hierarchy'
       }));
+      
+      // Add linkedPages edges (actual navigation links)
+      const nodePathSet = new Set(graphState.nodes.map(n => n.path));
+      pages.forEach(p => {
+        if (p.linkedPages && p.linkedPages.length > 0) {
+          p.linkedPages.forEach(linked => {
+            // Normalize linked path
+            const normalizedLinked = linked.startsWith('/') ? linked : '/' + linked;
+            // Check if target exists in our pages (exact match or prefix match for dynamic routes)
+            const targetExists = nodePathSet.has(normalizedLinked) || 
+              Array.from(nodePathSet).some(path => {
+                // Handle dynamic routes: /user/[id] matches /user/123
+                const pathPattern = path.replace(/\\[\\w+\\]/g, '[^/]+');
+                return new RegExp('^' + pathPattern + '$').test(normalizedLinked);
+              });
+            
+            if (targetExists || nodePathSet.has(normalizedLinked.split('?')[0])) {
+              const targetPath = normalizedLinked.split('?')[0];
+              // Avoid duplicate edges
+              const existingEdge = graphState.edges.find(e => 
+                (e.from === p.path && e.to === targetPath) || 
+                (e.from === targetPath && e.to === p.path && e.type === 'link')
+              );
+              if (!existingEdge && p.path !== targetPath) {
+                graphState.edges.push({
+                  from: p.path,
+                  to: targetPath,
+                  color: '#3b82f6', // Blue for navigation links
+                  type: 'link'
+                });
+              }
+            }
+          });
+        }
+      });
       
       // Build connection map for force simulation
       const connections = new Map();
@@ -1370,11 +1440,20 @@ export class PageMapGenerator {
         const to = graphState.nodes.find(n => n.path === e.to);
         if (from && to) {
           ctx.strokeStyle = e.color;
-          ctx.lineWidth = 1;
+          ctx.lineWidth = e.type === 'link' ? 1.5 : 1;
+          
+          // Dashed line for navigation links, solid for hierarchy
+          if (e.type === 'link') {
+            ctx.setLineDash([4, 4]);
+          } else {
+            ctx.setLineDash([]);
+          }
+          
           ctx.beginPath();
           ctx.moveTo(from.x, from.y);
           ctx.lineTo(to.x, to.y);
           ctx.stroke();
+          ctx.setLineDash([]); // Reset
           
           // Arrow
           const angle = Math.atan2(to.y - from.y, to.x - from.x);

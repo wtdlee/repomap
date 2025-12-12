@@ -9,6 +9,7 @@ import type {
   DataFetchingInfo,
   NavigationInfo,
   RepositoryConfig,
+  StepInfo,
 } from '../types.js';
 
 /**
@@ -82,6 +83,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const dataFetching = this.extractDataFetching(sourceFile);
     const navigation = this.extractNavigation(sourceFile);
     const linkedPages = this.extractLinkedPages(sourceFile);
+    const steps = this.extractSteps(sourceFile);
 
     return {
       path: routePath,
@@ -94,6 +96,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
       dataFetching,
       navigation,
       linkedPages,
+      steps: steps.length > 0 ? steps : undefined,
     };
   }
 
@@ -684,6 +687,161 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     return result;
+  }
+
+  /**
+   * Extract multi-step flow information (wizard, stepper, onboarding)
+   */
+  private extractSteps(sourceFile: SourceFile): StepInfo[] {
+    const steps: StepInfo[] = [];
+
+    // Pattern 1: useState with step-like variable names
+    const useStateCalls = sourceFile
+      .getDescendantsOfKind(SyntaxKind.CallExpression)
+      .filter((call) => call.getExpression().getText() === 'useState');
+
+    for (const call of useStateCalls) {
+      const parent = call.getParent();
+      if (!parent) continue;
+
+      const parentText = parent.getText();
+      // Match: const [step, setStep] = useState(0) or [currentStep, setCurrentStep]
+      const stepMatch = parentText.match(
+        /\[\s*(step|currentStep|activeStep|page|currentPage|phase|stage)\s*,/i
+      );
+      if (stepMatch) {
+        // Found a step state, now look for step-related JSX or switch cases
+        const stepVarName = stepMatch[1];
+
+        // Look for switch statements or conditional rendering
+        const switchStatements = sourceFile.getDescendantsOfKind(SyntaxKind.SwitchStatement);
+        for (const switchStmt of switchStatements) {
+          const expression = switchStmt.getExpression().getText();
+          if (expression.includes(stepVarName)) {
+            const caseBlocks = switchStmt.getClauses();
+            caseBlocks.forEach((clause, idx) => {
+              if (clause.isKind(SyntaxKind.CaseClause)) {
+                const caseExpr = clause.getExpression()?.getText() || String(idx);
+                // Try to find component name in case block
+                const jsxElements = clause.getDescendantsOfKind(SyntaxKind.JsxOpeningElement);
+                const componentName =
+                  jsxElements.length > 0 ? jsxElements[0].getTagNameNode().getText() : undefined;
+
+                steps.push({
+                  id: caseExpr.replace(/['"]/g, ''),
+                  name: `Step ${caseExpr.replace(/['"]/g, '')}`,
+                  component: componentName,
+                });
+              }
+            });
+          }
+        }
+
+        // Look for array of steps/components
+        const arrayLiterals = sourceFile.getDescendantsOfKind(SyntaxKind.ArrayLiteralExpression);
+        for (const arr of arrayLiterals) {
+          const parentVar = arr.getParent();
+          if (parentVar && parentVar.getText().match(/steps|pages|screens|views|components/i)) {
+            const elements = arr.getElements();
+            elements.forEach((el, idx) => {
+              const elText = el.getText();
+              // Could be component reference or object
+              if (elText.startsWith('{')) {
+                // Object literal, try to extract name/label
+                const nameMatch = elText.match(/(?:name|label|title)\s*:\s*['"]([^'"]+)['"]/);
+                const compMatch = elText.match(/(?:component|content)\s*:\s*<?\s*(\w+)/);
+                steps.push({
+                  id: idx + 1,
+                  name: nameMatch ? nameMatch[1] : `Step ${idx + 1}`,
+                  component: compMatch ? compMatch[1] : undefined,
+                });
+              } else if (/^[A-Z]/.test(elText)) {
+                // Component reference
+                steps.push({
+                  id: idx + 1,
+                  name: elText,
+                  component: elText,
+                });
+              }
+            });
+          }
+        }
+      }
+    }
+
+    // Pattern 2: Stepper/Wizard component usage
+    const jsxElements = sourceFile.getDescendantsOfKind(SyntaxKind.JsxOpeningElement);
+    for (const jsx of jsxElements) {
+      const tagName = jsx.getTagNameNode().getText();
+      if (tagName.match(/Stepper|Wizard|Steps|TabPanel|FormStep/i)) {
+        // Find Step children
+        const parent = jsx.getParent();
+        if (parent && parent.isKind(SyntaxKind.JsxElement)) {
+          const children = parent.getJsxChildren();
+          children.forEach((child, idx) => {
+            if (
+              child.isKind(SyntaxKind.JsxElement) ||
+              child.isKind(SyntaxKind.JsxSelfClosingElement)
+            ) {
+              const childTag = child.isKind(SyntaxKind.JsxElement)
+                ? child.getOpeningElement().getTagNameNode().getText()
+                : child.getTagNameNode().getText();
+
+              // Get label/title attribute
+              const attrs = child.isKind(SyntaxKind.JsxElement)
+                ? child.getOpeningElement().getAttributes()
+                : child.getAttributes();
+
+              let stepName = childTag;
+              for (const attr of attrs) {
+                if (attr.isKind(SyntaxKind.JsxAttribute)) {
+                  const name = attr.getNameNode().getText();
+                  if (name === 'label' || name === 'title' || name === 'name') {
+                    const value = attr.getInitializer()?.getText();
+                    if (value) {
+                      stepName = value.replace(/['"{}]/g, '');
+                      break;
+                    }
+                  }
+                }
+              }
+
+              steps.push({
+                id: idx + 1,
+                name: stepName,
+                component: childTag,
+              });
+            }
+          });
+        }
+      }
+    }
+
+    // Pattern 3: Conditional rendering with step variable
+    const conditionalExprs = sourceFile.getDescendantsOfKind(SyntaxKind.ConditionalExpression);
+    for (const cond of conditionalExprs) {
+      const condition = cond.getCondition().getText();
+      if (condition.match(/step\s*===?\s*\d+|currentStep|activeStep/i)) {
+        // Extract step number and components
+        const whenTrue = cond.getWhenTrue();
+        // Note: whenFalse (cond.getWhenFalse()) could be used for nested step detection
+
+        const stepNumMatch = condition.match(/===?\s*(\d+)/);
+        if (stepNumMatch && steps.length === 0) {
+          // Only add if we haven't found steps through other patterns
+          const trueJsx = whenTrue.getDescendantsOfKind(SyntaxKind.JsxOpeningElement);
+
+          if (trueJsx.length > 0) {
+            steps.push({
+              id: parseInt(stepNumMatch[1]),
+              component: trueJsx[0].getTagNameNode().getText(),
+            });
+          }
+        }
+      }
+    }
+
+    return steps;
   }
 
   private extractLinkedPages(sourceFile: SourceFile): string[] {

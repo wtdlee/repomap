@@ -130,6 +130,19 @@ export interface PageInfo {
   dataFetching: DataFetchingInfo[];
   navigation: NavigationInfo;
   linkedPages: string[];
+  /** Multi-step flow information (wizard, onboarding, etc.) */
+  steps?: StepInfo[];
+}
+
+export interface StepInfo {
+  /** Step number or identifier */
+  id: number | string;
+  /** Step name/label if available */
+  name?: string;
+  /** Component or content rendered in this step */
+  component?: string;
+  /** Condition to show this step */
+  condition?: string;
 }
 
 export interface AuthRequirement {
