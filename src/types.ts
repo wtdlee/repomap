@@ -40,7 +40,9 @@ export type AnalyzerType =
   | 'api-endpoints'
   | 'graphql-schema'
   | 'models'
-  | 'controllers';
+  | 'controllers'
+  | 'routes'
+  | 'grpc';
 
 export interface AnalysisConfig {
   include: string[];
@@ -154,7 +156,14 @@ export interface AuthRequirement {
 }
 
 export interface DataFetchingInfo {
-  type: 'useQuery' | 'useMutation' | 'useLazyQuery' | 'getServerSideProps' | 'getStaticProps' | 'component' | 'useSubscription';
+  type:
+    | 'useQuery'
+    | 'useMutation'
+    | 'useLazyQuery'
+    | 'getServerSideProps'
+    | 'getStaticProps'
+    | 'component'
+    | 'useSubscription';
   operationName: string;
   variables?: string[];
   source?: string; // Source component or hook name

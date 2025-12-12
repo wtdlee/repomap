@@ -12,6 +12,9 @@ import type {
 } from '../types.js';
 import { DocGeneratorEngine } from '../core/engine.js';
 import { PageMapGenerator } from '../generators/page-map-generator.js';
+import { RailsMapGenerator } from '../generators/rails-map-generator.js';
+import { detectEnvironments, type EnvironmentDetectionResult } from '../utils/env-detector.js';
+import { analyzeRailsApp, type RailsAnalysisResult } from '../analyzers/rails/index.js';
 
 export interface DocServerOptions {
   noCache?: boolean;
@@ -29,6 +32,8 @@ export class DocServer {
   private io: Server;
   private engine: DocGeneratorEngine;
   private currentReport: DocumentationReport | null = null;
+  private envResult: EnvironmentDetectionResult | null = null;
+  private railsAnalysis: RailsAnalysisResult | null = null;
 
   constructor(config: DocGeneratorConfig, port: number = 3030, options?: DocServerOptions) {
     this.config = config;
@@ -46,19 +51,48 @@ export class DocServer {
     // Serve static assets
     this.app.use('/assets', express.static(path.join(this.config.outputDir, 'assets')));
 
+    // Serve CSS files from generators/assets
+    const cssFiles = ['common.css', 'page-map.css', 'docs.css', 'rails-map.css'];
+    cssFiles.forEach((file) => {
+      this.app.get(`/${file}`, async (req, res) => {
+        try {
+          const cssPath = new URL(`../generators/assets/${file}`, import.meta.url);
+          const css = await fs.readFile(cssPath, 'utf-8');
+          res.type('text/css').send(css);
+        } catch {
+          res.status(404).send('CSS not found');
+        }
+      });
+    });
+
     // Main page - redirect to page-map
     this.app.get('/', (req, res) => {
       res.redirect('/page-map');
     });
 
-    // Interactive page map (main view)
+    // Interactive page map (main view) - now with environment awareness
     this.app.get('/page-map', (req, res) => {
       if (!this.currentReport) {
         res.status(503).send('Documentation not ready yet');
         return;
       }
       const generator = new PageMapGenerator();
-      res.send(generator.generatePageMapHtml(this.currentReport));
+      res.send(
+        generator.generatePageMapHtml(this.currentReport, {
+          envResult: this.envResult,
+          railsAnalysis: this.railsAnalysis,
+        })
+      );
+    });
+
+    // Rails map (standalone view)
+    this.app.get('/rails-map', (req, res) => {
+      if (!this.railsAnalysis) {
+        res.status(404).send('No Rails environment detected');
+        return;
+      }
+      const generator = new RailsMapGenerator();
+      res.send(generator.generateFromResult(this.railsAnalysis));
     });
 
     // Markdown pages - index
@@ -75,6 +109,20 @@ export class DocServer {
     // API endpoints
     this.app.get('/api/report', (req, res) => {
       res.json(this.currentReport);
+    });
+
+    // Environment detection result
+    this.app.get('/api/env', (req, res) => {
+      res.json(this.envResult);
+    });
+
+    // Rails analysis result
+    this.app.get('/api/rails', (req, res) => {
+      if (this.railsAnalysis) {
+        res.json(this.railsAnalysis);
+      } else {
+        res.status(404).json({ error: 'No Rails analysis available' });
+      }
     });
 
     this.app.get('/api/diagram/:name', (req, res) => {
@@ -268,580 +316,7 @@ export class DocServer {
       return null;
     };
   </script>
-  <style>
-    :root {
-      /* Header - dark theme matching /page-map */
-      --header-bg: #1e293b;
-      --header-border: #475569;
-      --header-text: #f8fafc;
-      --header-text2: #94a3b8;
-      --header-bg-hover: #334155;
-      
-      /* Content - light theme for readability */
-      --bg: #f5f5f5;
-      --bg2: #ffffff;
-      --bg3: #f1f5f9;
-      --text: #1a1a1a;
-      --text2: #666666;
-      --border: #e0e0e0;
-      --accent: #3b82f6;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-    }
-
-    .sidebar nav a {
-      display: block;
-      padding: 8px 12px;
-      color: var(--text2);
-      text-decoration: none;
-      border-radius: 6px;
-      margin-bottom: 4px;
-      transition: all 0.2s;
-    }
-
-    .sidebar nav a:hover {
-      background: var(--bg3);
-      color: var(--accent);
-    }
-
-    .sidebar nav a.active {
-      background: var(--accent);
-      color: white;
-    }
-
-    .nav-group {
-      margin-bottom: 16px;
-    }
-
-    .nav-group-title {
-      font-weight: 600;
-      font-size: 10px;
-      text-transform: uppercase;
-      color: var(--text2);
-      letter-spacing: 1px;
-      display: block;
-      padding: 8px 0 4px;
-      margin-bottom: 4px;
-    }
-
-    .nav-subitems {
-      margin-left: 0;
-      border-left: none;
-      padding-left: 0;
-    }
-
-    .nav-subitems a {
-      font-size: 12px;
-    }
-
-    .content {
-      background: var(--bg2);
-      padding: 32px;
-      border-radius: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-      overflow-x: auto;
-      max-width: 100%;
-    }
-
-    .content h1 {
-      font-size: 28px;
-      font-weight: 700;
-      margin-bottom: 20px;
-      border-bottom: 3px solid var(--accent);
-      padding-bottom: 10px;
-      letter-spacing: -0.5px;
-    }
-
-    .content h2 {
-      font-size: 20px;
-      font-weight: 600;
-      margin-top: 32px;
-      margin-bottom: 14px;
-      color: var(--text);
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .content h3 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-top: 20px;
-      margin-bottom: 10px;
-      color: var(--text);
-    }
-
-    .content h4 {
-      font-size: 14px;
-      font-weight: 600;
-      margin-top: 16px;
-      margin-bottom: 8px;
-      color: var(--text2);
-    }
-
-    .content p {
-      margin-bottom: 12px;
-      line-height: 1.6;
-    }
-
-    .content code {
-      background: #f1f5f9;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: 'SF Mono', Monaco, Consolas, monospace;
-      font-size: 13px;
-      color: #0f172a;
-      border: 1px solid #e2e8f0;
-    }
-
-    .content pre {
-      background: #0f172a;
-      color: #e2e8f0;
-      padding: 16px;
-      border-radius: 8px;
-      overflow-x: auto;
-      margin: 12px 0;
-      font-size: 13px;
-      line-height: 1.5;
-    }
-
-    .content pre code {
-      background: none;
-      padding: 0;
-      color: inherit;
-      border: none;
-      font-size: inherit;
-    }
-
-    .table-wrapper {
-      overflow-x: auto;
-      margin: 12px 0;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-    }
-
-    .content table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-
-    .content th, .content td {
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--border);
-      text-align: left;
-    }
-
-    .content td {
-      max-width: 500px;
-      vertical-align: middle;
-    }
-
-    /* Allow gql-ops-inline to wrap */
-    .gql-ops-inline {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      align-items: center;
-    }
-
-    .content th {
-      background: #f8fafc;
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text2);
-    }
-
-    .content tr:hover td {
-      background: #f8fafc;
-    }
-
-    .content blockquote {
-      border-left: 3px solid var(--accent);
-      padding: 12px 16px;
-      margin: 12px 0;
-      background: #f8fafc;
-      border-radius: 0 6px 6px 0;
-      color: var(--text2);
-      font-size: 14px;
-    }
-
-    .content ul, .content ol {
-      margin: 10px 0;
-      padding-left: 20px;
-    }
-
-    .content li {
-      margin-bottom: 6px;
-      line-height: 1.5;
-    }
-
-    .content a {
-      color: var(--accent);
-      text-decoration: none;
-    }
-
-    .content a:hover {
-      text-decoration: underline;
-    }
-
-    .content hr {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 16px 0;
-    }
-
-    /* Tag styles */
-    .content code:first-child {
-      font-weight: 500;
-    }
-
-    /* Clickable operation names */
-    .gql-op {
-      cursor: pointer;
-      padding: 2px 8px;
-      background: #dbeafe;
-      border-radius: 4px;
-      border: 1px solid #93c5fd;
-      color: #1d4ed8;
-      font-weight: 500;
-      transition: all 0.15s;
-      display: inline-block;
-      margin: 2px;
-    }
-
-    .gql-op:hover {
-      background: #bfdbfe;
-      border-color: #60a5fa;
-    }
-
-    .gql-op.mutation {
-      background: #fce7f3;
-      border-color: #f9a8d4;
-      color: #be185d;
-    }
-
-    .gql-op.mutation:hover {
-      background: #fbcfe8;
-      border-color: #f472b6;
-    }
-
-    /* Component references */
-    .gql-ref {
-      cursor: pointer;
-      padding: 2px 8px;
-      background: #f0fdf4;
-      border-radius: 4px;
-      border: 1px solid #86efac;
-      color: #166534;
-      font-weight: 500;
-      transition: all 0.15s;
-      display: inline-block;
-      margin: 2px;
-    }
-
-    .gql-ref:hover {
-      background: #dcfce7;
-      border-color: #4ade80;
-    }
-
-    .gql-ref.mutation {
-      background: #fef3c7;
-      border-color: #fcd34d;
-      color: #92400e;
-    }
-
-    /* More button */
-    .gql-more {
-      cursor: pointer;
-      padding: 2px 8px;
-      background: #e2e8f0;
-      border-radius: 4px;
-      border: 1px solid #cbd5e1;
-      color: #475569;
-      font-weight: 500;
-      transition: all 0.15s;
-      display: inline-block;
-      margin: 2px;
-    }
-
-    .gql-more:hover {
-      background: #cbd5e1;
-    }
-
-    .gql-more.mutation {
-      background: #fce7f3;
-      border-color: #f9a8d4;
-      color: #be185d;
-    }
-
-    /* Ops list container */
-    .gql-ops-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      margin: 8px 0;
-    }
-
-    .mermaid-container {
-      position: relative;
-      background: var(--bg-secondary);
-      border-radius: 8px;
-      margin: 16px 0;
-      overflow: hidden;
-    }
-
-    .mermaid-controls {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      display: flex;
-      gap: 4px;
-      z-index: 10;
-    }
-
-    .mermaid-controls button {
-      background: #ffffff;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 6px 10px;
-      cursor: pointer;
-      font-size: 14px;
-      transition: all 0.2s;
-      color: #1a1a1a;
-    }
-
-    .mermaid-controls button:hover {
-      background: var(--accent);
-      color: white;
-    }
-
-    .mermaid-wrapper {
-      overflow: hidden;
-      padding: 24px;
-      min-height: 200px;
-      max-height: none; /* Removed height limit for better viewing */
-      cursor: grab;
-      position: relative;
-    }
-
-    .mermaid-wrapper.dragging {
-      cursor: grabbing;
-    }
-
-    .mermaid-inner {
-      transform-origin: 0 0;
-      transition: none;
-      display: inline-block;
-    }
-
-    .mermaid {
-      display: inline-block;
-    }
-
-    .mermaid .node rect, .mermaid .node circle, .mermaid .node ellipse, .mermaid .node polygon {
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .mermaid .node:hover rect, .mermaid .node:hover circle {
-      filter: brightness(1.1);
-      stroke-width: 3px;
-    }
-
-    /* Detail modal */
-    .detail-modal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0,0,0,0.5);
-      z-index: 1000;
-      justify-content: center;
-      align-items: center;
-    }
-
-    .detail-modal.open {
-      display: flex;
-    }
-
-    .detail-modal-content {
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 24px;
-      max-width: 600px;
-      width: 90%;
-      max-height: 80vh;
-      overflow-y: auto;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-      color: #1a1a1a;
-    }
-
-    .detail-modal-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .detail-modal-close {
-      background: none;
-      border: none;
-      font-size: 24px;
-      cursor: pointer;
-      color: var(--text-secondary);
-    }
-
-    .detail-section {
-      margin-bottom: 16px;
-    }
-
-    .detail-section h4 {
-      font-size: 12px;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-      margin-bottom: 6px;
-    }
-
-    .detail-section p {
-      margin: 0;
-      padding: 8px 12px;
-      background: var(--bg-secondary);
-      border-radius: 4px;
-      font-family: 'SF Mono', Monaco, monospace;
-      font-size: 13px;
-    }
-
-    .detail-badge {
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 500;
-      margin-right: 6px;
-    }
-
-    .detail-badge.query { background: #dbeafe; color: #1d4ed8; }
-    .detail-badge.mutation { background: #fce7f3; color: #be185d; }
-    .detail-badge.context { background: #d1fae5; color: #047857; }
-    .detail-badge.fragment { background: #e0e7ff; color: #4338ca; }
-    .detail-badge.component { background: #f0fdf4; color: #166534; }
-    .detail-badge.operation { background: #f1f5f9; color: #475569; }
-
-    .live-indicator {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: #22c55e;
-      color: white;
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .live-indicator::before {
-      content: '';
-      width: 8px;
-      height: 8px;
-      background: white;
-      border-radius: 50%;
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    .regenerate-btn {
-      background: var(--accent);
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      margin-top: 24px;
-    }
-
-    .regenerate-btn:hover {
-      background: #0052a3;
-    }
-    
-    /* Header - matching /page-map exactly */
-    .header {
-      background: var(--header-bg);
-      padding: 0 20px;
-      height: 54px;
-      border-bottom: 1px solid var(--header-border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      position: sticky;
-      top: 0;
-      z-index: 200;
-      line-height: 1;
-    }
-    .header h1 { 
-      font-size: 18px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      color: var(--header-text);
-    }
-    .nav-link {
-      padding: 6px 12px;
-      height: 28px;
-      display: inline-flex;
-      align-items: center;
-      color: var(--header-text2);
-      text-decoration: none;
-      font-size: 13px;
-      border-radius: 4px;
-      transition: all 0.15s;
-    }
-    .nav-link:hover { background: var(--header-bg-hover); color: var(--header-text); }
-    .nav-link.active { background: var(--accent); color: white; }
-    
-    /* Layout - matching /page-map exactly */
-    .main {
-      display: flex;
-      height: calc(100vh - 54px);
-    }
-    
-    .sidebar {
-      width: 280px;
-      background: var(--bg2);
-      border-right: 1px solid var(--border);
-      padding: 16px;
-      overflow-y: auto;
-    }
-    
-    .content-area {
-      flex: 1;
-      padding: 32px;
-      overflow-y: auto;
-    }
-  </style>
+  <link rel="stylesheet" href="/docs.css">
 </head>
 <body>
   <header class="header">
@@ -849,6 +324,7 @@ export class DocServer {
       <h1 style="cursor:pointer" onclick="location.href='/'">📊 ${this.config.repositories[0]?.displayName || this.config.repositories[0]?.name || 'Repository'}</h1>
       <nav style="display:flex;gap:4px">
         <a href="/page-map" class="nav-link">Page Map</a>
+        ${this.railsAnalysis ? '<a href="/rails-map" class="nav-link">Rails Map</a>' : ''}
         <a href="/docs" class="nav-link active">Docs</a>
         <a href="/api/report" class="nav-link" target="_blank">API</a>
       </nav>
@@ -889,7 +365,7 @@ export class DocServer {
     </div>
   </div>
   <div class="live-indicator">Live</div>
-  
+
   <!-- Detail Modal -->
   <div class="detail-modal" id="detailModal">
     <div class="detail-modal-content">
@@ -906,16 +382,16 @@ export class DocServer {
 
   <script>
     // Initialize Mermaid
-    mermaid.initialize({ 
-      startOnLoad: false, 
+    mermaid.initialize({
+      startOnLoad: false,
       theme: 'neutral',
       securityLevel: 'loose',
       flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }
     });
-    
+
     // Diagram state per diagram
     const diagramStates = new Map();
-    
+
     // Render all mermaid diagrams on page load
     document.addEventListener('DOMContentLoaded', async () => {
       // Wrap mermaid divs with container and controls
@@ -937,14 +413,14 @@ export class DocServer {
         container.querySelector('.mermaid-inner').appendChild(el);
         el.dataset.idx = idx;
         diagramStates.set(idx, { zoom: 1, panX: 0, panY: 0 });
-        
+
         // Setup drag handlers
         setupDragHandlers(idx);
       });
 
       try {
         await mermaid.run({ querySelector: '.mermaid' });
-        
+
         // Add click handlers to nodes
         document.querySelectorAll('.mermaid .node').forEach(node => {
           node.addEventListener('click', (e) => {
@@ -1012,7 +488,7 @@ export class DocServer {
     function zoomDiagram(idx, factor) {
       const state = diagramStates.get(idx);
       if (!state) return;
-      
+
       if (factor === 'reset') {
         state.zoom = 1;
         state.panX = 0;
@@ -1164,7 +640,7 @@ export class DocServer {
       updateBackButton();
       modal.classList.add('open');
     }
-    
+
     function formatGqlFields(fields, indent) {
       if (!fields?.length) return '';
       const lines = [];
@@ -1183,7 +659,7 @@ export class DocServer {
 
     function parseNodeInfo(text) {
       const info = { type: 'unknown', name: text };
-      
+
       // Detect type from text patterns
       if (text.includes('Query') || text.includes('QUERY') || text.toLowerCase().includes('usequery')) {
         info.type = 'query';
@@ -1197,13 +673,13 @@ export class DocServer {
       } else if (text.includes('Fragment') || text.includes('FRAGMENT')) {
         info.type = 'fragment';
       }
-      
+
       // Extract name from common patterns
       const nameMatch = text.match(/^([A-Z][a-zA-Z]+)/);
       if (nameMatch) {
         info.name = nameMatch[1];
       }
-      
+
       return info;
     }
 
@@ -1694,10 +1170,10 @@ export class DocServer {
         const btn = document.querySelector('.regenerate-btn');
         btn.textContent = '⏳ 生成中...';
         btn.disabled = true;
-        
+
         const res = await fetch('/api/regenerate', { method: 'POST' });
         const data = await res.json();
-        
+
         if (data.success) {
           window.location.reload();
         } else {
@@ -1717,13 +1193,41 @@ export class DocServer {
   }
 
   async start(openBrowser: boolean = true): Promise<void> {
-    // Generate initial documentation
-    console.log('Generating initial documentation...');
+    // Detect environments first
+    const rootPath = this.config.repositories[0]?.path || process.cwd();
+    console.log('🔍 Detecting project environments...');
+    this.envResult = await detectEnvironments(rootPath);
+
+    if (this.envResult.environments.length > 0) {
+      console.log(`   Found: ${this.envResult.environments.map((e) => e.type).join(', ')}`);
+      for (const env of this.envResult.environments) {
+        if (env.features.length > 0) {
+          console.log(`   ${env.type} features: ${env.features.join(', ')}`);
+        }
+      }
+    }
+
+    // Generate initial documentation for frontend
+    console.log('\n📚 Generating documentation...');
     this.currentReport = await this.engine.generate();
+
+    // If Rails is detected, also analyze Rails
+    if (this.envResult.hasRails) {
+      console.log('\n🛤️  Analyzing Rails application...');
+      try {
+        this.railsAnalysis = await analyzeRailsApp(rootPath);
+        console.log(`   ✅ Rails analysis complete`);
+      } catch (error) {
+        console.error(`   ⚠️ Rails analysis failed:`, (error as Error).message);
+      }
+    }
 
     // Start server
     this.server.listen(this.port, () => {
       console.log(`\n🌐 Documentation server running at http://localhost:${this.port}`);
+      if (this.envResult?.hasRails && this.envResult?.hasNextjs) {
+        console.log('   📊 Multiple environments detected - use tabs to switch views');
+      }
       console.log('   Press Ctrl+C to stop\n');
     });
 
@@ -1742,6 +1246,17 @@ export class DocServer {
   private async regenerate(): Promise<void> {
     console.log('\n🔄 Regenerating documentation...');
     this.currentReport = await this.engine.generate();
+
+    // Re-analyze Rails if detected
+    if (this.envResult?.hasRails) {
+      const rootPath = this.config.repositories[0]?.path || process.cwd();
+      try {
+        this.railsAnalysis = await analyzeRailsApp(rootPath);
+      } catch (error) {
+        console.error(`⚠️ Rails re-analysis failed:`, (error as Error).message);
+      }
+    }
+
     this.io.emit('reload');
     console.log('✅ Documentation regenerated');
   }

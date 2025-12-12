@@ -3,11 +3,14 @@
  * web-tree-sitterを使用したRubyパーサー
  */
 
-import { Parser, Language } from 'web-tree-sitter';
-import type { SyntaxNode, Tree } from 'web-tree-sitter';
+import { Parser, Node, Tree, Language } from 'web-tree-sitter';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
+
+// Re-export types for compatibility
+export type SyntaxNode = Node;
+export { Tree };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,7 +33,7 @@ export async function initRubyParser(): Promise<Parser> {
   }
 
   parser = new Parser();
-  
+
   // Find WASM file - try multiple locations
   const possiblePaths = [
     // When running from source
@@ -54,7 +57,7 @@ export async function initRubyParser(): Promise<Parser> {
 
   rubyLanguage = await Language.load(wasmPath);
   parser.setLanguage(rubyLanguage);
-  
+
   return parser;
 }
 
@@ -63,7 +66,11 @@ export async function initRubyParser(): Promise<Parser> {
  */
 export async function parseRuby(code: string): Promise<Tree> {
   const p = await initRubyParser();
-  return p.parse(code);
+  const tree = p.parse(code);
+  if (!tree) {
+    throw new Error('Failed to parse Ruby code');
+  }
+  return tree;
 }
 
 /**
@@ -79,18 +86,18 @@ export async function parseRubyFile(filePath: string): Promise<Tree> {
  */
 export function findNodes(node: SyntaxNode, type: string): SyntaxNode[] {
   const results: SyntaxNode[] = [];
-  
+
   if (node.type === type) {
     results.push(node);
   }
-  
+
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
     if (child) {
       results.push(...findNodes(child, type));
     }
   }
-  
+
   return results;
 }
 
@@ -99,18 +106,18 @@ export function findNodes(node: SyntaxNode, type: string): SyntaxNode[] {
  */
 export function findNodesByTypes(node: SyntaxNode, types: string[]): SyntaxNode[] {
   const results: SyntaxNode[] = [];
-  
+
   if (types.includes(node.type)) {
     results.push(node);
   }
-  
+
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
     if (child) {
       results.push(...findNodesByTypes(child, types));
     }
   }
-  
+
   return results;
 }
 
@@ -155,7 +162,7 @@ export function getChildrenByType(node: SyntaxNode, type: string): SyntaxNode[] 
 export function getCallArguments(callNode: SyntaxNode): SyntaxNode[] {
   const args = callNode.childForFieldName('arguments');
   if (!args) return [];
-  
+
   const results: SyntaxNode[] = [];
   for (let i = 0; i < args.childCount; i++) {
     const child = args.child(i);
@@ -194,10 +201,11 @@ export function getClassName(classNode: SyntaxNode): string | null {
 export function getSuperclass(classNode: SyntaxNode): string | null {
   const superclassNode = classNode.childForFieldName('superclass');
   if (!superclassNode) return null;
-  
+
   // superclass node contains "< ClassName", extract just the class name
-  const constantNode = getChildByType(superclassNode, 'constant') || 
-                       getChildByType(superclassNode, 'scope_resolution');
+  const constantNode =
+    getChildByType(superclassNode, 'constant') ||
+    getChildByType(superclassNode, 'scope_resolution');
   return constantNode ? constantNode.text : null;
 }
 
@@ -215,12 +223,17 @@ export function getMethodName(methodNode: SyntaxNode): string | null {
 export function getMethodParameters(methodNode: SyntaxNode): string[] {
   const paramsNode = methodNode.childForFieldName('parameters');
   if (!paramsNode) return [];
-  
+
   const params: string[] = [];
   for (let i = 0; i < paramsNode.childCount; i++) {
     const child = paramsNode.child(i);
-    if (child && (child.type === 'identifier' || child.type === 'keyword_parameter' || 
-                  child.type === 'optional_parameter' || child.type === 'splat_parameter')) {
+    if (
+      child &&
+      (child.type === 'identifier' ||
+        child.type === 'keyword_parameter' ||
+        child.type === 'optional_parameter' ||
+        child.type === 'splat_parameter')
+    ) {
       // Extract the parameter name
       const nameNode = child.childForFieldName('name') || child;
       if (nameNode.type === 'identifier') {
@@ -232,7 +245,3 @@ export function getMethodParameters(methodNode: SyntaxNode): string[] {
   }
   return params;
 }
-
-// Export types
-export type { SyntaxNode, Tree };
-

@@ -1,6 +1,7 @@
 import { Project, SourceFile, SyntaxKind, Node } from 'ts-morph';
 import fg from 'fast-glob';
 import * as path from 'path';
+import * as fs from 'fs';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
 import type {
@@ -150,25 +151,8 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Analyze _app.tsx for global providers/context
     await this.analyzeAppFile();
 
-    const pagesDir = this.getSetting('pagesDir', 'src/pages');
-    const pagesPath = this.resolvePath(pagesDir);
-
-    // Find all page files
-    const pageFiles = await fg(['**/*.tsx', '**/*.ts'], {
-      cwd: pagesPath,
-      ignore: [
-        // Next.js special files (not actual pages)
-        '_app.tsx',
-        '_app.ts',
-        '_document.tsx',
-        '_document.ts',
-        '_error.tsx',
-        '_error.ts',
-        // API routes
-        'api/**',
-      ],
-      absolute: true,
-    });
+    // Find page files from multiple possible locations
+    const pageFiles = await this.findPageFiles();
 
     this.log(`Found ${pageFiles.length} page files`);
 
@@ -185,6 +169,8 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const pages = await parallelMapSafe(
       pageFiles,
       async (filePath) => {
+        // Determine the correct pagesPath based on the file location
+        const pagesPath = this.detectPagesRoot(filePath);
         return this.analyzePageFile(filePath, pagesPath);
       },
       4 // Limit concurrency for ts-morph stability
@@ -233,6 +219,33 @@ export class PagesAnalyzer extends BaseAnalyzer {
       linkedPages,
       steps: steps.length > 0 ? steps : undefined,
     };
+  }
+
+  /**
+   * Detect the pages root directory from a file path
+   * e.g., /project/src/pages/users/index.tsx -> /project/src/pages
+   */
+  private detectPagesRoot(filePath: string): string {
+    // Common pages directory patterns to look for (exclude components/pages - those are reusable components)
+    const pagesPatterns = [
+      '/src/pages/',
+      '/pages/',
+      '/src/app/',
+      '/app/',
+      '/frontend/src/pages/',
+      '/app/javascript/pages/',
+    ];
+
+    for (const pattern of pagesPatterns) {
+      const idx = filePath.indexOf(pattern);
+      if (idx !== -1) {
+        // Return the path up to and including the pages directory
+        return filePath.substring(0, idx + pattern.length - 1);
+      }
+    }
+
+    // Fallback: use basePath
+    return this.basePath;
   }
 
   private filePathToRoutePath(filePath: string): string {
@@ -801,8 +814,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
       visited.add(cacheKey);
 
       // Check cache
-      if (this.symbolTraceCache.has(cacheKey)) {
-        return this.symbolTraceCache.get(cacheKey)!;
+      const cachedResult = this.symbolTraceCache.get(cacheKey);
+      if (cachedResult !== undefined) {
+        return cachedResult;
       }
 
       // Try different file extensions and index files
@@ -1050,8 +1064,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
       visited.add(cacheKey);
 
       // Check cache
-      if (this.symbolTraceCache.has(cacheKey)) {
-        return this.symbolTraceCache.get(cacheKey)!;
+      const cachedHookResult = this.symbolTraceCache.get(cacheKey);
+      if (cachedHookResult !== undefined) {
+        return cachedHookResult;
       }
 
       const possiblePaths = [
@@ -1210,6 +1225,133 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   // Global context providers and their GraphQL queries
   private globalContextQueries: DataFetchingInfo[] = [];
+
+  /**
+   * Find page files from multiple possible locations
+   * Next.js, React, Rails+React 구조 모두 지원
+   */
+  private async findPageFiles(): Promise<string[]> {
+    const pagesDir = this.getSetting('pagesDir', 'src/pages');
+    const allFiles: string[] = [];
+
+    // 1. Check Next.js standard directories (deduplicate)
+    const nextjsDirsSet = new Set([pagesDir, 'pages', 'src/pages', 'app', 'src/app']);
+    const nextjsDirs = [...nextjsDirsSet];
+
+    for (const dir of nextjsDirs) {
+      // Skip Rails 'app' directory (contains controllers, models, views - not React pages)
+      if (dir === 'app' || dir === 'src/app') {
+        const railsIndicators = ['controllers', 'models', 'views', 'helpers'];
+        const dirPath = this.resolvePath(dir);
+        const hasRailsStructure = railsIndicators.some((subdir) => {
+          try {
+            return fs.existsSync(path.join(dirPath, subdir));
+          } catch {
+            return false;
+          }
+        });
+        if (hasRailsStructure) {
+          continue; // Skip Rails app directory
+        }
+      }
+
+      const dirPath = this.resolvePath(dir);
+      try {
+        const files = await fg(['**/*.tsx', '**/*.ts', '**/*.jsx', '**/*.js'], {
+          cwd: dirPath,
+          ignore: [
+            '_app.tsx',
+            '_app.ts',
+            '_app.jsx',
+            '_app.js',
+            '_document.tsx',
+            '_document.ts',
+            '_document.jsx',
+            '_document.js',
+            '_error.tsx',
+            '_error.ts',
+            '_error.jsx',
+            '_error.js',
+            'api/**',
+            '**/*.test.*',
+            '**/*.spec.*',
+            '**/node_modules/**',
+            '**/components/pages/**', // Reusable page components, not routes
+          ],
+          absolute: true,
+        });
+        allFiles.push(...files);
+        if (files.length > 0) {
+          this.log(`Found ${files.length} pages in ${dir}`);
+        }
+      } catch {
+        // Directory doesn't exist
+      }
+    }
+
+    // 2. Check Rails + React structures (exclude components/pages - those are reusable components, not routes)
+    const railsReactDirs = ['frontend/src/**/pages', 'app/javascript/**/pages'];
+
+    for (const pattern of railsReactDirs) {
+      try {
+        const files = await fg(
+          [
+            `${pattern}/**/*.tsx`,
+            `${pattern}/**/*.ts`,
+            `${pattern}/**/*.jsx`,
+            `${pattern}/**/*.js`,
+          ],
+          {
+            cwd: this.basePath,
+            ignore: [
+              '**/*.test.*',
+              '**/*.spec.*',
+              '**/node_modules/**',
+              '**/vendor/**',
+              '**/components/pages/**', // Exclude reusable page components (not actual routes)
+              '**/stories/**', // Exclude storybook files
+            ],
+            absolute: true,
+          }
+        );
+        allFiles.push(...files);
+        if (files.length > 0) {
+          this.log(`Found ${files.length} React pages in ${pattern}`);
+        }
+      } catch {
+        // Pattern doesn't match
+      }
+    }
+
+    // 3. Check for entry point files (Rails with Webpacker/Shakapacker)
+    const entryPatterns = [
+      'frontend/src/**/index.tsx',
+      'frontend/src/**/App.tsx',
+      'app/javascript/packs/*.tsx',
+      'app/javascript/packs/*.jsx',
+    ];
+
+    for (const pattern of entryPatterns) {
+      try {
+        const files = await fg([pattern], {
+          cwd: this.basePath,
+          ignore: ['**/node_modules/**', '**/vendor/**'],
+          absolute: true,
+        });
+        // Don't add duplicates
+        for (const file of files) {
+          if (!allFiles.includes(file)) {
+            allFiles.push(file);
+          }
+        }
+      } catch {
+        // Pattern doesn't match
+      }
+    }
+
+    // Remove duplicates
+    return [...new Set(allFiles)];
+  }
 
   /**
    * Analyze _app.tsx for global providers that use GraphQL
@@ -1382,14 +1524,16 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     // Direct lookup
-    if (this.codegenMap.has(documentName)) {
-      return this.codegenMap.get(documentName)!;
+    const directResult = this.codegenMap.get(documentName);
+    if (directResult !== undefined) {
+      return directResult;
     }
 
     // Try with Document suffix
     const withSuffix = documentName.endsWith('Document') ? documentName : documentName + 'Document';
-    if (this.codegenMap.has(withSuffix)) {
-      return this.codegenMap.get(withSuffix)!;
+    const suffixResult = this.codegenMap.get(withSuffix);
+    if (suffixResult !== undefined) {
+      return suffixResult;
     }
 
     return null;

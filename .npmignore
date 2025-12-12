@@ -3,19 +3,23 @@ src/
 
 # Config files
 tsconfig.json
+eslint.config.js
 .eslintrc*
 .prettierrc*
+.prettierignore
 vitest.config.*
 
 # Test files
 **/*.test.ts
 **/*.spec.ts
+test-full.ts
 coverage/
 
 # Dev files
 .vscode/
 .idea/
 .github/
+.husky/
 
 # Generated during dev
 .repomap/
@@ -24,3 +28,4 @@ generated-docs/
 # Misc
 *.log
 .DS_Store
+pnpm-lock.yaml

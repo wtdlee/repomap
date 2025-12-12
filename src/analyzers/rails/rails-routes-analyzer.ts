@@ -8,7 +8,6 @@ import * as path from 'path';
 import {
   parseRubyFile,
   findNodes,
-  getChildText,
   getChildByType,
   getChildrenByType,
   getCallArguments,
@@ -158,7 +157,7 @@ export class RailsRoutesAnalyzer {
 
     // First argument is the path
     const pathArg = args[0];
-    let routePath = this.extractStringValue(pathArg);
+    const routePath = this.extractStringValue(pathArg);
     if (!routePath) return;
 
     // Find controller#action from 'to:' option or second argument
@@ -224,7 +223,7 @@ export class RailsRoutesAnalyzer {
 
     // First argument is the resource name (symbol)
     const nameArg = args[0];
-    let resourceName = nameArg.text.replace(/^:/, '');
+    const resourceName = nameArg.text.replace(/^:/, '');
 
     const resource: ResourceInfo = {
       name: resourceName,
@@ -326,7 +325,7 @@ export class RailsRoutesAnalyzer {
   private async parseNamespace(
     call: SyntaxNode,
     currentNamespaces: string[],
-    currentFile: string
+    _currentFile: string
   ): Promise<void> {
     const args = getCallArguments(call);
     if (args.length === 0) return;
@@ -545,7 +544,9 @@ export class RailsRoutesAnalyzer {
 
     const actions =
       resource.only ||
-      (resource.except ? allActions.filter((a) => !resource.except!.includes(a)) : allActions);
+      (resource.except
+        ? allActions.filter((a) => !(resource.except as string[]).includes(a))
+        : allActions);
 
     const restfulRoutes: Array<{ method: RailsRoute['method']; path: string; action: string }> = [];
 

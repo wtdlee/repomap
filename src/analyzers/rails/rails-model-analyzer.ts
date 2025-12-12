@@ -6,14 +6,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { glob } from 'glob';
-import { 
-  parseRubyFile, 
-  findNodes, 
+import {
+  parseRubyFile,
+  findNodes,
   getClassName,
   getSuperclass,
-  getChildByType,
   getChildrenByType,
-  type SyntaxNode 
+  type SyntaxNode,
 } from './ruby-parser.js';
 
 export interface ModelInfo {
@@ -126,28 +125,22 @@ export class RailsModelAnalyzer {
       }
     }
 
-    const concerns = [...new Set(
-      this.models.flatMap(m => m.concerns)
-    )];
+    const concerns = [...new Set(this.models.flatMap((m) => m.concerns))];
 
-    const namespaces = [...new Set(
-      this.models
-        .map(m => {
-          const parts = m.filePath.split('/');
-          return parts.length > 1 ? parts.slice(0, -1).join('/') : null;
-        })
-        .filter((n): n is string => n !== null)
-    )];
+    const namespaces = [
+      ...new Set(
+        this.models
+          .map((m) => {
+            const parts = m.filePath.split('/');
+            return parts.length > 1 ? parts.slice(0, -1).join('/') : null;
+          })
+          .filter((n): n is string => n !== null)
+      ),
+    ];
 
-    const totalAssociations = this.models.reduce(
-      (sum, m) => sum + m.associations.length, 
-      0
-    );
+    const totalAssociations = this.models.reduce((sum, m) => sum + m.associations.length, 0);
 
-    const totalValidations = this.models.reduce(
-      (sum, m) => sum + m.validations.length, 
-      0
-    );
+    const totalValidations = this.models.reduce((sum, m) => sum + m.validations.length, 0);
 
     return {
       models: this.models,
@@ -200,44 +193,49 @@ export class RailsModelAnalyzer {
 
     // Find all method calls for associations, validations, etc.
     const calls = findNodes(classNode, 'call');
-    
+
     for (const call of calls) {
       const methodNode = call.childForFieldName('method');
       if (!methodNode) continue;
-      
+
       const methodName = methodNode.text;
       const line = call.startPosition.row + 1;
 
       // Associations
       if (['belongs_to', 'has_one', 'has_many', 'has_and_belongs_to_many'].includes(methodName)) {
-        this.parseAssociation(call, methodName as AssociationInfo['type'], model.associations, line);
+        this.parseAssociation(
+          call,
+          methodName as AssociationInfo['type'],
+          model.associations,
+          line
+        );
       }
-      
+
       // Validations
       else if (methodName.startsWith('validates') || methodName === 'validate') {
         this.parseValidation(call, methodName, model.validations, line);
       }
-      
+
       // Callbacks
       else if (this.isCallback(methodName)) {
         this.parseCallback(call, methodName, model.callbacks, line);
       }
-      
+
       // Scopes
       else if (methodName === 'scope') {
         this.parseScope(call, model.scopes, line);
       }
-      
+
       // Concerns
       else if (methodName === 'include') {
         this.parseInclude(call, model.concerns);
       }
-      
+
       // Enums
       else if (methodName === 'enum') {
         this.parseEnum(call, model.enums, line);
       }
-      
+
       // Attributes
       else if (methodName === 'attribute') {
         this.parseAttribute(call, model.attributes, line);
@@ -247,7 +245,7 @@ export class RailsModelAnalyzer {
     // Count methods
     const methods = findNodes(classNode, 'method');
     const singletonMethods = findNodes(classNode, 'singleton_method');
-    
+
     model.instanceMethodsCount = methods.length;
     model.classMethodsCount = singletonMethods.length;
 
@@ -255,17 +253,13 @@ export class RailsModelAnalyzer {
   }
 
   private isActiveRecordModel(parentClass: string): boolean {
-    const arBases = [
-      'ApplicationRecord',
-      'ActiveRecord::Base',
-      'ActiveRecord',
-    ];
-    return arBases.some(base => parentClass.includes(base));
+    const arBases = ['ApplicationRecord', 'ActiveRecord::Base', 'ActiveRecord'];
+    return arBases.some((base) => parentClass.includes(base));
   }
 
   private parseTableName(classNode: SyntaxNode): string | undefined {
     const calls = findNodes(classNode, 'call');
-    
+
     for (const call of calls) {
       const methodNode = call.childForFieldName('method');
       if (methodNode?.text === 'table_name=') {
@@ -276,7 +270,7 @@ export class RailsModelAnalyzer {
       }
     }
 
-    // Also check for self.table_name = 
+    // Also check for self.table_name =
     const assignments = findNodes(classNode, 'assignment');
     for (const assignment of assignments) {
       const left = assignment.child(0);
@@ -292,9 +286,9 @@ export class RailsModelAnalyzer {
   }
 
   private parseAssociation(
-    call: SyntaxNode, 
-    type: AssociationInfo['type'], 
-    associations: AssociationInfo[], 
+    call: SyntaxNode,
+    type: AssociationInfo['type'],
+    associations: AssociationInfo[],
     line: number
   ): void {
     const args = this.getCallArguments(call);
@@ -316,7 +310,7 @@ export class RailsModelAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (!key || !value) continue;
 
           switch (key) {
@@ -347,9 +341,9 @@ export class RailsModelAnalyzer {
   }
 
   private parseValidation(
-    call: SyntaxNode, 
-    methodName: string, 
-    validations: ValidationInfo[], 
+    call: SyntaxNode,
+    methodName: string,
+    validations: ValidationInfo[],
     line: number
   ): void {
     const args = this.getCallArguments(call);
@@ -368,11 +362,22 @@ export class RailsModelAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key && value) {
             // Validation type is usually the key (presence, uniqueness, etc.)
-            if (['presence', 'uniqueness', 'numericality', 'length', 'format', 
-                 'inclusion', 'exclusion', 'acceptance', 'confirmation'].includes(key)) {
+            if (
+              [
+                'presence',
+                'uniqueness',
+                'numericality',
+                'length',
+                'format',
+                'inclusion',
+                'exclusion',
+                'acceptance',
+                'confirmation',
+              ].includes(key)
+            ) {
               validationType = key;
               options[key] = value.text;
             } else {
@@ -395,21 +400,33 @@ export class RailsModelAnalyzer {
 
   private isCallback(methodName: string): boolean {
     const callbacks = [
-      'before_validation', 'after_validation',
-      'before_save', 'around_save', 'after_save',
-      'before_create', 'around_create', 'after_create',
-      'before_update', 'around_update', 'after_update',
-      'before_destroy', 'around_destroy', 'after_destroy',
-      'after_commit', 'after_rollback',
-      'after_initialize', 'after_find', 'after_touch',
+      'before_validation',
+      'after_validation',
+      'before_save',
+      'around_save',
+      'after_save',
+      'before_create',
+      'around_create',
+      'after_create',
+      'before_update',
+      'around_update',
+      'after_update',
+      'before_destroy',
+      'around_destroy',
+      'after_destroy',
+      'after_commit',
+      'after_rollback',
+      'after_initialize',
+      'after_find',
+      'after_touch',
     ];
     return callbacks.includes(methodName);
   }
 
   private parseCallback(
-    call: SyntaxNode, 
-    type: string, 
-    callbacks: CallbackInfo[], 
+    call: SyntaxNode,
+    type: string,
+    callbacks: CallbackInfo[],
     line: number
   ): void {
     const args = this.getCallArguments(call);
@@ -431,7 +448,7 @@ export class RailsModelAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key && value && ['if', 'unless'].includes(key)) {
             callback.conditions = `${key}: ${value.text}`;
           }
@@ -449,8 +466,7 @@ export class RailsModelAnalyzer {
     const nameArg = args[0];
     const scopeName = nameArg.text.replace(/^:/, '');
 
-    const isLambda = args.length > 1 && 
-      (args[1].type === 'lambda' || args[1].text.includes('->'));
+    const isLambda = args.length > 1 && (args[1].type === 'lambda' || args[1].text.includes('->'));
 
     scopes.push({
       name: scopeName,
@@ -480,7 +496,7 @@ export class RailsModelAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key && value && value.type === 'hash') {
             const enumValues: string[] = [];
             const valuePairs = getChildrenByType(value, 'pair');
@@ -488,7 +504,7 @@ export class RailsModelAnalyzer {
               const vKey = vp.child(0)?.text?.replace(/^:/, '');
               if (vKey) enumValues.push(vKey);
             }
-            
+
             enums.push({
               name: key,
               values: enumValues,
@@ -503,7 +519,7 @@ export class RailsModelAnalyzer {
                 enumValues.push(child.text.replace(/^:/, ''));
               }
             }
-            
+
             enums.push({
               name: key,
               values: enumValues,
@@ -539,7 +555,7 @@ export class RailsModelAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key === 'default' && value) {
             attr.default = value.text;
           }
@@ -557,15 +573,17 @@ export class RailsModelAnalyzer {
       for (let i = 0; i < call.childCount; i++) {
         const child = call.child(i);
         if (child && !['identifier', '(', ')', ',', 'call'].includes(child.type)) {
-          if (child !== call.childForFieldName('method') && 
-              child !== call.childForFieldName('receiver')) {
+          if (
+            child !== call.childForFieldName('method') &&
+            child !== call.childForFieldName('receiver')
+          ) {
             results.push(child);
           }
         }
       }
       return results;
     }
-    
+
     const results: SyntaxNode[] = [];
     for (let i = 0; i < args.childCount; i++) {
       const child = args.child(i);
@@ -581,17 +599,17 @@ export class RailsModelAnalyzer {
 async function main() {
   const targetPath = process.argv[2] || process.cwd();
   console.log(`Analyzing models in: ${targetPath}`);
-  
+
   const analyzer = new RailsModelAnalyzer(targetPath);
   const result = await analyzer.analyze();
-  
+
   console.log('\n=== Rails Models Analysis ===\n');
   console.log(`Total models: ${result.models.length}`);
   console.log(`Total associations: ${result.totalAssociations}`);
   console.log(`Total validations: ${result.totalValidations}`);
   console.log(`Shared concerns: ${result.concerns.length}`);
   console.log(`Namespaces: ${result.namespaces.join(', ') || '(none)'}`);
-  
+
   if (result.errors.length > 0) {
     console.log(`\n--- Errors (${result.errors.length}) ---`);
     for (const error of result.errors.slice(0, 5)) {
@@ -601,42 +619,46 @@ async function main() {
       console.log(`  ... and ${result.errors.length - 5} more`);
     }
   }
-  
+
   console.log('\n--- Sample Models (first 15) ---');
   for (const model of result.models.slice(0, 15)) {
     console.log(`\n  📦 ${model.className} (${model.filePath})`);
     console.log(`     Parent: ${model.parentClass}`);
-    
+
     if (model.associations.length > 0) {
-      const assocs = model.associations.slice(0, 3).map(a => `${a.type} :${a.name}`);
-      console.log(`     Associations: ${assocs.join(', ')}${model.associations.length > 3 ? '...' : ''}`);
+      const assocs = model.associations.slice(0, 3).map((a) => `${a.type} :${a.name}`);
+      console.log(
+        `     Associations: ${assocs.join(', ')}${model.associations.length > 3 ? '...' : ''}`
+      );
     }
-    
+
     if (model.validations.length > 0) {
       console.log(`     Validations: ${model.validations.length}`);
     }
-    
+
     if (model.scopes.length > 0) {
-      const scopeNames = model.scopes.slice(0, 3).map(s => s.name);
+      const scopeNames = model.scopes.slice(0, 3).map((s) => s.name);
       console.log(`     Scopes: ${scopeNames.join(', ')}${model.scopes.length > 3 ? '...' : ''}`);
     }
-    
+
     if (model.enums.length > 0) {
-      const enumInfo = model.enums.map(e => `${e.name}(${e.values.length})`);
+      const enumInfo = model.enums.map((e) => `${e.name}(${e.values.length})`);
       console.log(`     Enums: ${enumInfo.join(', ')}`);
     }
 
     if (model.concerns.length > 0) {
-      console.log(`     Concerns: ${model.concerns.slice(0, 3).join(', ')}${model.concerns.length > 3 ? '...' : ''}`);
+      console.log(
+        `     Concerns: ${model.concerns.slice(0, 3).join(', ')}${model.concerns.length > 3 ? '...' : ''}`
+      );
     }
   }
 
   // Association type summary
-  const allAssociations = result.models.flatMap(m => m.associations);
-  const belongsTo = allAssociations.filter(a => a.type === 'belongs_to').length;
-  const hasMany = allAssociations.filter(a => a.type === 'has_many').length;
-  const hasOne = allAssociations.filter(a => a.type === 'has_one').length;
-  
+  const allAssociations = result.models.flatMap((m) => m.associations);
+  const belongsTo = allAssociations.filter((a) => a.type === 'belongs_to').length;
+  const hasMany = allAssociations.filter((a) => a.type === 'has_many').length;
+  const hasOne = allAssociations.filter((a) => a.type === 'has_one').length;
+
   console.log('\n--- Association Summary ---');
   console.log(`  belongs_to: ${belongsTo}`);
   console.log(`  has_many: ${hasMany}`);
@@ -648,4 +670,3 @@ const isMainModule = import.meta.url === `file://${process.argv[1]}`;
 if (isMainModule) {
   main().catch(console.error);
 }
-

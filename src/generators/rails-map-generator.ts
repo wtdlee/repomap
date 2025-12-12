@@ -9,9 +9,6 @@ import {
   analyzeRailsApp,
   type RailsAnalysisResult,
   type RailsRoute,
-  type ControllerInfo,
-  type ModelInfo,
-  type AssociationInfo,
 } from '../analyzers/rails/index.js';
 
 export interface RailsMapOptions {
@@ -22,9 +19,10 @@ export interface RailsMapOptions {
 export class RailsMapGenerator {
   private result: RailsAnalysisResult | null = null;
 
-  constructor(private rootPath: string) {}
+  constructor(private rootPath?: string) {}
 
   async generate(options: RailsMapOptions = {}): Promise<string> {
+    if (!this.rootPath) throw new Error('Root path required for analysis');
     const { title = 'Rails Application Map' } = options;
 
     // Run analysis
@@ -42,10 +40,16 @@ export class RailsMapGenerator {
     return html;
   }
 
+  // Generate from existing analysis result (for doc-server)
+  generateFromResult(analysisResult: RailsAnalysisResult, title = 'Rails Application Map'): string {
+    this.result = analysisResult;
+    return this.generateHTML(title);
+  }
+
   private generateHTML(title: string): string {
     if (!this.result) throw new Error('Analysis not run');
 
-    const { routes, controllers, models, summary } = this.result;
+    const { routes, controllers, models, grpc, summary } = this.result;
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -53,454 +57,16 @@ export class RailsMapGenerator {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
-  <style>
-    :root {
-      --bg-primary: #0d1117;
-      --bg-secondary: #161b22;
-      --bg-tertiary: #21262d;
-      --text-primary: #e6edf3;
-      --text-secondary: #8b949e;
-      --text-muted: #6e7681;
-      --border-color: #30363d;
-      --accent-blue: #58a6ff;
-      --accent-green: #3fb950;
-      --accent-purple: #a371f7;
-      --accent-orange: #d29922;
-      --accent-red: #f85149;
-      --accent-pink: #db61a2;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      line-height: 1.5;
-    }
-
-    header {
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-color);
-      padding: 16px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-
-    header h1 {
-      font-size: 20px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .stats-bar {
-      display: flex;
-      gap: 24px;
-    }
-
-    .stat {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      padding: 6px 12px;
-      border-radius: 6px;
-      transition: background 0.2s;
-    }
-
-    .stat:hover {
-      background: var(--bg-tertiary);
-    }
-
-    .stat.active {
-      background: var(--bg-tertiary);
-      box-shadow: inset 0 0 0 1px var(--accent-blue);
-    }
-
-    .stat-value {
-      font-size: 18px;
-      font-weight: 600;
-    }
-
-    .stat-label {
-      color: var(--text-secondary);
-      font-size: 12px;
-    }
-
-    .container {
-      display: grid;
-      grid-template-columns: 280px 1fr 350px;
-      height: calc(100vh - 65px);
-    }
-
-    .sidebar {
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border-color);
-      overflow-y: auto;
-    }
-
-    .sidebar-section {
-      padding: 12px;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .sidebar-title {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-      margin-bottom: 8px;
-    }
-
-    .search-box {
-      width: 100%;
-      padding: 8px 12px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      color: var(--text-primary);
-      font-size: 13px;
-    }
-
-    .search-box:focus {
-      outline: none;
-      border-color: var(--accent-blue);
-    }
-
-    .namespace-list {
-      max-height: 200px;
-      overflow-y: auto;
-    }
-
-    .namespace-item {
-      padding: 6px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .namespace-item:hover {
-      background: var(--bg-tertiary);
-    }
-
-    .namespace-item.active {
-      background: var(--accent-blue);
-      color: white;
-    }
-
-    .namespace-count {
-      background: var(--bg-tertiary);
-      padding: 2px 6px;
-      border-radius: 10px;
-      font-size: 11px;
-      color: var(--text-secondary);
-    }
-
-    .main-panel {
-      overflow-y: auto;
-      padding: 20px;
-    }
-
-    .panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-
-    .panel-title {
-      font-size: 16px;
-      font-weight: 600;
-    }
-
-    .view-toggle {
-      display: flex;
-      gap: 4px;
-      background: var(--bg-secondary);
-      padding: 4px;
-      border-radius: 6px;
-    }
-
-    .view-btn {
-      padding: 6px 12px;
-      border: none;
-      background: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      border-radius: 4px;
-      font-size: 13px;
-    }
-
-    .view-btn.active {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-    }
-
-    .routes-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .routes-table th,
-    .routes-table td {
-      padding: 10px 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .routes-table th {
-      background: var(--bg-secondary);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-      position: sticky;
-      top: 0;
-    }
-
-    .routes-table tr {
-      cursor: pointer;
-    }
-
-    .routes-table tr:hover {
-      background: var(--bg-secondary);
-    }
-
-    .method-badge {
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .method-GET { background: #238636; color: white; }
-    .method-POST { background: #1f6feb; color: white; }
-    .method-PUT, .method-PATCH { background: #9e6a03; color: white; }
-    .method-DELETE { background: #da3633; color: white; }
-    .method-ALL { background: #6e7681; color: white; }
-
-    .path-text {
-      font-family: 'SF Mono', Monaco, monospace;
-      font-size: 13px;
-    }
-
-    .param {
-      color: var(--accent-orange);
-    }
-
-    .controller-text {
-      color: var(--text-secondary);
-      font-size: 13px;
-    }
-
-    .detail-panel {
-      background: var(--bg-secondary);
-      border-left: 1px solid var(--border-color);
-      overflow-y: auto;
-    }
-
-    .detail-header {
-      padding: 16px;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .detail-title {
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    .close-btn {
-      background: none;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 18px;
-    }
-
-    .detail-content {
-      padding: 16px;
-    }
-
-    .detail-section {
-      margin-bottom: 20px;
-    }
-
-    .detail-section-title {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-      margin-bottom: 8px;
-    }
-
-    .detail-item {
-      background: var(--bg-tertiary);
-      padding: 8px 12px;
-      border-radius: 4px;
-      margin-bottom: 6px;
-      font-size: 13px;
-    }
-
-    .tag {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 500;
-      margin-right: 6px;
-    }
-
-    .tag-blue { background: rgba(88, 166, 255, 0.2); color: var(--accent-blue); }
-    .tag-green { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
-    .tag-purple { background: rgba(163, 113, 247, 0.2); color: var(--accent-purple); }
-    .tag-orange { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange); }
-    .tag-pink { background: rgba(219, 97, 162, 0.2); color: var(--accent-pink); }
-
-    .empty-state {
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--text-secondary);
-    }
-
-    .empty-state-icon {
-      font-size: 48px;
-      margin-bottom: 16px;
-    }
-
-    .model-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 12px;
-      cursor: pointer;
-      transition: border-color 0.2s;
-    }
-
-    .model-card:hover {
-      border-color: var(--accent-blue);
-    }
-
-    .model-name {
-      font-weight: 600;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .model-stats {
-      display: flex;
-      gap: 16px;
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-
-    .controller-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      margin-bottom: 12px;
-      overflow: hidden;
-    }
-
-    .controller-header {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border-color);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .controller-header:hover {
-      background: var(--bg-tertiary);
-    }
-
-    .controller-name {
-      font-weight: 600;
-      font-size: 14px;
-    }
-
-    .controller-namespace {
-      color: var(--text-secondary);
-      font-size: 12px;
-    }
-
-    .controller-actions {
-      padding: 8px;
-      display: none;
-    }
-
-    .controller-card.expanded .controller-actions {
-      display: block;
-    }
-
-    .action-item {
-      padding: 6px 12px;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .action-visibility {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-
-    .visibility-public { background: var(--accent-green); }
-    .visibility-private { background: var(--accent-red); }
-    .visibility-protected { background: var(--accent-orange); }
-
-    .mermaid-container {
-      background: var(--bg-secondary);
-      border-radius: 8px;
-      padding: 20px;
-      overflow-x: auto;
-    }
-
-    /* Scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: var(--bg-primary);
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: var(--border-color);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: var(--text-muted);
-    }
-  </style>
+  <link rel="stylesheet" href="/rails-map.css">
 </head>
 <body>
   <header>
     <h1>🛤️ ${title}</h1>
+    <nav class="header-nav">
+      <a href="/page-map" class="nav-link">Page Map</a>
+      <a href="/rails-map" class="nav-link active">Rails Map</a>
+      <a href="/docs" class="nav-link">Docs</a>
+    </nav>
     <div class="stats-bar">
       <div class="stat active" data-view="routes">
         <div>
@@ -520,6 +86,12 @@ export class RailsMapGenerator {
           <div class="stat-label">Models</div>
         </div>
       </div>
+      <div class="stat" data-view="grpc">
+        <div>
+          <div class="stat-value">${summary.totalGrpcServices}</div>
+          <div class="stat-label">gRPC</div>
+        </div>
+      </div>
       <div class="stat" data-view="diagram">
         <div>
           <div class="stat-value">📊</div>
@@ -535,21 +107,21 @@ export class RailsMapGenerator {
         <div class="sidebar-title">Search</div>
         <input type="text" class="search-box" id="searchBox" placeholder="Search routes, controllers...">
       </div>
-      
-      <div class="sidebar-section">
+
+      <div class="sidebar-section namespaces" id="namespaceFilter">
         <div class="sidebar-title">Namespaces (${summary.namespaces.length})</div>
         <div class="namespace-list">
           <div class="namespace-item active" data-namespace="all">
-            <span>📁 All</span>
+            <span>All</span>
             <span class="namespace-count">${routes.routes.length}</span>
           </div>
           ${this.generateNamespaceList(routes.routes)}
         </div>
       </div>
 
-      <div class="sidebar-section">
+      <div class="sidebar-section" id="methodFilter">
         <div class="sidebar-title">HTTP Methods</div>
-        <div class="namespace-list">
+        <div class="namespace-list methods-list">
           ${this.generateMethodFilters(routes.routes)}
         </div>
       </div>
@@ -572,12 +144,69 @@ export class RailsMapGenerator {
     const routes = ${JSON.stringify(routes.routes)};
     const controllers = ${JSON.stringify(controllers.controllers)};
     const models = ${JSON.stringify(models.models)};
+    const grpcServices = ${JSON.stringify(grpc.services)};
 
     // State
     let currentView = 'routes';
-    let selectedNamespace = 'all';
-    let selectedMethod = 'all';
+    let selectedNamespaces = new Set(['all']);
+    let selectedMethods = new Set(['all']);
     let searchQuery = '';
+    let routesDisplayCount = 200;
+    let controllersDisplayCount = 50;
+    let modelsDisplayCount = 50;
+
+    // Filtered data cache for click handlers
+    let filteredControllers = [];
+    let filteredModels = [];
+
+    // URL State Management
+    function saveStateToUrl() {
+      const params = new URLSearchParams();
+      params.set('view', currentView);
+      if (!selectedNamespaces.has('all')) {
+        params.set('ns', [...selectedNamespaces].join(','));
+      }
+      if (!selectedMethods.has('all')) {
+        params.set('method', [...selectedMethods].join(','));
+      }
+      if (searchQuery) {
+        params.set('q', searchQuery);
+      }
+      const newUrl = window.location.pathname + '?' + params.toString();
+      window.history.replaceState({}, '', newUrl);
+    }
+
+    function loadStateFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+
+      if (params.has('view')) {
+        currentView = params.get('view');
+        document.querySelectorAll('.stat').forEach(s => {
+          s.classList.toggle('active', s.dataset.view === currentView);
+        });
+      }
+
+      if (params.has('ns')) {
+        const ns = params.get('ns').split(',').filter(Boolean);
+        if (ns.length > 0) {
+          selectedNamespaces = new Set(ns);
+        }
+      }
+
+      if (params.has('method')) {
+        const methods = params.get('method').split(',').filter(Boolean);
+        if (methods.length > 0) {
+          selectedMethods = new Set(methods);
+        }
+      }
+
+      if (params.has('q')) {
+        searchQuery = params.get('q');
+        searchBox.value = searchQuery;
+      }
+
+      updateFilterUI();
+    }
 
     // DOM Elements
     const mainPanel = document.getElementById('mainPanel');
@@ -590,26 +219,98 @@ export class RailsMapGenerator {
         document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
         stat.classList.add('active');
         currentView = stat.dataset.view;
+        saveStateToUrl();
         renderMainPanel();
       });
     });
 
-    document.querySelectorAll('.namespace-item').forEach(item => {
-      item.addEventListener('click', () => {
-        document.querySelectorAll('.namespace-item').forEach(i => i.classList.remove('active'));
-        item.classList.add('active');
-        selectedNamespace = item.dataset.namespace;
+    // Namespace filter (multi-select with Ctrl/Cmd)
+    document.querySelectorAll('.namespace-item[data-namespace]').forEach(item => {
+      item.addEventListener('click', (e) => {
+        const ns = item.dataset.namespace;
+        if (e.ctrlKey || e.metaKey) {
+          // Multi-select
+          if (ns === 'all') {
+            selectedNamespaces = new Set(['all']);
+          } else {
+            selectedNamespaces.delete('all');
+            if (selectedNamespaces.has(ns)) {
+              selectedNamespaces.delete(ns);
+              if (selectedNamespaces.size === 0) selectedNamespaces.add('all');
+            } else {
+              selectedNamespaces.add(ns);
+            }
+          }
+        } else {
+          // Single select
+          selectedNamespaces = new Set([ns]);
+        }
+        updateFilterUI();
+        routesDisplayCount = 200;
+        saveStateToUrl();
         renderMainPanel();
       });
     });
+
+    // Method filter (multi-select with Ctrl/Cmd)
+    document.querySelectorAll('.namespace-item[data-method]').forEach(item => {
+      item.addEventListener('click', (e) => {
+        const method = item.dataset.method;
+        if (e.ctrlKey || e.metaKey) {
+          if (selectedMethods.has('all')) {
+            selectedMethods = new Set([method]);
+          } else if (selectedMethods.has(method)) {
+            selectedMethods.delete(method);
+            if (selectedMethods.size === 0) selectedMethods.add('all');
+          } else {
+            selectedMethods.add(method);
+          }
+        } else {
+          if (selectedMethods.has(method) && selectedMethods.size === 1) {
+            selectedMethods = new Set(['all']);
+          } else {
+            selectedMethods = new Set([method]);
+          }
+        }
+        updateFilterUI();
+        routesDisplayCount = 200;
+        saveStateToUrl();
+        renderMainPanel();
+      });
+    });
+
+    function updateFilterUI() {
+      document.querySelectorAll('.namespace-item[data-namespace]').forEach(item => {
+        item.classList.toggle('active', selectedNamespaces.has(item.dataset.namespace));
+      });
+      document.querySelectorAll('.namespace-item[data-method]').forEach(item => {
+        // Only highlight selected methods, not all when 'all' is selected
+        item.classList.toggle('active', selectedMethods.has(item.dataset.method));
+      });
+    }
 
     searchBox.addEventListener('input', (e) => {
       searchQuery = e.target.value.toLowerCase();
+      saveStateToUrl();
       renderMainPanel();
     });
 
     // Render Functions
     function renderMainPanel() {
+      // Disable filters for models/diagram tabs
+      const namespaceFilter = document.getElementById('namespaceFilter');
+      const methodFilter = document.getElementById('methodFilter');
+      const filtersDisabled = currentView === 'models' || currentView === 'diagram';
+
+      if (namespaceFilter) {
+        namespaceFilter.style.opacity = filtersDisabled ? '0.4' : '1';
+        namespaceFilter.style.pointerEvents = filtersDisabled ? 'none' : 'auto';
+      }
+      if (methodFilter) {
+        methodFilter.style.opacity = filtersDisabled ? '0.4' : '1';
+        methodFilter.style.pointerEvents = filtersDisabled ? 'none' : 'auto';
+      }
+
       switch (currentView) {
         case 'routes':
           mainPanel.innerHTML = renderRoutesView();
@@ -620,8 +321,12 @@ export class RailsMapGenerator {
         case 'models':
           mainPanel.innerHTML = renderModelsView();
           break;
+        case 'grpc':
+          mainPanel.innerHTML = renderGrpcView();
+          break;
         case 'diagram':
           mainPanel.innerHTML = renderDiagramView();
+          setTimeout(loadMermaid, 100);
           break;
       }
       attachEventListeners();
@@ -629,10 +334,16 @@ export class RailsMapGenerator {
 
     function filterRoutes() {
       return routes.filter(route => {
-        if (selectedNamespace !== 'all' && route.namespace !== selectedNamespace) return false;
-        if (selectedMethod !== 'all' && route.method !== selectedMethod) return false;
+        // Namespace filter (multi-select)
+        if (!selectedNamespaces.has('all')) {
+          const routeNs = route.namespace || '';
+          if (!selectedNamespaces.has(routeNs)) return false;
+        }
+        // Method filter (multi-select)
+        if (!selectedMethods.has('all') && !selectedMethods.has(route.method)) return false;
+        // Search filter
         if (searchQuery) {
-          const searchStr = (route.path + route.controller + route.action).toLowerCase();
+          const searchStr = (route.path + route.controller + route.action + (route.namespace || '')).toLowerCase();
           if (!searchStr.includes(searchQuery)) return false;
         }
         return true;
@@ -641,9 +352,12 @@ export class RailsMapGenerator {
 
     function renderRoutesView() {
       const filtered = filterRoutes();
+      const displayed = filtered.slice(0, routesDisplayCount);
+      const hasMore = filtered.length > routesDisplayCount;
+
       return \`
         <div class="panel-header">
-          <div class="panel-title">Routes (\${filtered.length})</div>
+          <div class="panel-title">Routes <span class="panel-count">(\${Math.min(routesDisplayCount, filtered.length)} / \${filtered.length})</span></div>
         </div>
         <table class="routes-table">
           <thead>
@@ -654,7 +368,7 @@ export class RailsMapGenerator {
             </tr>
           </thead>
           <tbody>
-            \${filtered.slice(0, 200).map((route, idx) => \`
+            \${displayed.map((route, idx) => \`
               <tr data-type="route" data-index="\${idx}">
                 <td><span class="method-badge method-\${route.method}">\${route.method}</span></td>
                 <td class="path-text">\${highlightParams(route.path)}</td>
@@ -663,28 +377,40 @@ export class RailsMapGenerator {
             \`).join('')}
           </tbody>
         </table>
-        \${filtered.length > 200 ? '<p style="padding: 20px; color: var(--text-secondary);">Showing first 200 routes...</p>' : ''}
+        \${hasMore ? \`
+          <div class="show-more-container">
+            <button class="show-more-btn" onclick="loadMoreRoutes()">Show More (+200)</button>
+            <span class="show-more-count">\${routesDisplayCount} / \${filtered.length}</span>
+          </div>
+        \` : ''}
       \`;
     }
 
+    window.loadMoreRoutes = function() {
+      routesDisplayCount += 200;
+      renderMainPanel();
+    };
+
     function renderControllersView() {
-      let filtered = controllers;
+      filteredControllers = controllers;
       if (searchQuery) {
-        filtered = controllers.filter(c => 
+        filteredControllers = controllers.filter(c =>
           c.className.toLowerCase().includes(searchQuery) ||
           c.actions.some(a => a.name.toLowerCase().includes(searchQuery))
         );
       }
-      if (selectedNamespace !== 'all') {
-        filtered = filtered.filter(c => c.namespace === selectedNamespace);
+      if (!selectedNamespaces.has('all')) {
+        filteredControllers = filteredControllers.filter(c => selectedNamespaces.has(c.namespace || ''));
       }
+      const displayed = filteredControllers.slice(0, controllersDisplayCount);
+      const hasMore = filteredControllers.length > controllersDisplayCount;
 
       return \`
         <div class="panel-header">
-          <div class="panel-title">Controllers (\${filtered.length})</div>
+          <div class="panel-title">Controllers <span class="panel-count">(\${Math.min(controllersDisplayCount, filteredControllers.length)} / \${filteredControllers.length})</span></div>
         </div>
         <div>
-          \${filtered.slice(0, 50).map((ctrl, idx) => \`
+          \${displayed.map((ctrl, idx) => \`
             <div class="controller-card" data-type="controller" data-index="\${idx}">
               <div class="controller-header">
                 <div>
@@ -706,68 +432,220 @@ export class RailsMapGenerator {
             </div>
           \`).join('')}
         </div>
+        \${hasMore ? \`
+          <div class="show-more-container">
+            <button class="show-more-btn" onclick="loadMoreControllers()">Show More (+50)</button>
+            <span class="show-more-count">\${controllersDisplayCount} / \${filteredControllers.length}</span>
+          </div>
+        \` : ''}
       \`;
     }
 
+    window.loadMoreControllers = function() {
+      controllersDisplayCount += 50;
+      renderMainPanel();
+    };
+
     function renderModelsView() {
-      let filtered = models;
+      filteredModels = models;
       if (searchQuery) {
-        filtered = models.filter(m => 
+        filteredModels = models.filter(m =>
           m.className.toLowerCase().includes(searchQuery)
         );
       }
+      const displayed = filteredModels.slice(0, modelsDisplayCount);
+      const hasMore = filteredModels.length > modelsDisplayCount;
 
       return \`
         <div class="panel-header">
-          <div class="panel-title">Models (\${filtered.length})</div>
+          <div class="panel-title">Models <span class="panel-count">(\${Math.min(modelsDisplayCount, filteredModels.length)} / \${filteredModels.length})</span></div>
         </div>
         <div>
-          \${filtered.slice(0, 50).map((model, idx) => \`
+          \${displayed.map((model, idx) => \`
             <div class="model-card" data-type="model" data-index="\${idx}">
               <div class="model-name">
-                📦 \${model.className}
+                \${model.className}
                 \${model.concerns.length > 0 ? \`<span class="tag tag-purple">\${model.concerns.length} concerns</span>\` : ''}
               </div>
               <div class="model-stats">
-                <span>📎 \${model.associations.length} associations</span>
-                <span>✓ \${model.validations.length} validations</span>
-                <span>🔄 \${model.callbacks.length} callbacks</span>
+                <span>\${model.associations.length} assoc</span>
+                <span>\${model.validations.length} valid</span>
+                <span>\${model.callbacks.length} callbacks</span>
               </div>
             </div>
           \`).join('')}
         </div>
+        \${hasMore ? \`
+          <div class="show-more-container">
+            <button class="show-more-btn" onclick="loadMoreModels()">Show More (+50)</button>
+            <span class="show-more-count">\${modelsDisplayCount} / \${filteredModels.length}</span>
+          </div>
+        \` : ''}
       \`;
     }
 
+    window.loadMoreModels = function() {
+      modelsDisplayCount += 50;
+      renderMainPanel();
+    };
+
+    let grpcDisplayCount = 50;
+    let filteredGrpc = grpcServices;
+
+    function renderGrpcView() {
+      filteredGrpc = grpcServices;
+      if (searchQuery) {
+        filteredGrpc = grpcServices.filter(svc =>
+          (svc.className && svc.className.toLowerCase().includes(searchQuery)) ||
+          (svc.namespace && svc.namespace.toLowerCase().includes(searchQuery)) ||
+          (svc.rpcs && svc.rpcs.some(rpc => rpc.name && rpc.name.toLowerCase().includes(searchQuery)))
+        );
+      }
+
+      const displayedGrpc = filteredGrpc.slice(0, grpcDisplayCount);
+
+      return \`
+        <div class="panel-header">
+          <div class="panel-title">gRPC Services <span class="panel-count">(\${Math.min(grpcDisplayCount, filteredGrpc.length)} / \${filteredGrpc.length})</span></div>
+        </div>
+        <div style="display:grid;gap:12px">
+          \${displayedGrpc.map((svc, idx) => \`
+            <div class="model-card" onclick="showGrpcDetail(\${idx})">
+              <div class="model-name">
+                🔌 \${svc.className || 'Unknown'}
+              </div>
+              <div class="model-stats">
+                \${svc.namespace ? \`<span>📁 \${svc.namespace}</span>\` : ''}
+                <span>⚡ \${svc.rpcs ? svc.rpcs.length : 0} RPCs</span>
+              </div>
+            </div>
+          \`).join('')}
+        </div>
+        \${filteredGrpc.length > grpcDisplayCount ? \`
+          <div class="show-more-container">
+            <button class="show-more-btn" onclick="loadMoreGrpc()">Show More (+50)</button>
+            <span class="show-more-count">\${grpcDisplayCount} / \${filteredGrpc.length}</span>
+          </div>
+        \` : ''}
+      \`;
+    }
+
+    window.loadMoreGrpc = function() {
+      grpcDisplayCount += 50;
+      renderMainPanel();
+    };
+
+    window.showGrpcDetail = function(idx) {
+      const svc = filteredGrpc[idx];
+      if (!svc) return;
+
+      let detail = \`
+        <div class="detail-header">
+          <div class="detail-title">🔌 \${svc.className || 'gRPC Service'}</div>
+          <button class="close-btn" onclick="closeDetail()">×</button>
+        </div>
+        <div class="detail-content">
+          <div class="detail-section">
+            <div class="detail-section-title">Service Info</div>
+            <div class="detail-item"><span class="tag tag-purple">class</span>\${svc.className || 'N/A'}</div>
+            \${svc.namespace ? \`<div class="detail-item"><span class="tag tag-blue">namespace</span>\${svc.namespace}</div>\` : ''}
+            \${svc.filePath ? \`<div class="detail-item"><span class="tag tag-green">file</span><span style="word-break:break-all">\${svc.filePath}</span></div>\` : ''}
+          </div>
+
+          \${svc.rpcs && svc.rpcs.length > 0 ? \`
+            <div class="detail-section">
+              <div class="detail-section-title">RPCs (\${svc.rpcs.length})</div>
+              \${svc.rpcs.map(rpc => \`
+                <div class="detail-item">
+                  <span class="tag tag-orange">rpc</span>
+                  <span>\${rpc.name || 'unknown'}</span>
+                  \${rpc.request ? \`<span style="margin-left:auto;font-size:11px;color:var(--text-secondary)">(\${rpc.request})</span>\` : ''}
+                </div>
+              \`).join('')}
+            </div>
+          \` : ''}
+        </div>
+      \`;
+
+      detailPanel.innerHTML = detail;
+      detailPanel.classList.add('open');
+    };
+
     function renderDiagramView() {
-      const topModels = models
+      const topModels = [...models]
         .sort((a, b) => b.associations.length - a.associations.length)
         .slice(0, 15);
 
+      const modelNames = new Set(topModels.map(m => m.name || m.className));
       let mermaidCode = 'erDiagram\\n';
-      
+      const addedRelations = new Set();
+
       topModels.forEach(model => {
+        const modelName = (model.name || model.className).replace(/[^a-zA-Z0-9]/g, '_');
         model.associations.forEach(assoc => {
-          const targetModel = assoc.className || capitalize(singularize(assoc.name));
-          if (topModels.some(m => m.name === targetModel || m.className === targetModel)) {
-            const rel = assoc.type === 'belongs_to' ? '||--o{' : 
-                       assoc.type === 'has_one' ? '||--||' : 
-                       '||--o{';
-            mermaidCode += \`  \${model.name} \${rel} \${targetModel} : "\${assoc.type}"\\n\`;
+          let targetModel = assoc.className || capitalize(singularize(assoc.name));
+          targetModel = targetModel.replace(/[^a-zA-Z0-9]/g, '_');
+
+          if (modelNames.has(assoc.className) || modelNames.has(capitalize(singularize(assoc.name)))) {
+            const relKey = [modelName, targetModel].sort().join('-') + assoc.type;
+            if (!addedRelations.has(relKey)) {
+              addedRelations.add(relKey);
+              const rel =
+                assoc.type === 'belongs_to' ? '||--o{' :
+                assoc.type === 'has_one' ? '||--||' : '||--o{';
+              mermaidCode += \`  \${modelName} \${rel} \${targetModel} : "\${assoc.type}"\\n\`;
+            }
           }
         });
       });
+
+      // Ensure there's content even if no relations found
+      if (mermaidCode === 'erDiagram\\n') {
+        topModels.slice(0, 5).forEach(model => {
+          const modelName = (model.name || model.className).replace(/[^a-zA-Z0-9]/g, '_');
+          mermaidCode += \`  \${modelName} {\\n    string id\\n  }\\n\`;
+        });
+      }
 
       return \`
         <div class="panel-header">
           <div class="panel-title">Model Relationships (Top 15 by associations)</div>
         </div>
-        <div class="mermaid-container">
-          <pre class="mermaid">\${mermaidCode}</pre>
+        <div class="mermaid-container" id="mermaid-container">
+          <pre class="mermaid" id="mermaid-diagram">\${mermaidCode}</pre>
         </div>
-        <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"><\\/script>
-        <script>mermaid.initialize({startOnLoad: true, theme: 'dark'});<\\/script>
       \`;
+    }
+
+    // Load mermaid dynamically
+    function loadMermaid() {
+      const container = document.getElementById('mermaid-diagram');
+      if (!container) return;
+
+      if (window.mermaid) {
+        try {
+          // Re-render mermaid diagram
+          container.removeAttribute('data-processed');
+          window.mermaid.init(undefined, container);
+        } catch (e) {
+          console.error('Mermaid error:', e);
+        }
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js';
+      script.onload = () => {
+        window.mermaid.initialize({
+          startOnLoad: false,
+          theme: 'dark',
+          securityLevel: 'loose'
+        });
+        const diagram = document.getElementById('mermaid-diagram');
+        if (diagram) {
+          window.mermaid.init(undefined, diagram);
+        }
+      };
+      document.head.appendChild(script);
     }
 
     function highlightParams(path) {
@@ -799,14 +677,20 @@ export class RailsMapGenerator {
             card.classList.toggle('expanded');
           }
           const idx = parseInt(card.dataset.index);
-          showControllerDetail(controllers[idx]);
+          // Use filtered array to get correct item
+          if (filteredControllers[idx]) {
+            showControllerDetail(filteredControllers[idx]);
+          }
         });
       });
 
       document.querySelectorAll('[data-type="model"]').forEach(card => {
         card.addEventListener('click', () => {
           const idx = parseInt(card.dataset.index);
-          showModelDetail(models[idx]);
+          // Use filtered array to get correct item
+          if (filteredModels[idx]) {
+            showModelDetail(filteredModels[idx]);
+          }
         });
       });
     }
@@ -955,7 +839,8 @@ export class RailsMapGenerator {
     }
 
     // Initialize
-    attachEventListeners();
+    loadStateFromUrl();
+    renderMainPanel();
   </script>
 </body>
 </html>`;
@@ -963,7 +848,7 @@ export class RailsMapGenerator {
 
   private generateNamespaceList(routes: RailsRoute[]): string {
     const namespaces = new Map<string, number>();
-    
+
     for (const route of routes) {
       const ns = route.namespace || 'root';
       namespaces.set(ns, (namespaces.get(ns) || 0) + 1);
@@ -971,28 +856,36 @@ export class RailsMapGenerator {
 
     const sorted = [...namespaces.entries()].sort((a, b) => b[1] - a[1]);
 
-    return sorted.slice(0, 20).map(([ns, count]) => `
+    return sorted
+      .map(
+        ([ns, count]) => `
       <div class="namespace-item" data-namespace="${ns === 'root' ? '' : ns}">
-        <span>📂 ${ns}</span>
+        <span>${ns}</span>
         <span class="namespace-count">${count}</span>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   private generateMethodFilters(routes: RailsRoute[]): string {
     const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
     const counts = new Map<string, number>();
-    
+
     for (const route of routes) {
       counts.set(route.method, (counts.get(route.method) || 0) + 1);
     }
 
-    return methods.map(method => `
+    return methods
+      .map(
+        (method) => `
       <div class="namespace-item" data-method="${method}">
         <span class="method-badge method-${method}">${method}</span>
         <span class="namespace-count">${counts.get(method) || 0}</span>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   private generateRoutesView(routes: RailsRoute[]): string {
@@ -1009,13 +902,18 @@ export class RailsMapGenerator {
           </tr>
         </thead>
         <tbody>
-          ${routes.slice(0, 200).map((route, idx) => `
+          ${routes
+            .slice(0, 200)
+            .map(
+              (route, idx) => `
             <tr data-type="route" data-index="${idx}">
               <td><span class="method-badge method-${route.method}">${route.method}</span></td>
               <td class="path-text">${this.highlightParams(route.path)}</td>
               <td class="controller-text">${route.controller}#${route.action}</td>
             </tr>
-          `).join('')}
+          `
+            )
+            .join('')}
         </tbody>
       </table>
     `;
@@ -1042,4 +940,3 @@ const isMainModule = import.meta.url === `file://${process.argv[1]}`;
 if (isMainModule) {
   main().catch(console.error);
 }
-

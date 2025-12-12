@@ -6,7 +6,12 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { DocGeneratorEngine } from './core/engine.js';
 import { DocServer } from './server/doc-server.js';
-import type { DocGeneratorConfig, RepositoryConfig, DocumentationReport } from './types.js';
+import type {
+  DocGeneratorConfig,
+  RepositoryConfig,
+  DocumentationReport,
+  AnalyzerType,
+} from './types.js';
 
 const program = new Command();
 
@@ -20,53 +25,39 @@ program
  */
 async function detectProject(dir: string): Promise<RepositoryConfig | null> {
   const dirName = path.basename(dir);
-  
+  let isRails = false;
+
   // Check for Rails project first
   const gemfilePath = path.join(dir, 'Gemfile');
   const routesPath = path.join(dir, 'config', 'routes.rb');
-  
+
   try {
     await fs.access(gemfilePath);
     await fs.access(routesPath);
-    
+
     // This is a Rails project
     const gemfile = await fs.readFile(gemfilePath, 'utf-8');
-    const isRails = gemfile.includes("gem 'rails'") || gemfile.includes('gem "rails"');
-    
-    if (isRails) {
-      return {
-        name: dirName,
-        displayName: dirName,
-        description: 'Rails application',
-        path: dir,
-        branch: 'main',
-        type: 'rails',
-        analyzers: ['routes', 'controllers', 'models', 'grpc'],
-        settings: {},
-      };
-    }
+    isRails = gemfile.includes("gem 'rails'") || gemfile.includes('gem "rails"');
   } catch {
     // Not a Rails project, continue checking
   }
 
   const packageJsonPath = path.join(dir, 'package.json');
+  let hasReact = false;
+  let hasNextjs = false;
+  const settings: Record<string, string> = {};
 
   try {
     const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
 
     // Detect project type
     const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-    let type: 'nextjs' | 'rails' | 'generic' = 'generic';
 
-    if (deps['next']) {
-      type = 'nextjs';
-    }
-
-    // Detect directories
-    const settings: Record<string, string> = {};
+    hasReact = !!deps['react'];
+    hasNextjs = !!deps['next'];
 
     // Check common Next.js structures
-    const possiblePagesDirs = ['src/pages', 'pages', 'app', 'src/app'];
+    const possiblePagesDirs = ['src/pages', 'pages', 'app', 'src/app', 'frontend/src'];
     for (const pagesDir of possiblePagesDirs) {
       try {
         await fs.access(path.join(dir, pagesDir));
@@ -76,7 +67,13 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
     }
 
     // Check for features directory
-    const possibleFeaturesDirs = ['src/features', 'features', 'src/modules', 'modules'];
+    const possibleFeaturesDirs = [
+      'src/features',
+      'features',
+      'src/modules',
+      'modules',
+      'frontend/src',
+    ];
     for (const featuresDir of possibleFeaturesDirs) {
       try {
         await fs.access(path.join(dir, featuresDir));
@@ -86,7 +83,12 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
     }
 
     // Check for components directory
-    const possibleComponentsDirs = ['src/components', 'components', 'src/common/components'];
+    const possibleComponentsDirs = [
+      'src/components',
+      'components',
+      'src/common/components',
+      'frontend/src',
+    ];
     for (const componentsDir of possibleComponentsDirs) {
       try {
         await fs.access(path.join(dir, componentsDir));
@@ -94,21 +96,44 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
         break;
       } catch {}
     }
-
-    // Use directory name as the repository name (not package.json name)
-    return {
-      name: dirName,
-      displayName: dirName,
-      description: packageJson.description || '',
-      path: dir,
-      branch: 'main',
-      type,
-      analyzers: ['pages', 'graphql', 'dataflow', 'rest-api'],
-      settings,
-    };
   } catch {
+    // No package.json
+  }
+
+  // Build analyzers list based on detected environments
+  const analyzers: AnalyzerType[] = [];
+
+  // Add frontend analyzers if React/Next.js detected
+  if (hasReact || hasNextjs) {
+    analyzers.push('pages', 'graphql', 'dataflow', 'rest-api');
+  }
+
+  // Rails analyzers are handled separately via Rails analysis
+
+  // Determine project type
+  let type: 'nextjs' | 'rails' | 'generic' = 'generic';
+  if (hasNextjs) {
+    type = 'nextjs';
+  } else if (isRails) {
+    type = 'rails';
+  }
+
+  // If nothing detected, return null
+  if (!isRails && !hasReact && !hasNextjs) {
     return null;
   }
+
+  return {
+    name: dirName,
+    displayName: dirName,
+    description:
+      isRails && hasReact ? 'Rails + React application' : isRails ? 'Rails application' : '',
+    path: dir,
+    branch: 'main',
+    type,
+    analyzers,
+    settings,
+  };
 }
 
 /**
@@ -194,8 +219,15 @@ program
   .option('--repo <name>', 'Analyze specific repository only')
   .option('--watch', 'Watch for changes and regenerate')
   .option('--no-cache', 'Disable caching (always analyze from scratch)')
+  .option('--format <type>', 'Output format: json, html, markdown (default: all)', 'all')
+  .option('--ci', 'CI mode: minimal output, exit codes for errors')
+  .option('--static', 'Generate standalone HTML files (for GitHub Pages)')
   .action(async (options) => {
-    console.log(chalk.blue.bold('\n📚 Repomap - Documentation Generator\n'));
+    const isCI = options.ci || process.env.CI === 'true';
+
+    if (!isCI) {
+      console.log(chalk.blue.bold('\n📚 Repomap - Documentation Generator\n'));
+    }
 
     try {
       const cwd = process.cwd();
@@ -223,13 +255,104 @@ program
         await watchAndGenerate(engine, config);
       } else {
         const report = await engine.generate();
-        printSummary(report);
+
+        // Handle different output formats
+        if (options.format === 'json' || options.static) {
+          const jsonPath = path.join(config.outputDir, 'report.json');
+          await fs.mkdir(config.outputDir, { recursive: true });
+          await fs.writeFile(jsonPath, JSON.stringify(report, null, 2));
+          if (!isCI) console.log(chalk.green(`📄 JSON report: ${jsonPath}`));
+        }
+
+        // Generate static HTML files for GitHub Pages
+        if (options.static) {
+          await generateStaticSite(config, report, isCI);
+        }
+
+        if (!isCI) {
+          printSummary(report);
+        } else {
+          // CI mode: minimal output
+          const totalPages = report.repositories.reduce(
+            (sum: number, r: { summary: { totalPages: number } }) => sum + r.summary.totalPages,
+            0
+          );
+          console.log(`✅ Generated: ${totalPages} pages, ${report.repositories.length} repos`);
+        }
       }
     } catch (error) {
-      console.error(chalk.red('\n❌ Error:'), (error as Error).message);
+      console.error(
+        isCI ? `Error: ${(error as Error).message}` : chalk.red('\n❌ Error:'),
+        (error as Error).message
+      );
       process.exit(1);
     }
   });
+
+/**
+ * Generate static HTML site for GitHub Pages deployment
+ */
+async function generateStaticSite(
+  config: DocGeneratorConfig,
+  report: DocumentationReport,
+  isCI: boolean
+): Promise<void> {
+  const { PageMapGenerator } = await import('./generators/page-map-generator.js');
+  const { detectEnvironments } = await import('./utils/env-detector.js');
+
+  const outputDir = config.outputDir;
+  await fs.mkdir(outputDir, { recursive: true });
+
+  // Detect environment for Rails support
+  const rootPath = config.repositories[0]?.path || process.cwd();
+  const envResult = await detectEnvironments(rootPath);
+
+  let railsAnalysis = null;
+  if (envResult.hasRails) {
+    const { analyzeRailsApp } = await import('./analyzers/rails/index.js');
+    railsAnalysis = await analyzeRailsApp(rootPath);
+  }
+
+  // Generate page-map.html
+  const pageMapGenerator = new PageMapGenerator();
+  const pageMapHtml = pageMapGenerator.generatePageMapHtml(report, {
+    envResult,
+    railsAnalysis,
+    staticMode: true,
+  });
+  await fs.writeFile(path.join(outputDir, 'index.html'), pageMapHtml);
+  if (!isCI) console.log(chalk.green(`📄 Static page map: ${path.join(outputDir, 'index.html')}`));
+
+  // Generate rails-map.html if Rails detected
+  if (railsAnalysis) {
+    const { RailsMapGenerator } = await import('./generators/rails-map-generator.js');
+    const railsGenerator = new RailsMapGenerator();
+    const railsHtml = railsGenerator.generateFromResult(railsAnalysis);
+    await fs.writeFile(path.join(outputDir, 'rails-map.html'), railsHtml);
+    if (!isCI)
+      console.log(chalk.green(`📄 Static Rails map: ${path.join(outputDir, 'rails-map.html')}`));
+  }
+
+  // Copy CSS assets
+  const cssFiles = ['common.css', 'page-map.css', 'docs.css', 'rails-map.css'];
+  const assetsDir = path.join(outputDir, 'assets');
+  await fs.mkdir(assetsDir, { recursive: true });
+
+  for (const cssFile of cssFiles) {
+    try {
+      const cssPath = new URL(`./generators/assets/${cssFile}`, import.meta.url);
+      const css = await fs.readFile(cssPath, 'utf-8');
+      await fs.writeFile(path.join(assetsDir, cssFile), css);
+    } catch {
+      // CSS file not found, skip
+    }
+  }
+
+  if (!isCI) {
+    console.log(chalk.green(`\n✅ Static site generated in: ${outputDir}`));
+    console.log(chalk.gray('   Deploy to GitHub Pages or any static hosting'));
+  }
+}
 
 /**
  * Serve command - starts documentation server
@@ -366,7 +489,7 @@ program
 
     try {
       const targetPath = options.path || process.cwd();
-      
+
       // Verify it's a Rails project
       try {
         await fs.access(path.join(targetPath, 'config', 'routes.rb'));
@@ -376,9 +499,8 @@ program
       }
 
       // Dynamically import Rails analyzer
-      const { analyzeRailsApp } = await import('./analyzers/rails/index.js');
       const { RailsMapGenerator } = await import('./generators/rails-map-generator.js');
-      
+
       // Generate map
       const outputPath = options.output || path.join(targetPath, 'rails-map.html');
       const generator = new RailsMapGenerator(targetPath);
@@ -386,13 +508,12 @@ program
         title: `${path.basename(targetPath)} - Rails Map`,
         outputPath,
       });
-      
+
       console.log(chalk.green(`\n✅ Rails map generated: ${outputPath}`));
-      
+
       // Open in browser
       const { exec } = await import('child_process');
       exec(`open "${outputPath}"`);
-      
     } catch (error) {
       console.error(chalk.red('\n❌ Error:'), (error as Error).message);
       process.exit(1);
