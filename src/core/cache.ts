@@ -35,8 +35,16 @@ export class AnalysisCache {
    * Initialize cache directory and load manifest
    */
   async init(): Promise<void> {
+    // Create cache directory
     try {
       await fs.mkdir(this.cacheDir, { recursive: true });
+    } catch (err) {
+      console.warn(`  Warning: Could not create cache directory: ${(err as Error).message}`);
+      return;
+    }
+
+    // Load existing manifest
+    try {
       const data = await fs.readFile(this.manifestPath, 'utf-8');
       const loaded = JSON.parse(data) as CacheManifest;
 
@@ -48,7 +56,7 @@ export class AnalysisCache {
         await this.clear();
       }
     } catch {
-      // Cache doesn't exist yet, that's fine
+      // Manifest doesn't exist yet, will be created on save
     }
   }
 
@@ -104,10 +112,12 @@ export class AnalysisCache {
     if (!this.dirty) return;
 
     try {
+      // Ensure directory exists
+      await fs.mkdir(this.cacheDir, { recursive: true });
       await fs.writeFile(this.manifestPath, JSON.stringify(this.manifest, null, 2));
       this.dirty = false;
     } catch (error) {
-      console.warn('Failed to save cache:', (error as Error).message);
+      console.warn('  Warning: Failed to save cache:', (error as Error).message);
     }
   }
 

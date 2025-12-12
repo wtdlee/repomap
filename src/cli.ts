@@ -74,7 +74,7 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
       path: dir,
       branch: 'main',
       type,
-      analyzers: ['pages', 'graphql', 'components', 'dataflow', 'rest-api'],
+      analyzers: ['pages', 'graphql', 'dataflow', 'rest-api'],
       settings,
     };
   } catch {
