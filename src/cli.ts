@@ -6,7 +6,12 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { DocGeneratorEngine } from './core/engine.js';
 import { DocServer } from './server/doc-server.js';
-import type { DocGeneratorConfig, RepositoryConfig, DocumentationReport } from './types.js';
+import type {
+  DocGeneratorConfig,
+  RepositoryConfig,
+  DocumentationReport,
+  AnalyzerType,
+} from './types.js';
 
 const program = new Command();
 
@@ -20,53 +25,39 @@ program
  */
 async function detectProject(dir: string): Promise<RepositoryConfig | null> {
   const dirName = path.basename(dir);
-  
+  let isRails = false;
+
   // Check for Rails project first
   const gemfilePath = path.join(dir, 'Gemfile');
   const routesPath = path.join(dir, 'config', 'routes.rb');
-  
+
   try {
     await fs.access(gemfilePath);
     await fs.access(routesPath);
-    
+
     // This is a Rails project
     const gemfile = await fs.readFile(gemfilePath, 'utf-8');
-    const isRails = gemfile.includes("gem 'rails'") || gemfile.includes('gem "rails"');
-    
-    if (isRails) {
-      return {
-        name: dirName,
-        displayName: dirName,
-        description: 'Rails application',
-        path: dir,
-        branch: 'main',
-        type: 'rails',
-        analyzers: ['routes', 'controllers', 'models', 'grpc'],
-        settings: {},
-      };
-    }
+    isRails = gemfile.includes("gem 'rails'") || gemfile.includes('gem "rails"');
   } catch {
     // Not a Rails project, continue checking
   }
 
   const packageJsonPath = path.join(dir, 'package.json');
+  let hasReact = false;
+  let hasNextjs = false;
+  const settings: Record<string, string> = {};
 
   try {
     const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
 
     // Detect project type
     const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-    let type: 'nextjs' | 'rails' | 'generic' = 'generic';
 
-    if (deps['next']) {
-      type = 'nextjs';
-    }
-
-    // Detect directories
-    const settings: Record<string, string> = {};
+    hasReact = !!deps['react'];
+    hasNextjs = !!deps['next'];
 
     // Check common Next.js structures
-    const possiblePagesDirs = ['src/pages', 'pages', 'app', 'src/app'];
+    const possiblePagesDirs = ['src/pages', 'pages', 'app', 'src/app', 'frontend/src'];
     for (const pagesDir of possiblePagesDirs) {
       try {
         await fs.access(path.join(dir, pagesDir));
@@ -76,7 +67,13 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
     }
 
     // Check for features directory
-    const possibleFeaturesDirs = ['src/features', 'features', 'src/modules', 'modules'];
+    const possibleFeaturesDirs = [
+      'src/features',
+      'features',
+      'src/modules',
+      'modules',
+      'frontend/src',
+    ];
     for (const featuresDir of possibleFeaturesDirs) {
       try {
         await fs.access(path.join(dir, featuresDir));
@@ -86,7 +83,12 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
     }
 
     // Check for components directory
-    const possibleComponentsDirs = ['src/components', 'components', 'src/common/components'];
+    const possibleComponentsDirs = [
+      'src/components',
+      'components',
+      'src/common/components',
+      'frontend/src',
+    ];
     for (const componentsDir of possibleComponentsDirs) {
       try {
         await fs.access(path.join(dir, componentsDir));
@@ -94,21 +96,44 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
         break;
       } catch {}
     }
-
-    // Use directory name as the repository name (not package.json name)
-    return {
-      name: dirName,
-      displayName: dirName,
-      description: packageJson.description || '',
-      path: dir,
-      branch: 'main',
-      type,
-      analyzers: ['pages', 'graphql', 'dataflow', 'rest-api'],
-      settings,
-    };
   } catch {
+    // No package.json
+  }
+
+  // Build analyzers list based on detected environments
+  const analyzers: AnalyzerType[] = [];
+
+  // Add frontend analyzers if React/Next.js detected
+  if (hasReact || hasNextjs) {
+    analyzers.push('pages', 'graphql', 'dataflow', 'rest-api');
+  }
+
+  // Rails analyzers are handled separately via Rails analysis
+
+  // Determine project type
+  let type: 'nextjs' | 'rails' | 'generic' = 'generic';
+  if (hasNextjs) {
+    type = 'nextjs';
+  } else if (isRails) {
+    type = 'rails';
+  }
+
+  // If nothing detected, return null
+  if (!isRails && !hasReact && !hasNextjs) {
     return null;
   }
+
+  return {
+    name: dirName,
+    displayName: dirName,
+    description:
+      isRails && hasReact ? 'Rails + React application' : isRails ? 'Rails application' : '',
+    path: dir,
+    branch: 'main',
+    type,
+    analyzers,
+    settings,
+  };
 }
 
 /**
@@ -366,7 +391,7 @@ program
 
     try {
       const targetPath = options.path || process.cwd();
-      
+
       // Verify it's a Rails project
       try {
         await fs.access(path.join(targetPath, 'config', 'routes.rb'));
@@ -378,7 +403,7 @@ program
       // Dynamically import Rails analyzer
       const { analyzeRailsApp } = await import('./analyzers/rails/index.js');
       const { RailsMapGenerator } = await import('./generators/rails-map-generator.js');
-      
+
       // Generate map
       const outputPath = options.output || path.join(targetPath, 'rails-map.html');
       const generator = new RailsMapGenerator(targetPath);
@@ -386,13 +411,12 @@ program
         title: `${path.basename(targetPath)} - Rails Map`,
         outputPath,
       });
-      
+
       console.log(chalk.green(`\n✅ Rails map generated: ${outputPath}`));
-      
+
       // Open in browser
       const { exec } = await import('child_process');
       exec(`open "${outputPath}"`);
-      
     } catch (error) {
       console.error(chalk.red('\n❌ Error:'), (error as Error).message);
       process.exit(1);

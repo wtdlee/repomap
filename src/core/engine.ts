@@ -214,7 +214,8 @@ export class DocGeneratorEngine {
   ): PagesAnalyzer | GraphQLAnalyzer | DataFlowAnalyzer | RestApiAnalyzer | null {
     switch (type) {
       case 'pages':
-        if (config.type === 'nextjs') {
+        // Support Next.js, React, and Rails+React projects
+        if (config.type === 'nextjs' || config.type === 'rails' || config.type === 'generic') {
           return new PagesAnalyzer(config);
         }
         break;

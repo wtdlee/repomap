@@ -150,25 +150,8 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Analyze _app.tsx for global providers/context
     await this.analyzeAppFile();
 
-    const pagesDir = this.getSetting('pagesDir', 'src/pages');
-    const pagesPath = this.resolvePath(pagesDir);
-
-    // Find all page files
-    const pageFiles = await fg(['**/*.tsx', '**/*.ts'], {
-      cwd: pagesPath,
-      ignore: [
-        // Next.js special files (not actual pages)
-        '_app.tsx',
-        '_app.ts',
-        '_document.tsx',
-        '_document.ts',
-        '_error.tsx',
-        '_error.ts',
-        // API routes
-        'api/**',
-      ],
-      absolute: true,
-    });
+    // Find page files from multiple possible locations
+    const pageFiles = await this.findPageFiles();
 
     this.log(`Found ${pageFiles.length} page files`);
 
@@ -185,7 +168,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const pages = await parallelMapSafe(
       pageFiles,
       async (filePath) => {
-        return this.analyzePageFile(filePath, pagesPath);
+        return this.analyzePageFile(filePath, this.basePath);
       },
       4 // Limit concurrency for ts-morph stability
     );
@@ -1210,6 +1193,113 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   // Global context providers and their GraphQL queries
   private globalContextQueries: DataFetchingInfo[] = [];
+
+  /**
+   * Find page files from multiple possible locations
+   * Next.js, React, Rails+React 구조 모두 지원
+   */
+  private async findPageFiles(): Promise<string[]> {
+    const pagesDir = this.getSetting('pagesDir', 'src/pages');
+    const allFiles: string[] = [];
+
+    // 1. Check Next.js standard directories
+    const nextjsDirs = [pagesDir, 'pages', 'src/pages', 'app', 'src/app'];
+
+    for (const dir of nextjsDirs) {
+      const dirPath = this.resolvePath(dir);
+      try {
+        const files = await fg(['**/*.tsx', '**/*.ts', '**/*.jsx', '**/*.js'], {
+          cwd: dirPath,
+          ignore: [
+            '_app.tsx',
+            '_app.ts',
+            '_app.jsx',
+            '_app.js',
+            '_document.tsx',
+            '_document.ts',
+            '_document.jsx',
+            '_document.js',
+            '_error.tsx',
+            '_error.ts',
+            '_error.jsx',
+            '_error.js',
+            'api/**',
+            '**/*.test.*',
+            '**/*.spec.*',
+            '**/node_modules/**',
+          ],
+          absolute: true,
+        });
+        allFiles.push(...files);
+        if (files.length > 0) {
+          this.log(`Found ${files.length} pages in ${dir}`);
+        }
+      } catch {
+        // Directory doesn't exist
+      }
+    }
+
+    // 2. Check Rails + React structures
+    const railsReactDirs = [
+      'frontend/src/**/pages',
+      'frontend/src/**/components/pages',
+      'app/javascript/**/pages',
+      'app/javascript/**/components/pages',
+    ];
+
+    for (const pattern of railsReactDirs) {
+      try {
+        const files = await fg(
+          [
+            `${pattern}/**/*.tsx`,
+            `${pattern}/**/*.ts`,
+            `${pattern}/**/*.jsx`,
+            `${pattern}/**/*.js`,
+          ],
+          {
+            cwd: this.basePath,
+            ignore: ['**/*.test.*', '**/*.spec.*', '**/node_modules/**', '**/vendor/**'],
+            absolute: true,
+          }
+        );
+        allFiles.push(...files);
+        if (files.length > 0) {
+          this.log(`Found ${files.length} React pages in ${pattern}`);
+        }
+      } catch {
+        // Pattern doesn't match
+      }
+    }
+
+    // 3. Check for entry point files (Rails with Webpacker/Shakapacker)
+    const entryPatterns = [
+      'frontend/src/**/index.tsx',
+      'frontend/src/**/App.tsx',
+      'app/javascript/packs/*.tsx',
+      'app/javascript/packs/*.jsx',
+    ];
+
+    for (const pattern of entryPatterns) {
+      try {
+        const files = await fg([pattern], {
+          cwd: this.basePath,
+          ignore: ['**/node_modules/**', '**/vendor/**'],
+          absolute: true,
+        });
+        // Don't add duplicates
+        for (const file of files) {
+          if (!allFiles.includes(file)) {
+            allFiles.push(file);
+          }
+        }
+      } catch {
+        // Pattern doesn't match
+      }
+    }
+
+    // Remove duplicates
+    return [...new Set(allFiles)];
+  }
 
   /**
    * Analyze _app.tsx for global providers that use GraphQL

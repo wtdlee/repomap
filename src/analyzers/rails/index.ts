@@ -3,22 +3,64 @@
  * Rails分析モジュールのエクスポート
  */
 
-export { RailsRoutesAnalyzer, type RailsRoute, type RailsRoutesResult, type ResourceInfo, type MountedEngine } from './rails-routes-analyzer.js';
-export { RailsControllerAnalyzer, type ControllerInfo, type ActionInfo, type FilterInfo, type RailsControllersResult } from './rails-controller-analyzer.js';
-export { RailsModelAnalyzer, type ModelInfo, type AssociationInfo, type ValidationInfo, type RailsModelsResult } from './rails-model-analyzer.js';
-export { RailsGrpcAnalyzer, type GrpcServiceInfo, type RpcMethodInfo, type RailsGrpcResult } from './rails-grpc-analyzer.js';
-export { initRubyParser, parseRuby, parseRubyFile, findNodes, type SyntaxNode, type Tree } from './ruby-parser.js';
+export {
+  RailsRoutesAnalyzer,
+  type RailsRoute,
+  type RailsRoutesResult,
+  type ResourceInfo,
+  type MountedEngine,
+} from './rails-routes-analyzer.js';
+export {
+  RailsControllerAnalyzer,
+  type ControllerInfo,
+  type ActionInfo,
+  type FilterInfo,
+  type RailsControllersResult,
+} from './rails-controller-analyzer.js';
+export {
+  RailsModelAnalyzer,
+  type ModelInfo,
+  type AssociationInfo,
+  type ValidationInfo,
+  type RailsModelsResult,
+} from './rails-model-analyzer.js';
+export {
+  RailsGrpcAnalyzer,
+  type GrpcServiceInfo,
+  type RpcMethodInfo,
+  type RailsGrpcResult,
+} from './rails-grpc-analyzer.js';
+export {
+  analyzeRailsViews,
+  type RailsViewInfo,
+  type RailsPageInfo,
+  type RailsApiCall,
+  type RailsViewAnalysisResult,
+} from './rails-view-analyzer.js';
+export {
+  initRubyParser,
+  parseRuby,
+  parseRubyFile,
+  findNodes,
+  type SyntaxNode,
+  type Tree,
+} from './ruby-parser.js';
 
 import { RailsRoutesAnalyzer, type RailsRoutesResult } from './rails-routes-analyzer.js';
-import { RailsControllerAnalyzer, type RailsControllersResult } from './rails-controller-analyzer.js';
+import {
+  RailsControllerAnalyzer,
+  type RailsControllersResult,
+} from './rails-controller-analyzer.js';
 import { RailsModelAnalyzer, type RailsModelsResult } from './rails-model-analyzer.js';
 import { RailsGrpcAnalyzer, type RailsGrpcResult } from './rails-grpc-analyzer.js';
+import { analyzeRailsViews, type RailsViewAnalysisResult } from './rails-view-analyzer.js';
 
 export interface RailsAnalysisResult {
   routes: RailsRoutesResult;
   controllers: RailsControllersResult;
   models: RailsModelsResult;
   grpc: RailsGrpcResult;
+  views: RailsViewAnalysisResult;
   summary: RailsSummary;
 }
 
@@ -31,6 +73,8 @@ export interface RailsSummary {
   totalValidations: number;
   totalGrpcServices: number;
   totalRpcs: number;
+  totalViews: number;
+  totalPages: number;
   namespaces: string[];
   concerns: string[];
 }
@@ -40,24 +84,28 @@ export interface RailsSummary {
  */
 export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisResult> {
   console.log(`\n📦 Analyzing Rails application at: ${rootPath}\n`);
-  
+
   // Routes
   console.log('🔄 Analyzing routes...');
   const routesAnalyzer = new RailsRoutesAnalyzer(rootPath);
   const routes = await routesAnalyzer.analyze();
   console.log(`   ✅ Found ${routes.routes.length} routes`);
-  
+
   // Controllers
   console.log('🔄 Analyzing controllers...');
   const controllersAnalyzer = new RailsControllerAnalyzer(rootPath);
   const controllers = await controllersAnalyzer.analyze();
-  console.log(`   ✅ Found ${controllers.controllers.length} controllers with ${controllers.totalActions} actions`);
-  
+  console.log(
+    `   ✅ Found ${controllers.controllers.length} controllers with ${controllers.totalActions} actions`
+  );
+
   // Models
   console.log('🔄 Analyzing models...');
   const modelsAnalyzer = new RailsModelAnalyzer(rootPath);
   const models = await modelsAnalyzer.analyze();
-  console.log(`   ✅ Found ${models.models.length} models with ${models.totalAssociations} associations`);
+  console.log(
+    `   ✅ Found ${models.models.length} models with ${models.totalAssociations} associations`
+  );
 
   // gRPC Services
   console.log('🔄 Analyzing gRPC services...');
@@ -65,19 +113,25 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
   const grpc = await grpcAnalyzer.analyze();
   console.log(`   ✅ Found ${grpc.services.length} gRPC services with ${grpc.totalRpcs} RPCs`);
 
+  // Views
+  console.log('🔄 Analyzing views...');
+  const views = await analyzeRailsViews(rootPath);
+  console.log(
+    `   ✅ Found ${views.summary.totalViews} views and ${views.summary.totalPages} pages`
+  );
+
   // Combine all namespaces
-  const allNamespaces = [...new Set([
-    ...routes.namespaces,
-    ...controllers.namespaces,
-    ...models.namespaces,
-    ...grpc.namespaces,
-  ])];
+  const allNamespaces = [
+    ...new Set([
+      ...routes.namespaces,
+      ...controllers.namespaces,
+      ...models.namespaces,
+      ...grpc.namespaces,
+    ]),
+  ];
 
   // Combine all concerns
-  const allConcerns = [...new Set([
-    ...controllers.concerns,
-    ...models.concerns,
-  ])];
+  const allConcerns = [...new Set([...controllers.concerns, ...models.concerns])];
 
   const summary: RailsSummary = {
     totalRoutes: routes.routes.length,
@@ -88,6 +142,8 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
     totalValidations: models.totalValidations,
     totalGrpcServices: grpc.services.length,
     totalRpcs: grpc.totalRpcs,
+    totalViews: views.summary.totalViews,
+    totalPages: views.summary.totalPages,
     namespaces: allNamespaces,
     concerns: allConcerns,
   };
@@ -97,6 +153,7 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
     controllers,
     models,
     grpc,
+    views,
     summary,
   };
 }
@@ -104,58 +161,87 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
 // Standalone execution for full analysis
 async function main() {
   const targetPath = process.argv[2] || process.cwd();
-  
+
   const result = await analyzeRailsApp(targetPath);
-  
+
   console.log('\n' + '='.repeat(60));
   console.log('📊 RAILS APPLICATION ANALYSIS SUMMARY');
   console.log('='.repeat(60) + '\n');
-  
+
   console.log('┌─────────────────────────────────────────────────────┐');
   console.log('│ Routes                                              │');
   console.log('├─────────────────────────────────────────────────────┤');
-  console.log(`│  Total routes:         ${String(result.summary.totalRoutes).padStart(6)}                      │`);
-  console.log(`│  Resources:            ${String(result.routes.resources.length).padStart(6)}                      │`);
-  console.log(`│  Mounted engines:      ${String(result.routes.mountedEngines.length).padStart(6)}                      │`);
-  console.log(`│  External files:       ${String(result.routes.drawnFiles.length).padStart(6)}                      │`);
+  console.log(
+    `│  Total routes:         ${String(result.summary.totalRoutes).padStart(6)}                      │`
+  );
+  console.log(
+    `│  Resources:            ${String(result.routes.resources.length).padStart(6)}                      │`
+  );
+  console.log(
+    `│  Mounted engines:      ${String(result.routes.mountedEngines.length).padStart(6)}                      │`
+  );
+  console.log(
+    `│  External files:       ${String(result.routes.drawnFiles.length).padStart(6)}                      │`
+  );
   console.log('└─────────────────────────────────────────────────────┘');
-  
+
   console.log('┌─────────────────────────────────────────────────────┐');
   console.log('│ Controllers                                         │');
   console.log('├─────────────────────────────────────────────────────┤');
-  console.log(`│  Total controllers:    ${String(result.summary.totalControllers).padStart(6)}                      │`);
-  console.log(`│  Total actions:        ${String(result.summary.totalActions).padStart(6)}                      │`);
-  console.log(`│  Namespaces:           ${String(result.controllers.namespaces.length).padStart(6)}                      │`);
+  console.log(
+    `│  Total controllers:    ${String(result.summary.totalControllers).padStart(6)}                      │`
+  );
+  console.log(
+    `│  Total actions:        ${String(result.summary.totalActions).padStart(6)}                      │`
+  );
+  console.log(
+    `│  Namespaces:           ${String(result.controllers.namespaces.length).padStart(6)}                      │`
+  );
   console.log('└─────────────────────────────────────────────────────┘');
-  
+
   console.log('┌─────────────────────────────────────────────────────┐');
   console.log('│ Models                                              │');
   console.log('├─────────────────────────────────────────────────────┤');
-  console.log(`│  Total models:         ${String(result.summary.totalModels).padStart(6)}                      │`);
-  console.log(`│  Associations:         ${String(result.summary.totalAssociations).padStart(6)}                      │`);
-  console.log(`│  Validations:          ${String(result.summary.totalValidations).padStart(6)}                      │`);
+  console.log(
+    `│  Total models:         ${String(result.summary.totalModels).padStart(6)}                      │`
+  );
+  console.log(
+    `│  Associations:         ${String(result.summary.totalAssociations).padStart(6)}                      │`
+  );
+  console.log(
+    `│  Validations:          ${String(result.summary.totalValidations).padStart(6)}                      │`
+  );
   console.log('└─────────────────────────────────────────────────────┘');
 
   console.log('┌─────────────────────────────────────────────────────┐');
   console.log('│ gRPC Services                                       │');
   console.log('├─────────────────────────────────────────────────────┤');
-  console.log(`│  Total services:       ${String(result.summary.totalGrpcServices).padStart(6)}                      │`);
-  console.log(`│  Total RPCs:           ${String(result.summary.totalRpcs).padStart(6)}                      │`);
+  console.log(
+    `│  Total services:       ${String(result.summary.totalGrpcServices).padStart(6)}                      │`
+  );
+  console.log(
+    `│  Total RPCs:           ${String(result.summary.totalRpcs).padStart(6)}                      │`
+  );
   console.log('└─────────────────────────────────────────────────────┘');
-  
+
   console.log('┌─────────────────────────────────────────────────────┐');
   console.log('│ Shared                                              │');
   console.log('├─────────────────────────────────────────────────────┤');
-  console.log(`│  Total namespaces:     ${String(result.summary.namespaces.length).padStart(6)}                      │`);
-  console.log(`│  Total concerns:       ${String(result.summary.concerns.length).padStart(6)}                      │`);
+  console.log(
+    `│  Total namespaces:     ${String(result.summary.namespaces.length).padStart(6)}                      │`
+  );
+  console.log(
+    `│  Total concerns:       ${String(result.summary.concerns.length).padStart(6)}                      │`
+  );
   console.log('└─────────────────────────────────────────────────────┘');
-  
+
   // Errors summary
-  const totalErrors = result.routes.errors.length + 
-                      result.controllers.errors.length + 
-                      result.models.errors.length +
-                      result.grpc.errors.length;
-  
+  const totalErrors =
+    result.routes.errors.length +
+    result.controllers.errors.length +
+    result.models.errors.length +
+    result.grpc.errors.length;
+
   if (totalErrors > 0) {
     console.log(`\n⚠️  Total errors: ${totalErrors}`);
   } else {
@@ -168,4 +254,3 @@ const isMainModule = import.meta.url === `file://${process.argv[1]}`;
 if (isMainModule) {
   main().catch(console.error);
 }
-

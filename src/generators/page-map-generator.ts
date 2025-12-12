@@ -180,6 +180,9 @@ export class PageMapGenerator {
       ? JSON.stringify(railsAnalysis.controllers.controllers)
       : '[]';
     const railsModelsJson = railsAnalysis ? JSON.stringify(railsAnalysis.models.models) : '[]';
+    const railsViewsJson = railsAnalysis
+      ? JSON.stringify(railsAnalysis.views)
+      : '{ "views": [], "pages": [], "summary": {} }';
     const railsSummaryJson = railsAnalysis ? JSON.stringify(railsAnalysis.summary) : 'null';
 
     // Environment info
@@ -555,8 +558,19 @@ export class PageMapGenerator {
     </aside>
     
     <div class="content">
-      <div class="tree-view active" id="tree-view">
-        ${this.buildTreeHtml(groups, allPages)}
+      <!-- Pages Tree View (for all screens - Next.js/React/Rails) -->
+      <div class="tree-view ${activeTab === 'pages' ? 'active' : ''}" id="tree-view" data-tab="pages">
+        ${allPages.length > 0 ? this.buildTreeHtml(groups, allPages) : ''}
+        <div id="page-map-rails-section" style="${allPages.length > 0 && hasRails ? 'margin-top:20px;border-top:1px solid var(--bg3);padding-top:20px' : ''}">
+          ${hasRails && allPages.length === 0 ? '<div style="padding:20px;color:var(--text2)">Loading screens...</div>' : ''}
+        </div>
+      </div>
+      
+      <!-- Rails Routes View (dedicated) -->
+      <div class="tree-view ${activeTab === 'rails' ? 'active' : ''}" id="rails-tree-view" data-tab="rails">
+        <div id="rails-routes-container">
+          ${hasRails ? '<div style="padding:20px;color:var(--text2)">Loading Rails routes...</div>' : '<div style="padding:40px;text-align:center;color:var(--text2)">No Rails environment detected</div>'}
+        </div>
       </div>
       
       <div class="graph-view" id="graph-view">
@@ -617,6 +631,7 @@ export class PageMapGenerator {
     const railsRoutes = ${railsRoutesJson};
     const railsControllers = ${railsControllersJson};
     const railsModels = ${railsModelsJson};
+    const railsViews = ${railsViewsJson};
     const railsSummary = ${railsSummaryJson};
     
     // Current active tab state
@@ -631,9 +646,22 @@ export class PageMapGenerator {
     function setView(v) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       event.target.classList.add('active');
-      document.getElementById('tree-view').classList.toggle('active', v === 'tree');
-      document.getElementById('graph-view').classList.toggle('active', v === 'graph');
-      if (v === 'graph') setTimeout(initGraph, 100);
+      
+      // Hide all tree views
+      document.querySelectorAll('.tree-view').forEach(el => el.classList.remove('active'));
+      document.getElementById('graph-view').classList.remove('active');
+      
+      if (v === 'tree') {
+        // Show appropriate tree view based on current main tab
+        if (currentMainTab === 'rails') {
+          document.getElementById('rails-tree-view').classList.add('active');
+        } else {
+          document.getElementById('tree-view').classList.add('active');
+        }
+      } else if (v === 'graph') {
+        document.getElementById('graph-view').classList.add('active');
+        setTimeout(initGraph, 100);
+      }
     }
     
     // Environment filtering
@@ -771,6 +799,428 @@ export class PageMapGenerator {
       }
       
       showModal('🔌 gRPC Services', '<div style="color:var(--text2)">Total ' + railsSummary.totalGrpcServices + ' services with ' + railsSummary.totalRpcs + ' RPCs</div><div style="margin-top:8px;font-size:12px">View full details in Rails Map tab</div>');
+    }
+    
+    // Render Rails routes in tree view
+    function renderRailsRoutesTree() {
+      const container = document.getElementById('rails-routes-container');
+      if (!container) return;
+      
+      // Use pages if available, otherwise fall back to routes
+      const pages = (railsViews && railsViews.pages) || [];
+      const routes = railsRoutes || [];
+      
+      if (pages.length === 0 && routes.length === 0) {
+        container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text2)">No Rails pages or routes found</div>';
+        return;
+      }
+      
+      // Build combined data from routes with page info
+      const combinedData = [];
+      
+      // Map routes to include API info from pages
+      routes.forEach(route => {
+        // Skip redirect routes and complex patterns
+        if (route.path.includes('=>') || route.path.includes('redirect{') || route.path.includes('redirect {')) {
+          return;
+        }
+        // Skip routes with unmatched parentheses (malformed patterns)
+        if (route.path.includes('(') && !route.path.includes(')')) {
+          return;
+        }
+        
+        const pageInfo = pages.find(p => p.route === route.path && p.method === route.method);
+        combinedData.push({
+          ...route,
+          hasView: !!pageInfo?.view,
+          services: pageInfo?.services || [],
+          grpcCalls: pageInfo?.grpcCalls || [],
+          modelAccess: pageInfo?.modelAccess || [],
+          apis: pageInfo?.apis || []
+        });
+      });
+      
+      // Group by namespace (first path segment)
+      const routesByNamespace = new Map();
+      combinedData.forEach(r => {
+        // Extract clean first segment
+        let firstSegment = r.path.split('/').filter(s => s && !s.startsWith(':') && !s.includes('('))[0] || '';
+        const ns = r.namespace || (r.path.startsWith('/api/') ? 'api' : firstSegment || 'root');
+        if (!routesByNamespace.has(ns)) routesByNamespace.set(ns, []);
+        routesByNamespace.get(ns).push(r);
+      });
+      
+      // Sort namespaces
+      const sortedNamespaces = [...routesByNamespace.keys()].sort((a, b) => {
+        if (a === 'root') return -1;
+        if (b === 'root') return 1;
+        return a.localeCompare(b);
+      });
+      
+      let html = '';
+      const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
+      
+      // Stats summary
+      const totalWithView = combinedData.filter(r => r.hasView).length;
+      const totalWithApi = combinedData.filter(r => r.services.length > 0 || r.grpcCalls.length > 0).length;
+      
+      html += '<div style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:12px">';
+      html += '<div style="display:flex;gap:16px;justify-content:center">';
+      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:600">' + combinedData.length + '</div><div style="font-size:11px;color:var(--text2)">Routes</div></div>';
+      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:600">' + totalWithView + '</div><div style="font-size:11px;color:var(--text2)">With Views</div></div>';
+      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:600">' + totalWithApi + '</div><div style="font-size:11px;color:var(--text2)">With APIs</div></div>';
+      html += '</div></div>';
+      
+      sortedNamespaces.forEach((ns, idx) => {
+        const routes = routesByNamespace.get(ns);
+        const color = colors[idx % colors.length];
+        
+        html += '<div class="group">';
+        html += '<div class="group-header" onclick="toggleGroup(this)" style="border-left-color:' + color + '">';
+        html += '<span class="group-toggle">▼</span>';
+        html += '<span class="group-name">📂 ' + ns + '</span>';
+        html += '<span class="group-count">' + routes.length + '</span>';
+        html += '</div>';
+        html += '<div class="group-items">';
+        
+        // Sort by path, then by method
+        routes.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+        
+        routes.slice(0, 100).forEach(route => {
+          const methodColor = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',PATCH:'#f59e0b',DELETE:'#ef4444'}[route.method] || '#888';
+          
+          // Clean up path - truncate redirect blocks and long paths
+          let displayPath = route.path;
+          if (displayPath.includes('=>') || displayPath.includes('redirect')) {
+            // Extract just the route pattern before any redirect logic
+            const match = displayPath.match(/^([^"]+)"/);
+            displayPath = match ? match[1].trim() + ' → redirect' : displayPath.slice(0, 60) + '...';
+          }
+          if (displayPath.length > 80) {
+            displayPath = displayPath.slice(0, 77) + '...';
+          }
+          const pathHighlighted = displayPath.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>');
+          
+          // Indicators for view and API
+          let indicators = '';
+          if (route.hasView) indicators += '<span title="Has View" style="margin-left:4px;font-size:10px">📄</span>';
+          if (route.services.length > 0) indicators += '<span title="Uses Services" style="margin-left:4px;font-size:10px">⚙️</span>';
+          if (route.grpcCalls.length > 0) indicators += '<span title="gRPC Calls" style="margin-left:4px;font-size:10px">🔌</span>';
+          if (route.modelAccess.length > 0) indicators += '<span title="Model Access" style="margin-left:4px;font-size:10px">💾</span>';
+          
+          html += '<div class="page-item" onclick="showRailsRouteDetail(\\''+encodeURIComponent(JSON.stringify(route))+'\\', true)" style="cursor:pointer">';
+          html += '<span class="page-type" style="background:' + methodColor + ';min-width:50px;text-align:center">' + route.method + '</span>';
+          html += '<span class="page-path" style="font-family:monospace;font-size:12px;flex:1">' + pathHighlighted + '</span>';
+          html += indicators;
+          html += '</div>';
+        });
+        
+        if (routes.length > 100) {
+          html += '<div style="padding:8px 12px;color:var(--text2);font-size:12px">...and ' + (routes.length - 100) + ' more routes</div>';
+        }
+        
+        html += '</div></div>';
+      });
+      
+      container.innerHTML = html;
+    }
+    
+    // Show Rails route detail
+    function showRailsRouteDetail(dataOrPath, isFullData) {
+      let route;
+      if (isFullData) {
+        route = JSON.parse(decodeURIComponent(dataOrPath));
+      } else {
+        // Legacy support
+        route = { path: dataOrPath, method: arguments[1], controller: arguments[2], action: arguments[3], line: arguments[4] };
+      }
+      
+      const methodColor = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',PATCH:'#f59e0b',DELETE:'#ef4444'}[route.method] || '#888';
+      
+      let html = '<div class="detail-section">';
+      html += '<div class="detail-label">Method</div>';
+      html += '<div class="detail-value"><span style="background:' + methodColor + ';color:white;padding:4px 12px;border-radius:4px;font-weight:600">' + route.method + '</span></div>';
+      html += '</div>';
+      
+      html += '<div class="detail-section">';
+      html += '<div class="detail-label">Path</div>';
+      html += '<div class="detail-value" style="font-family:monospace">' + route.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>') + '</div>';
+      html += '</div>';
+      
+      html += '<div class="detail-section">';
+      html += '<div class="detail-label">Controller#Action</div>';
+      html += '<div class="detail-value">' + route.controller + '#' + route.action + '</div>';
+      html += '</div>';
+      
+      // View info
+      if (route.hasView && route.view) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">📄 View</div>';
+        html += '<div class="detail-value" style="font-family:monospace;font-size:12px">app/views/' + route.view.path + '</div>';
+        html += '</div>';
+      }
+      
+      // Services
+      if (route.services && route.services.length > 0) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">⚙️ Services Used</div>';
+        html += '<div class="detail-items">';
+        route.services.forEach(s => {
+          html += '<div class="detail-item"><span class="tag" style="background:#8b5cf6">Service</span><span class="name">' + s + '</span></div>';
+        });
+        html += '</div></div>';
+      }
+      
+      // gRPC Calls
+      if (route.grpcCalls && route.grpcCalls.length > 0) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">🔌 gRPC Calls</div>';
+        html += '<div class="detail-items">';
+        route.grpcCalls.forEach(g => {
+          html += '<div class="detail-item"><span class="tag" style="background:#06b6d4">gRPC</span><span class="name">' + g + '</span></div>';
+        });
+        html += '</div></div>';
+      }
+      
+      // Model Access
+      if (route.modelAccess && route.modelAccess.length > 0) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">💾 Models Accessed</div>';
+        html += '<div class="detail-items">';
+        route.modelAccess.forEach(m => {
+          html += '<div class="detail-item"><span class="tag" style="background:#f59e0b">Model</span><span class="name">' + m + '</span></div>';
+        });
+        html += '</div></div>';
+      }
+      
+      if (route.line > 0) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">Source</div>';
+        html += '<div class="detail-value" style="font-size:12px;color:var(--text2)">config/routes.rb:' + route.line + '</div>';
+        html += '</div>';
+      }
+      
+      // Find related controller info
+      if (railsControllers && railsControllers.length > 0) {
+        const ctrl = railsControllers.find(c => c.className.toLowerCase().includes(route.controller.split('::').pop().toLowerCase()));
+        if (ctrl) {
+          html += '<div class="detail-section">';
+          html += '<div class="detail-label">Controller Details</div>';
+          html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-top:8px">';
+          html += '<div style="font-weight:600;margin-bottom:4px">' + ctrl.className + '</div>';
+          html += '<div style="font-size:11px;color:var(--text2)">extends ' + ctrl.parentClass + '</div>';
+          if (ctrl.beforeActions && ctrl.beforeActions.length > 0) {
+            html += '<div style="margin-top:8px;font-size:11px">';
+            html += '<span style="color:var(--text2)">Before filters:</span> ';
+            html += ctrl.beforeActions.slice(0, 3).map(f => f.name).join(', ');
+            if (ctrl.beforeActions.length > 3) html += '...';
+            html += '</div>';
+          }
+          html += '</div></div>';
+        }
+      }
+      
+      showModal(route.method + ' ' + route.path, html);
+    }
+    
+    // Initialize Rails view on page load
+    if (currentMainTab === 'rails') {
+      setTimeout(renderRailsRoutesTree, 100);
+    }
+    
+    // For page-map: show Rails views/pages when no Next.js pages
+    if (currentMainTab === 'pages' && envInfo.hasRails) {
+      setTimeout(renderRailsPagesInPageMap, 100);
+    }
+    
+    // Render Rails pages in page-map view (integrated screens) - URL format like React
+    function renderRailsPagesInPageMap() {
+      const container = document.getElementById('page-map-rails-section');
+      if (!container) return;
+      
+      const routes = railsRoutes || [];
+      
+      // Filter to only GET routes (actual pages, not API endpoints)
+      const pageRoutes = routes.filter(r => {
+        // Skip redirects and complex patterns
+        if (r.path.includes('=>') || r.path.includes('redirect')) return false;
+        // Only GET requests are pages
+        if (r.method !== 'GET') return false;
+        // Skip API routes
+        if (r.path.startsWith('/api/')) return false;
+        // Skip assets and other non-page routes
+        if (r.path.includes('/assets/') || r.path.includes('.')) return false;
+        return true;
+      });
+      
+      if (pageRoutes.length === 0) {
+        container.innerHTML = '';
+        return;
+      }
+      
+      // Group by first path segment
+      const routesByGroup = new Map();
+      pageRoutes.forEach(r => {
+        const segments = r.path.split('/').filter(s => s);
+        const group = segments[0] || 'root';
+        if (!routesByGroup.has(group)) routesByGroup.set(group, []);
+        routesByGroup.get(group).push(r);
+      });
+      
+      const sortedGroups = [...routesByGroup.keys()].sort();
+      const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
+      
+      let html = '';
+      html += '<div style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:12px">';
+      html += '<div style="font-weight:600;margin-bottom:8px">🛤️ Rails Pages</div>';
+      html += '<div style="font-size:12px;color:var(--text2)">' + pageRoutes.length + ' pages from ' + sortedGroups.length + ' sections</div>';
+      html += '</div>';
+      
+      sortedGroups.forEach((group, idx) => {
+        const groupRoutes = routesByGroup.get(group);
+        const color = colors[idx % colors.length];
+        
+        html += '<div class="group">';
+        html += '<div class="group-header" onclick="toggleGroup(this)" style="border-left-color:' + color + '">';
+        html += '<span class="group-toggle">▼</span>';
+        html += '<span class="group-name">/' + group + '</span>';
+        html += '<span class="group-count">' + groupRoutes.length + '</span>';
+        html += '</div>';
+        html += '<div class="group-items">';
+        
+        // Sort by path
+        groupRoutes.sort((a, b) => a.path.localeCompare(b.path));
+        
+        groupRoutes.slice(0, 50).forEach(route => {
+          // Format path with params highlighted
+          const displayPath = route.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>');
+          
+          html += '<div class="page-item" onclick="showRailsPageDetail(\\'' + encodeURIComponent(JSON.stringify(route)) + '\\')" style="cursor:pointer">';
+          html += '<span class="page-type" style="background:#8b5cf6">GET</span>';
+          html += '<span class="page-path" style="font-family:monospace;font-size:12px">' + displayPath + '</span>';
+          html += '</div>';
+        });
+        
+        if (groupRoutes.length > 50) {
+          html += '<div style="padding:8px 12px;color:var(--text2);font-size:11px">...and ' + (groupRoutes.length - 50) + ' more</div>';
+        }
+        
+        html += '</div></div>';
+      });
+      
+      container.innerHTML = html;
+    }
+    
+    // Show Rails page detail with API info
+    function showRailsPageDetail(encodedData) {
+      const route = JSON.parse(decodeURIComponent(encodedData));
+      
+      let html = '<div class="detail-section">';
+      html += '<div class="detail-label">URL Path</div>';
+      html += '<div class="detail-value" style="font-family:monospace">' + route.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>') + '</div>';
+      html += '</div>';
+      
+      html += '<div class="detail-section">';
+      html += '<div class="detail-label">Controller#Action</div>';
+      html += '<div class="detail-value">' + route.controller + '#' + route.action + '</div>';
+      html += '</div>';
+      
+      // Find page info from railsViews.pages
+      const pageInfo = (railsViews && railsViews.pages || []).find(p => 
+        p.controller === route.controller && p.action === route.action
+      );
+      
+      if (pageInfo) {
+        // Services
+        if (pageInfo.services && pageInfo.services.length > 0) {
+          html += '<div class="detail-section">';
+          html += '<div class="detail-label">⚙️ Services Used</div>';
+          html += '<div class="detail-items">';
+          pageInfo.services.forEach(s => {
+            html += '<div class="detail-item"><span class="tag" style="background:#8b5cf6">Service</span><span class="name">' + s + '</span></div>';
+          });
+          html += '</div></div>';
+        }
+        
+        // gRPC Calls
+        if (pageInfo.grpcCalls && pageInfo.grpcCalls.length > 0) {
+          html += '<div class="detail-section">';
+          html += '<div class="detail-label">🔌 gRPC Calls</div>';
+          html += '<div class="detail-items">';
+          pageInfo.grpcCalls.forEach(g => {
+            html += '<div class="detail-item"><span class="tag" style="background:#06b6d4">gRPC</span><span class="name">' + g + '</span></div>';
+          });
+          html += '</div></div>';
+        }
+        
+        // Model Access
+        if (pageInfo.modelAccess && pageInfo.modelAccess.length > 0) {
+          html += '<div class="detail-section">';
+          html += '<div class="detail-label">💾 Models Accessed</div>';
+          html += '<div class="detail-items">';
+          pageInfo.modelAccess.forEach(m => {
+            html += '<div class="detail-item"><span class="tag" style="background:#f59e0b">Model</span><span class="name">' + m + '</span></div>';
+          });
+          html += '</div></div>';
+        }
+        
+        // View
+        if (pageInfo.view) {
+          html += '<div class="detail-section">';
+          html += '<div class="detail-label">📄 View Template</div>';
+          html += '<div class="detail-value" style="font-family:monospace;font-size:12px">app/views/' + pageInfo.view.path + '</div>';
+          html += '</div>';
+        }
+      } else {
+        html += '<div style="padding:12px;color:var(--text2);font-size:12px">No detailed API information available for this page.</div>';
+      }
+      
+      showModal(route.path, html);
+    }
+    
+    // Show Rails view detail
+    function showRailsViewDetail(encodedData) {
+      const view = JSON.parse(decodeURIComponent(encodedData));
+      
+      let html = '<div class="detail-section">';
+      html += '<div class="detail-label">View</div>';
+      html += '<div class="detail-value" style="font-family:monospace">app/views/' + view.path + '</div>';
+      html += '</div>';
+      
+      html += '<div class="detail-section">';
+      html += '<div class="detail-label">Controller#Action</div>';
+      html += '<div class="detail-value">' + view.controller + '#' + view.action + '</div>';
+      html += '</div>';
+      
+      html += '<div class="detail-section">';
+      html += '<div class="detail-label">Template</div>';
+      html += '<div class="detail-value">' + view.template.toUpperCase() + ' (' + view.format + ')</div>';
+      html += '</div>';
+      
+      if (view.partials && view.partials.length > 0) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">Partials Used</div>';
+        html += '<div class="detail-items">';
+        view.partials.forEach(p => {
+          html += '<div class="detail-item"><span class="tag" style="background:#6b7280">PARTIAL</span><span class="name">' + p + '</span></div>';
+        });
+        html += '</div></div>';
+      }
+      
+      if (view.instanceVars && view.instanceVars.length > 0) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">Instance Variables</div>';
+        html += '<div class="detail-items">';
+        view.instanceVars.slice(0, 10).forEach(v => {
+          html += '<div class="detail-item"><span class="tag" style="background:#f59e0b">@</span><span class="name">' + v + '</span></div>';
+        });
+        if (view.instanceVars.length > 10) {
+          html += '<div style="padding:4px 8px;color:var(--text2);font-size:11px">...and ' + (view.instanceVars.length - 10) + ' more</div>';
+        }
+        html += '</div></div>';
+      }
+      
+      showModal('📄 ' + view.controller + '/' + view.action, html);
     }
     
     function toggleGroup(el) {
@@ -1730,6 +2180,12 @@ export class PageMapGenerator {
         }
       });
       return lines.join('\\n');
+    }
+    
+    function showModal(title, html) {
+      document.getElementById('modal-title').textContent = title;
+      document.getElementById('modal-body').innerHTML = html;
+      document.getElementById('modal').classList.add('open');
     }
     
     function closeModal() {
