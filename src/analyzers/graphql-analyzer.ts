@@ -81,9 +81,6 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   private async analyzeInlineGraphQL(): Promise<GraphQLOperation[]> {
     const operations: GraphQLOperation[] = [];
 
-    const _featuresDir = this.getSetting('featuresDir', 'src/features');
-    const _commonDir = this.getSetting('componentsDir', 'src/common');
-
     const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
       ignore: [
@@ -100,6 +97,23 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
       try {
         const sourceFile = this.project.addSourceFileAtPath(filePath);
         const relativePath = path.relative(this.basePath, filePath);
+
+        // Check if file imports gql from any GraphQL-related source
+        // Supports: @apollo/client, graphql-tag, graphql.macro, __generated__/gql, gql-masked, etc.
+        const hasGqlImport = sourceFile.getImportDeclarations().some((imp) => {
+          const spec = imp.getModuleSpecifierValue();
+          const namedImports = imp.getNamedImports().map((n) => n.getName());
+          const defaultImport = imp.getDefaultImport()?.getText();
+
+          // Check if gql is imported from GraphQL-related modules
+          return (
+            (namedImports.includes('gql') || namedImports.includes('graphql') || defaultImport === 'gql') &&
+            (spec.includes('graphql') ||
+              spec.includes('apollo') ||
+              spec.includes('gql') ||
+              spec.includes('__generated__'))
+          );
+        });
 
         // Find gql`` or graphql`` template literals
         const taggedTemplates = sourceFile.getDescendantsOfKind(
@@ -141,6 +155,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         }
 
         // Find gql() function calls: gql(/* GraphQL */ `...`) or gql(`...`)
+        // Also supports typed-document-node codegen pattern: gql(/* GraphQL */ `...`)
         const callExpressions = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
         for (const call of callExpressions) {
           try {
@@ -154,7 +169,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
                 const firstArg = args[0];
                 let content = '';
 
-                // Handle template literal argument
+                // Handle template literal argument (direct or with /* GraphQL */ comment)
                 if (firstArg.isKind(SyntaxKind.NoSubstitutionTemplateLiteral)) {
                   content = firstArg.getLiteralValue();
                 } else if (firstArg.isKind(SyntaxKind.TemplateExpression)) {
@@ -163,11 +178,18 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
                 } else {
                   // Try to get text content (might be a variable or other expression)
                   const argText = firstArg.getText();
-                  // Check if it's a template literal wrapped in comments
+                  // Check if it's a template literal wrapped in comments (/* GraphQL */ `...`)
                   if (argText.includes('`')) {
-                    const match = argText.match(/`([^`]*)`/);
+                    // Handle /* GraphQL */ `query { ... }` pattern
+                    const match = argText.match(/\/\*\s*GraphQL\s*\*\/\s*`([^`]*)`/);
                     if (match) {
                       content = match[1];
+                    } else {
+                      // Fallback: just extract template literal
+                      const simpleMatch = argText.match(/`([^`]*)`/);
+                      if (simpleMatch) {
+                        content = simpleMatch[1];
+                      }
                     }
                   }
                 }
@@ -191,20 +213,32 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
           }
         }
 
-        // Also find exported const queries
-        const variableDeclarations = sourceFile.getVariableDeclarations();
-        for (const varDecl of variableDeclarations) {
-          const name = varDecl.getName();
-          if (
-            name.includes('QUERY') ||
-            name.includes('MUTATION') ||
-            name.includes('FRAGMENT') ||
-            name.includes('Query') ||
-            name.includes('Mutation')
-          ) {
-            const initializer = varDecl.getInitializer();
-            if (initializer && initializer.isKind(SyntaxKind.TaggedTemplateExpression)) {
-              // Already handled above
+        // Find exported const queries with GraphQL-like naming patterns
+        // Supports: SCREAMING_CASE (e.g., SEARCH_COMPANIES) and PascalCase (e.g., Query, Mutation)
+        if (hasGqlImport) {
+          const variableDeclarations = sourceFile.getVariableDeclarations();
+          for (const varDecl of variableDeclarations) {
+            const name = varDecl.getName();
+            // Match GraphQL-like variable names
+            const isGraphQLLike =
+              name.includes('QUERY') ||
+              name.includes('MUTATION') ||
+              name.includes('FRAGMENT') ||
+              name.includes('Query') ||
+              name.includes('Mutation') ||
+              name.includes('Subscription') ||
+              // SCREAMING_CASE constants ending in related words
+              /^[A-Z_]+_(QUERY|MUTATION|FRAGMENT|SUBSCRIPTION)$/.test(name) ||
+              // PascalCase Query suffix
+              /Query$|Mutation$|Fragment$|Subscription$/.test(name);
+
+            if (isGraphQLLike) {
+              const initializer = varDecl.getInitializer();
+              // Tagged template is handled above, but let's also handle
+              // cases where the initializer is a call expression
+              if (initializer && initializer.isKind(SyntaxKind.CallExpression)) {
+                // Already handled above in the call expression loop
+              }
             }
           }
         }

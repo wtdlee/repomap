@@ -213,6 +213,7 @@ export class RestApiAnalyzer extends BaseAnalyzer {
       containingFunction,
       usedIn: [],
       requiresAuth,
+      category: this.categorizeApi(url),
     };
   }
 
@@ -251,6 +252,7 @@ export class RestApiAnalyzer extends BaseAnalyzer {
       containingFunction,
       usedIn: [],
       requiresAuth,
+      category: this.categorizeApi(url),
     };
   }
 
@@ -285,6 +287,7 @@ export class RestApiAnalyzer extends BaseAnalyzer {
       containingFunction,
       usedIn: [],
       requiresAuth,
+      category: this.categorizeApi(url),
     };
   }
 
@@ -339,6 +342,7 @@ export class RestApiAnalyzer extends BaseAnalyzer {
       containingFunction,
       usedIn: [],
       requiresAuth: false,
+      category: this.categorizeApi(url),
     };
   }
 
@@ -408,7 +412,7 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     }
 
     // Skip file extensions that are clearly not APIs
-    if (/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/i.test(url)) {
+    if (/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|html)$/i.test(url)) {
       return false;
     }
 
@@ -417,8 +421,31 @@ export class RestApiAnalyzer extends BaseAnalyzer {
       url.startsWith('/') ||
       url.startsWith('http') ||
       url.includes('/api/') ||
-      url.includes('.json')
+      url.includes('.json') ||
+      // Common external API patterns
+      url.includes('api.') ||
+      url.includes('hsforms.com') || // HubSpot
+      url.includes('amazonaws.com') || // AWS S3
+      url.includes('googleapis.com') || // Google APIs
+      url.includes('stripe.com') || // Stripe
+      url.includes('graph.facebook.com') || // Facebook
+      url.includes('api.twitter.com') // Twitter
     );
+  }
+
+  /**
+   * Categorize API by URL pattern
+   */
+  private categorizeApi(url: string): string | undefined {
+    if (url.includes('hsforms.com') || url.includes('hubspot')) return 'HubSpot';
+    if (url.includes('amazonaws.com') || url.includes('s3.')) return 'AWS S3';
+    if (url.includes('googleapis.com')) return 'Google API';
+    if (url.includes('stripe.com')) return 'Stripe';
+    if (url.includes('graph.facebook.com')) return 'Facebook';
+    if (url.includes('api.twitter.com')) return 'Twitter';
+    if (url.startsWith('/api/')) return 'Internal API';
+    if (url.startsWith('/')) return 'Internal Route';
+    return undefined;
   }
 
   /**

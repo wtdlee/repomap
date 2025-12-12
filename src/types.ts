@@ -117,6 +117,8 @@ export interface APICall {
   requiresAuth: boolean;
   /** Additional options or headers */
   options?: Record<string, unknown>;
+  /** API category (e.g., 'HubSpot', 'AWS S3', 'Internal API') */
+  category?: string;
 }
 
 export interface PageInfo {
