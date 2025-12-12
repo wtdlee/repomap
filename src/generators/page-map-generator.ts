@@ -1137,7 +1137,7 @@ export class PageMapGenerator {
       canvas.style.height = rect.height + 'px';
       ctx.scale(2, 2);
       
-      // Build nodes with better layout - group by category
+      // Build nodes - initial placement by category
       const groups = new Map();
       pages.forEach(p => {
         const cat = p.path.split('/').filter(Boolean)[0] || 'root';
@@ -1150,7 +1150,7 @@ export class PageMapGenerator {
       let catIdx = 0;
       const centerX = rect.width / 2;
       const centerY = rect.height / 2;
-      const catRadius = Math.min(rect.width, rect.height) * 0.35;
+      const catRadius = Math.min(rect.width, rect.height) * 0.3;
       
       Array.from(groups.entries()).forEach(([cat, catPages], gIdx) => {
         const catAngle = (gIdx / groups.size) * Math.PI * 2 - Math.PI / 2;
@@ -1158,17 +1158,18 @@ export class PageMapGenerator {
         const catY = centerY + Math.sin(catAngle) * catRadius;
         const color = catColors[catIdx++ % catColors.length];
         
-        // Arrange pages in this category in a cluster
-        const clusterRadius = 30 + catPages.length * 8;
+        // Initial spread with some randomness
         catPages.forEach((p, pIdx) => {
           const pageAngle = (pIdx / catPages.length) * Math.PI * 2;
-          const x = catX + Math.cos(pageAngle) * clusterRadius;
-          const y = catY + Math.sin(pageAngle) * clusterRadius;
+          const spread = 50 + catPages.length * 5;
+          const x = catX + Math.cos(pageAngle) * spread + (Math.random() - 0.5) * 30;
+          const y = catY + Math.sin(pageAngle) * spread + (Math.random() - 0.5) * 30;
           const label = p.path.split('/').filter(Boolean).pop() || '/';
           
           graphState.nodes.push({
             path: p.path,
             x, y,
+            vx: 0, vy: 0, // velocity for force simulation
             radius: 8,
             color: p.authentication?.required ? '#dc2626' : '#22c55e',
             label: label.length > 12 ? label.substring(0,10)+'...' : label,
@@ -1178,12 +1179,87 @@ export class PageMapGenerator {
         });
       });
       
-      // Build edges
+      // Build edges - only parent-child for visual clarity
       graphState.edges = relations.filter(r => r.type === 'parent-child').map(r => ({
         from: r.from,
         to: r.to,
         color: '#475569'
       }));
+      
+      // Build connection map for force simulation
+      const connections = new Map();
+      graphState.nodes.forEach(n => connections.set(n.path, new Set()));
+      graphState.edges.forEach(e => {
+        connections.get(e.from)?.add(e.to);
+        connections.get(e.to)?.add(e.from);
+      });
+      
+      // Force-directed layout simulation
+      const minDistance = 60; // Minimum distance between nodes
+      const iterations = 100;
+      
+      for (let iter = 0; iter < iterations; iter++) {
+        const alpha = 1 - iter / iterations; // Cooling factor
+        
+        // Apply forces
+        for (let i = 0; i < graphState.nodes.length; i++) {
+          const nodeA = graphState.nodes[i];
+          let fx = 0, fy = 0;
+          
+          for (let j = 0; j < graphState.nodes.length; j++) {
+            if (i === j) continue;
+            const nodeB = graphState.nodes[j];
+            
+            const dx = nodeA.x - nodeB.x;
+            const dy = nodeA.y - nodeB.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            
+            // Repulsion force (all nodes push each other away)
+            if (dist < minDistance * 3) {
+              const repulsion = (minDistance * 3 - dist) / dist * 2;
+              fx += dx * repulsion * alpha;
+              fy += dy * repulsion * alpha;
+            }
+            
+            // Attraction force (connected nodes pull each other)
+            const isConnected = connections.get(nodeA.path)?.has(nodeB.path);
+            if (isConnected && dist > minDistance) {
+              const attraction = (dist - minDistance) / dist * 0.3;
+              fx -= dx * attraction * alpha;
+              fy -= dy * attraction * alpha;
+            }
+            
+            // Category cohesion (same category nodes stay somewhat close)
+            if (nodeA.category === nodeB.category && dist > 150) {
+              const cohesion = (dist - 150) / dist * 0.1;
+              fx -= dx * cohesion * alpha;
+              fy -= dy * cohesion * alpha;
+            }
+          }
+          
+          // Center gravity (prevent nodes from flying away)
+          const toCenterX = centerX - nodeA.x;
+          const toCenterY = centerY - nodeA.y;
+          const centerDist = Math.sqrt(toCenterX * toCenterX + toCenterY * toCenterY);
+          if (centerDist > catRadius * 1.5) {
+            fx += toCenterX * 0.05 * alpha;
+            fy += toCenterY * 0.05 * alpha;
+          }
+          
+          // Apply velocity with damping
+          nodeA.vx = (nodeA.vx + fx) * 0.8;
+          nodeA.vy = (nodeA.vy + fy) * 0.8;
+        }
+        
+        // Update positions
+        graphState.nodes.forEach(n => {
+          n.x += n.vx;
+          n.y += n.vy;
+          // Keep within bounds
+          n.x = Math.max(50, Math.min(rect.width - 50, n.x));
+          n.y = Math.max(50, Math.min(rect.height - 50, n.y));
+        });
+      }
       
       // Setup event handlers
       canvas.onmousedown = e => {
