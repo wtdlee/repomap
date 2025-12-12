@@ -40,7 +40,22 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Find all page files
     const pageFiles = await fg(['**/*.tsx', '**/*.ts'], {
       cwd: pagesPath,
-      ignore: ['_app.tsx', '_document.tsx', 'api/**'],
+      ignore: [
+        // Next.js special files
+        '_app.tsx',
+        '_app.ts',
+        '_document.tsx',
+        '_document.ts',
+        '_error.tsx',
+        '_error.ts',
+        // Error pages
+        '404.tsx',
+        '404.ts',
+        '500.tsx',
+        '500.ts',
+        // API routes
+        'api/**',
+      ],
       absolute: true,
     });
 
