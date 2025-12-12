@@ -355,25 +355,79 @@ export class PagesAnalyzer extends BaseAnalyzer {
   private extractDataFetching(sourceFile: SourceFile): DataFetchingInfo[] {
     const dataFetching: DataFetchingInfo[] = [];
 
-    // Check if this file uses Apollo Client (imports from @apollo/client)
-    const hasApolloImport = sourceFile.getImportDeclarations().some((imp) => {
+    // Build a map of imported GraphQL hooks (including aliases)
+    // e.g., import { useQuery as getQuery } from '@apollo/client'
+    const apolloHookAliases = new Map<string, string>();
+    const apolloHooks = ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'];
+    
+    for (const imp of sourceFile.getImportDeclarations()) {
+      const moduleSpec = imp.getModuleSpecifierValue();
+      if (moduleSpec.includes('@apollo/client') || moduleSpec.includes('apollo')) {
+        for (const named of imp.getNamedImports()) {
+          const originalName = named.getName();
+          const alias = named.getAliasNode()?.getText() || originalName;
+          if (apolloHooks.includes(originalName)) {
+            apolloHookAliases.set(alias, originalName);
+          }
+        }
+      }
+    }
+
+    // Check if this file uses Apollo Client
+    const hasApolloImport = apolloHookAliases.size > 0 || sourceFile.getImportDeclarations().some((imp) => {
       const moduleSpecifier = imp.getModuleSpecifierValue();
       return moduleSpecifier.includes('@apollo/client') || moduleSpecifier.includes('apollo');
     });
 
-    // Find useQuery calls - only process as GraphQL if it's Apollo Client style
-    const useQueryCalls = sourceFile
+    // Find GraphQL hook calls - including aliases and custom hooks that wrap Apollo hooks
+    const graphqlHookCalls = sourceFile
       .getDescendantsOfKind(SyntaxKind.CallExpression)
       .filter((call) => {
         const expression = call.getExpression().getText();
-        return ['useQuery', 'useMutation', 'useLazyQuery'].includes(expression);
+        
+        // Direct Apollo hook or alias
+        if (apolloHookAliases.has(expression) || apolloHooks.includes(expression)) {
+          return true;
+        }
+        
+        // Custom hooks pattern: use*Query, use*Mutation (e.g., useUserQuery, useFetchPosts)
+        // But exclude non-GraphQL hooks like useQueryParams, useQueryString
+        if (/^use[A-Z].*Query$/.test(expression) && !expression.includes('Params') && !expression.includes('String')) {
+          return true;
+        }
+        if (/^use[A-Z].*Mutation$/.test(expression)) {
+          return true;
+        }
+        
+        return false;
       });
 
-    for (const call of useQueryCalls) {
-      const type = call.getExpression().getText() as DataFetchingInfo['type'];
+    for (const call of graphqlHookCalls) {
+      const hookName = call.getExpression().getText();
+      
+      // Determine the actual type (resolve alias to original name)
+      let resolvedType: DataFetchingInfo['type'];
+      if (apolloHookAliases.has(hookName)) {
+        resolvedType = apolloHookAliases.get(hookName) as DataFetchingInfo['type'];
+      } else if (hookName.includes('Mutation')) {
+        resolvedType = 'useMutation';
+      } else if (hookName.includes('Lazy')) {
+        resolvedType = 'useLazyQuery';
+      } else {
+        resolvedType = 'useQuery';
+      }
+
       const args = call.getArguments();
 
-      if (args.length === 0) continue;
+      // Custom hooks might not have arguments (they encapsulate the query)
+      if (args.length === 0) {
+        // For custom hooks like useUserQuery(), extract name from hook name
+        if (/^use[A-Z]/.test(hookName)) {
+          const operationName = hookName.replace(/^use/, '').replace(/Query$|Mutation$/, '');
+          dataFetching.push({ type: resolvedType, operationName, variables: [] });
+        }
+        continue;
+      }
 
       const firstArg = args[0];
       const firstArgText = firstArg.getText();
@@ -400,7 +454,8 @@ export class PagesAnalyzer extends BaseAnalyzer {
         firstArgText.endsWith('Document') ||
         firstArgText.endsWith('Query') ||
         firstArgText.endsWith('Mutation') ||
-        firstArgText.includes('gql');
+        firstArgText.includes('gql') ||
+        /^[A-Z_]+$/.test(firstArgText); // SCREAMING_CASE constant
 
       if (!isApolloPattern) {
         continue;
@@ -438,7 +493,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
         }
       }
 
-      dataFetching.push({ type, operationName, variables });
+      dataFetching.push({ type: resolvedType, operationName, variables });
     }
 
     // Find getServerSideProps and extract GraphQL queries
