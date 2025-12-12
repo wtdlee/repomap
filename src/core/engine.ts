@@ -1,6 +1,7 @@
 import { simpleGit } from 'simple-git';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import fg from 'fast-glob';
 import type {
   DocGeneratorConfig,
   RepositoryConfig,
@@ -19,6 +20,7 @@ import { DataFlowAnalyzer } from '../analyzers/dataflow-analyzer.js';
 import { RestApiAnalyzer } from '../analyzers/rest-api-analyzer.js';
 import { MermaidGenerator } from '../generators/mermaid-generator.js';
 import { MarkdownGenerator } from '../generators/markdown-generator.js';
+import { AnalysisCache } from './cache.js';
 
 /**
  * Main documentation generation engine
@@ -82,11 +84,48 @@ export class DocGeneratorEngine {
   }
 
   /**
-   * Analyze a single repository
+   * Analyze a single repository (with caching)
    */
   private async analyzeRepository(repoConfig: RepositoryConfig): Promise<RepositoryReport> {
+    // Initialize cache
+    const cache = new AnalysisCache(repoConfig.path);
+    await cache.init();
+
     // Get repository info
     const { version, commitHash } = await this.getRepoInfo(repoConfig);
+
+    // Compute content hash for cache key
+    const sourceFiles = await fg(['**/*.{ts,tsx,graphql}'], {
+      cwd: repoConfig.path,
+      ignore: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**'],
+      absolute: true,
+    });
+    const contentHash = await cache.computeFilesHash(sourceFiles);
+    const cacheKey = `analysis_${repoConfig.name}_${commitHash}`;
+
+    // Check cache
+    const cachedResult = cache.get<AnalysisResult>(cacheKey, contentHash);
+    if (cachedResult) {
+      console.log(`  ⚡ Using cached analysis (${cache.getStats().entries} entries)`);
+
+      const summary = {
+        totalPages: cachedResult.pages.length,
+        totalComponents: cachedResult.components.length,
+        totalGraphQLOperations: cachedResult.graphqlOperations.length,
+        totalDataFlows: cachedResult.dataFlows.length,
+        authRequiredPages: cachedResult.pages.filter((p) => p.authentication.required).length,
+        publicPages: cachedResult.pages.filter((p) => !p.authentication.required).length,
+      };
+
+      return {
+        name: repoConfig.name,
+        displayName: repoConfig.displayName,
+        version,
+        commitHash,
+        analysis: cachedResult,
+        summary,
+      };
+    }
 
     // Run analyzers in PARALLEL for faster analysis
     const analyzers = repoConfig.analyzers
@@ -107,6 +146,11 @@ export class DocGeneratorEngine {
       version,
       commitHash
     );
+
+    // Save to cache
+    cache.set(cacheKey, contentHash, analysis);
+    await cache.save();
+    console.log(`  💾 Analysis cached for future runs`);
 
     // Calculate summary
     const summary = {
