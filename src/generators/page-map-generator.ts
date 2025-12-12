@@ -1109,9 +1109,20 @@ export class PageMapGenerator {
           html += '</div>';
         }
       } else {
-        // Extract the core component name without common suffixes
-        const coreNameMatch = name.match(/^(.+?)(Container|Page|Wrapper|Form|Component|View|Modal|Dialog|Body|Content|Section|Header|Footer|Root)?$/);
-        const coreName = coreNameMatch ? coreNameMatch[1] : name;
+        // Extract the core component name - remove ALL common suffixes iteratively
+        const suffixes = ['Container', 'Page', 'Wrapper', 'Form', 'Component', 'View', 'Modal', 'Dialog', 'Body', 'Content', 'Section', 'Header', 'Footer', 'Root', 'Screen', 'Panel'];
+        let coreName = name;
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const suffix of suffixes) {
+            if (coreName.endsWith(suffix) && coreName.length > suffix.length) {
+              coreName = coreName.slice(0, -suffix.length);
+              changed = true;
+              break;
+            }
+          }
+        }
         
         // Split core name into keywords
         const rawKeywords = coreName
@@ -1123,8 +1134,9 @@ export class PageMapGenerator {
         // Build search patterns
         const strictPattern = coreName.toLowerCase();
         const kebabPattern = rawKeywords.join('-').toLowerCase();
-        // First significant keyword (for broader matching)
-        const primaryKeyword = rawKeywords.find(k => k.length >= 4)?.toLowerCase() || '';
+        // All keywords >= 4 chars for broader matching
+        const significantKeywords = rawKeywords.filter(k => k.length >= 4).map(k => k.toLowerCase());
+        const primaryKeyword = significantKeywords[0] || '';
 
         // Priority 1: Exact match in operation name
         let relatedOps = graphqlOps.filter(op => {
@@ -1141,42 +1153,24 @@ export class PageMapGenerator {
             op.usedIn?.some(f => {
               const fLower = f.toLowerCase();
               return fLower.includes(kebabPattern) || fLower.includes(strictPattern) ||
-                     (primaryKeyword && fLower.includes(primaryKeyword));
+                     significantKeywords.some(k => fLower.includes(k));
             })
           );
         }
 
-        // Priority 3: Primary keyword in operation name (longer keywords only)
-        if (relatedOps.length === 0 && primaryKeyword && primaryKeyword.length >= 5) {
+        // Priority 3: Any significant keyword in operation name
+        if (relatedOps.length === 0 && significantKeywords.length > 0) {
           relatedOps = graphqlOps.filter(op => {
             const opLower = op.name.toLowerCase();
-            return opLower.includes(primaryKeyword);
+            return significantKeywords.some(k => opLower.includes(k));
           });
         }
 
-        // Priority 4: Multiple keyword match (at least 2 significant keywords must match)
-        if (relatedOps.length === 0 && rawKeywords.length >= 2) {
-          const significantKeywords = rawKeywords.filter(k => k.length >= 3);
-          if (significantKeywords.length >= 2) {
-            relatedOps = graphqlOps.filter(op => {
-              const opLower = op.name.toLowerCase();
-              const matchCount = significantKeywords.filter(k => opLower.includes(k.toLowerCase())).length;
-              return matchCount >= 2;
-            });
-          }
-        }
-        
-        // Priority 5: Check usedIn for any keyword match
-        if (relatedOps.length === 0) {
-          const significantKeywords = rawKeywords.filter(k => k.length >= 4);
-          if (significantKeywords.length > 0) {
-            relatedOps = graphqlOps.filter(op => 
-              op.usedIn?.some(f => {
-                const fLower = f.toLowerCase();
-                return significantKeywords.some(k => fLower.includes(k.toLowerCase()));
-              })
-            );
-          }
+        // Priority 4: Single keyword match in usedIn paths (most flexible)
+        if (relatedOps.length === 0 && primaryKeyword) {
+          relatedOps = graphqlOps.filter(op => 
+            op.usedIn?.some(f => f.toLowerCase().includes(primaryKeyword))
+          );
         }
         
         // Deduplicate and limit
