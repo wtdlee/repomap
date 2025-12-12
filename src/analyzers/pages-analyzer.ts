@@ -25,9 +25,18 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   constructor(config: RepositoryConfig) {
     super(config);
+    const tsConfigPath = this.resolvePath('tsconfig.json');
+    const hasTsConfig = fs.existsSync(tsConfigPath);
+
     this.project = new Project({
-      tsConfigFilePath: this.resolvePath('tsconfig.json'),
+      ...(hasTsConfig ? { tsConfigFilePath: tsConfigPath } : {}),
       skipAddingFilesFromTsConfig: true,
+      compilerOptions: hasTsConfig
+        ? undefined
+        : {
+            allowJs: true,
+            jsx: 2, // React
+          },
     });
   }
 
@@ -1349,8 +1358,130 @@ export class PagesAnalyzer extends BaseAnalyzer {
       }
     }
 
+    // 4. Fallback: SPA with react-router-dom (no pages directory)
+    // Check for App.tsx with Route components
+    if (allFiles.length === 0) {
+      const spaRoutes = await this.findSPARoutes();
+      if (spaRoutes.length > 0) {
+        this.log(`Found ${spaRoutes.length} SPA routes from App.tsx`);
+        allFiles.push(...spaRoutes);
+      }
+    }
+
     // Remove duplicates
     return [...new Set(allFiles)];
+  }
+
+  /**
+   * Find routes from SPA (react-router-dom) based projects
+   * App.tsx에서 react-router-dom의 Route 컴포넌트를 파싱하여 페이지 찾기
+   */
+  private async findSPARoutes(): Promise<string[]> {
+    const routeFiles: string[] = [];
+
+    // Look for App.tsx/App.jsx/App.js in src/
+    const appPatterns = [
+      'src/App.tsx',
+      'src/App.jsx',
+      'src/App.js',
+      'App.tsx',
+      'App.jsx',
+      'App.js',
+    ];
+
+    for (const pattern of appPatterns) {
+      const appPath = this.resolvePath(pattern);
+      if (!fs.existsSync(appPath)) continue;
+
+      try {
+        const content = fs.readFileSync(appPath, 'utf-8');
+
+        // Check if it uses react-router-dom
+        if (!content.includes('react-router') && !content.includes('Route')) {
+          continue;
+        }
+
+        // Parse Route components to find component paths
+        // Pattern: <Route ... component={ComponentName} or element={<ComponentName} or path="..."
+        const routeRegex =
+          /<(?:Route|PrivateRoute)[^>]*(?:component=\{([^}]+)\}|element=\{<([^>\s/]+)|path=["']([^"']+)["'])/g;
+        const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]/g;
+
+        // Build import map
+        const importMap = new Map<string, string>();
+        let importMatch;
+        while ((importMatch = importRegex.exec(content)) !== null) {
+          importMap.set(importMatch[1], importMatch[2]);
+        }
+
+        // Find Route components
+        let routeMatch;
+        const foundComponents = new Set<string>();
+        while ((routeMatch = routeRegex.exec(content)) !== null) {
+          const componentName = routeMatch[1] || routeMatch[2];
+          if (componentName && !foundComponents.has(componentName)) {
+            foundComponents.add(componentName);
+
+            // Resolve component file path
+            const importPath = importMap.get(componentName);
+            if (importPath) {
+              const resolvedPath = this.resolveImportPath(path.dirname(appPath), importPath);
+              if (resolvedPath && fs.existsSync(resolvedPath)) {
+                routeFiles.push(resolvedPath);
+              }
+            }
+          }
+        }
+
+        // Also add App.tsx itself as an entry point if routes were found
+        if (routeFiles.length > 0) {
+          routeFiles.push(appPath);
+        }
+      } catch {
+        // Failed to parse App file
+      }
+    }
+
+    return routeFiles;
+  }
+
+  /**
+   * Resolve import path to absolute file path
+   */
+  private resolveImportPath(baseDir: string, importPath: string): string | null {
+    // Handle relative imports
+    if (importPath.startsWith('.')) {
+      const extensions = [
+        '.tsx',
+        '.ts',
+        '.jsx',
+        '.js',
+        '/index.tsx',
+        '/index.ts',
+        '/index.jsx',
+        '/index.js',
+      ];
+      const basePath = path.resolve(baseDir, importPath);
+
+      for (const ext of extensions) {
+        const fullPath = basePath + ext;
+        if (fs.existsSync(fullPath)) {
+          return fullPath;
+        }
+      }
+
+      // Check if it's a directory with index file
+      if (fs.existsSync(basePath) && fs.statSync(basePath).isDirectory()) {
+        for (const ext of ['/index.tsx', '/index.ts', '/index.jsx', '/index.js']) {
+          const indexPath = basePath + ext;
+          if (fs.existsSync(indexPath)) {
+            return indexPath;
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   /**

@@ -1,6 +1,7 @@
 import { Project, SyntaxKind, CallExpression, Node } from 'ts-morph';
 import fg from 'fast-glob';
 import * as path from 'path';
+import { existsSync } from 'fs';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
 import type { AnalysisResult, APICall, RepositoryConfig } from '../types.js';
@@ -15,9 +16,18 @@ export class RestApiAnalyzer extends BaseAnalyzer {
 
   constructor(config: RepositoryConfig) {
     super(config);
+    const tsConfigPath = this.resolvePath('tsconfig.json');
+    const hasTsConfig = existsSync(tsConfigPath);
+
     this.project = new Project({
-      tsConfigFilePath: this.resolvePath('tsconfig.json'),
+      ...(hasTsConfig ? { tsConfigFilePath: tsConfigPath } : {}),
       skipAddingFilesFromTsConfig: true,
+      compilerOptions: hasTsConfig
+        ? undefined
+        : {
+            allowJs: true,
+            jsx: 2, // React
+          },
     });
   }
 
