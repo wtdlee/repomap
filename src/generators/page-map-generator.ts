@@ -1194,9 +1194,19 @@ export class PageMapGenerator {
         connections.get(e.to)?.add(e.from);
       });
       
+      // Calculate category centers for strong grouping
+      const categoryCenters = new Map();
+      Array.from(groups.entries()).forEach(([cat], gIdx) => {
+        const catAngle = (gIdx / groups.size) * Math.PI * 2 - Math.PI / 2;
+        categoryCenters.set(cat, {
+          x: centerX + Math.cos(catAngle) * catRadius,
+          y: centerY + Math.sin(catAngle) * catRadius
+        });
+      });
+      
       // Force-directed layout simulation
-      const minDistance = 60; // Minimum distance between nodes
-      const iterations = 100;
+      const minDistance = 40; // Minimum distance between nodes
+      const iterations = 80;
       
       for (let iter = 0; iter < iterations; iter++) {
         const alpha = 1 - iter / iterations; // Cooling factor
@@ -1206,6 +1216,17 @@ export class PageMapGenerator {
           const nodeA = graphState.nodes[i];
           let fx = 0, fy = 0;
           
+          // Strong attraction to category center (keeps nodes in their group)
+          const catCenter = categoryCenters.get(nodeA.category);
+          if (catCenter) {
+            const toCatX = catCenter.x - nodeA.x;
+            const toCatY = catCenter.y - nodeA.y;
+            const catDist = Math.sqrt(toCatX * toCatX + toCatY * toCatY);
+            // Always pull toward category center
+            fx += toCatX * 0.08 * alpha;
+            fy += toCatY * 0.08 * alpha;
+          }
+          
           for (let j = 0; j < graphState.nodes.length; j++) {
             if (i === j) continue;
             const nodeB = graphState.nodes[j];
@@ -1214,9 +1235,9 @@ export class PageMapGenerator {
             const dy = nodeA.y - nodeB.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
             
-            // Repulsion force (all nodes push each other away)
-            if (dist < minDistance * 3) {
-              const repulsion = (minDistance * 3 - dist) / dist * 2;
+            // Repulsion force (only very close nodes)
+            if (dist < minDistance * 2) {
+              const repulsion = (minDistance * 2 - dist) / dist * 0.8;
               fx += dx * repulsion * alpha;
               fy += dy * repulsion * alpha;
             }
@@ -1224,31 +1245,15 @@ export class PageMapGenerator {
             // Attraction force (connected nodes pull each other)
             const isConnected = connections.get(nodeA.path)?.has(nodeB.path);
             if (isConnected && dist > minDistance) {
-              const attraction = (dist - minDistance) / dist * 0.3;
+              const attraction = (dist - minDistance) / dist * 0.2;
               fx -= dx * attraction * alpha;
               fy -= dy * attraction * alpha;
             }
-            
-            // Category cohesion (same category nodes stay somewhat close)
-            if (nodeA.category === nodeB.category && dist > 150) {
-              const cohesion = (dist - 150) / dist * 0.1;
-              fx -= dx * cohesion * alpha;
-              fy -= dy * cohesion * alpha;
-            }
-          }
-          
-          // Center gravity (prevent nodes from flying away)
-          const toCenterX = centerX - nodeA.x;
-          const toCenterY = centerY - nodeA.y;
-          const centerDist = Math.sqrt(toCenterX * toCenterX + toCenterY * toCenterY);
-          if (centerDist > catRadius * 1.5) {
-            fx += toCenterX * 0.05 * alpha;
-            fy += toCenterY * 0.05 * alpha;
           }
           
           // Apply velocity with damping
-          nodeA.vx = (nodeA.vx + fx) * 0.8;
-          nodeA.vy = (nodeA.vy + fy) * 0.8;
+          nodeA.vx = (nodeA.vx + fx) * 0.7;
+          nodeA.vy = (nodeA.vy + fy) * 0.7;
         }
         
         // Update positions
