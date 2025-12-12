@@ -577,25 +577,34 @@ export class PageMapGenerator {
       // Data operations - show component name info (deduplicated)
       let dataHtml = '';
       if (page.dataFetching && page.dataFetching.length > 0) {
-        // Deduplicate by operationName
-        const seenNames = new Set();
-        const uniqueDataFetching = page.dataFetching.filter(df => {
+        // Separate actual GraphQL operations from component references FIRST
+        const graphqlOps = page.dataFetching.filter(df => df.type !== 'component');
+        const componentRefs = page.dataFetching.filter(df => df.type === 'component');
+        
+        // Deduplicate GraphQL ops by operationName
+        const seenGraphQL = new Set();
+        const uniqueGraphQLOps = graphqlOps.filter(df => {
           const name = (df.operationName || '').replace(/^[→\\->\\s]+/,'').replace(/^\\u2192\\s*/,'');
-          if (seenNames.has(name)) return false;
-          seenNames.add(name);
+          if (seenGraphQL.has(name)) return false;
+          seenGraphQL.add(name);
           return true;
         });
         
-        // Separate actual GraphQL operations from component references
-        const graphqlOps = uniqueDataFetching.filter(df => df.type !== 'component');
-        const componentRefs = uniqueDataFetching.filter(df => df.type === 'component');
+        // Deduplicate component refs by operationName
+        const seenComponents = new Set();
+        const uniqueComponentRefs = componentRefs.filter(df => {
+          const name = df.operationName || '';
+          if (seenComponents.has(name)) return false;
+          seenComponents.add(name);
+          return true;
+        });
         
         dataHtml = '';
         
         // Show actual GraphQL operations
-        if (graphqlOps.length > 0) {
+        if (uniqueGraphQLOps.length > 0) {
           dataHtml += '<div class="detail-section"><h4>Data Operations</h4>';
-          graphqlOps.forEach(df => {
+          uniqueGraphQLOps.forEach(df => {
             const rawName = df.operationName || '';
             const cleanName = rawName.replace(/^[→\\->\\s]+/,'').replace(/^\\u2192\\s*/,'');
             const isQ = !df.type?.includes('Mutation');
@@ -607,9 +616,9 @@ export class PageMapGenerator {
         }
         
         // Show component references separately
-        if (componentRefs.length > 0) {
+        if (uniqueComponentRefs.length > 0) {
           dataHtml += '<div class="detail-section"><h4>Used Components</h4>';
-          componentRefs.forEach(df => {
+          uniqueComponentRefs.forEach(df => {
             const name = df.operationName || '';
             dataHtml += '<div class="detail-item" style="cursor:default"><span class="tag" style="background:var(--text2);color:var(--bg)">COMPONENT</span> '+name+'</div>';
           });
