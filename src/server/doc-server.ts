@@ -795,11 +795,11 @@ export class DocServer {
       background: #0052a3;
     }
     
-    /* Top header - matching page-map style */
-    .top-header {
+    /* Top header - exactly matching page-map style */
+    .header {
       background: #1e293b;
       padding: 12px 20px;
-      border-bottom: 1px solid #334155;
+      border-bottom: 1px solid #475569;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -807,21 +807,17 @@ export class DocServer {
       top: 0;
       z-index: 200;
     }
-    .top-header h1 { 
+    .header h1 { 
       font-size: 18px; 
-      color: #f1f5f9;
+      color: #f8fafc;
       cursor: pointer;
     }
-    .top-header-left {
+    .header-left {
       display: flex;
       align-items: center;
       gap: 24px;
     }
-    .top-nav {
-      display: flex;
-      gap: 4px;
-    }
-    .top-nav-link {
+    .nav-link {
       padding: 6px 12px;
       color: #94a3b8;
       text-decoration: none;
@@ -829,8 +825,8 @@ export class DocServer {
       border-radius: 4px;
       transition: all 0.15s;
     }
-    .top-nav-link:hover { background: #334155; color: #f1f5f9; }
-    .top-nav-link.active { background: #3b82f6; color: white; }
+    .nav-link:hover { background: #334155; color: #f8fafc; }
+    .nav-link.active { background: #3b82f6; color: white; }
     
     .container {
       display: flex;
@@ -850,13 +846,13 @@ export class DocServer {
   </style>
 </head>
 <body>
-  <header class="top-header">
-    <div class="top-header-left">
+  <header class="header">
+    <div class="header-left">
       <h1 onclick="location.href='/'">📊 ${this.config.repositories[0]?.displayName || this.config.repositories[0]?.name || 'Repository'}</h1>
-      <nav class="top-nav">
-        <a href="/page-map" class="top-nav-link">Page Map</a>
-        <a href="/docs" class="top-nav-link active">Docs</a>
-        <a href="/api/report" class="top-nav-link" target="_blank">API</a>
+      <nav style="display:flex;gap:4px">
+        <a href="/page-map" class="nav-link">Page Map</a>
+        <a href="/docs" class="nav-link active">Docs</a>
+        <a href="/api/report" class="nav-link" target="_blank">API</a>
       </nav>
     </div>
   </header>
