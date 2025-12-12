@@ -468,7 +468,7 @@ export class PageMapGenerator {
     <div class="detail-body" id="detail-body"></div>
   </div>
   
-  <div class="modal" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal" onclick="if(event.target===this)handleModalOutsideClick()">
     <div class="modal-box">
       <div class="modal-head">
         <div style="display:flex;align-items:center;gap:8px">
@@ -1143,11 +1143,22 @@ export class PageMapGenerator {
       document.getElementById('modal-back').style.display = 'none';
     }
     
+    function handleModalOutsideClick() {
+      // If there's history, go back instead of closing
+      if (modalHistory.length > 1) {
+        modalBack();
+      } else {
+        closeModal();
+      }
+    }
+    
     function modalBack() {
       if (modalHistory.length > 1) {
         modalHistory.pop(); // Remove current
         const prevName = modalHistory.pop(); // Get previous (will be re-added by showDataDetail)
         showDataDetail(prevName);
+      } else {
+        closeModal();
       }
     }
     
