@@ -303,14 +303,14 @@ export class PageMapGenerator {
         <div id="page-map-react-components-section" style="${hasRails ? 'margin-top:20px;border-top:1px solid var(--bg3);padding-top:20px' : ''}">
         </div>
         <div id="page-map-rails-section" style="${allPages.length > 0 && hasRails ? 'margin-top:20px;border-top:1px solid var(--bg3);padding-top:20px' : ''}">
-          ${hasRails && allPages.length === 0 ? '<div style="padding:20px;color:var(--text2)">Loading screens...</div>' : ''}
+          ${hasRails && allPages.length === 0 ? '<div class="empty-state-sm">Loading screens...</div>' : ''}
         </div>
       </div>
 
       <!-- Rails Routes View (dedicated) -->
       <div class="tree-view ${activeTab === 'rails' ? 'active' : ''}" id="rails-tree-view" data-tab="rails">
         <div id="rails-routes-container">
-          ${hasRails ? '<div style="padding:20px;color:var(--text2)">Loading Rails routes...</div>' : '<div style="padding:40px;text-align:center;color:var(--text2)">No Rails environment detected</div>'}
+          ${hasRails ? '<div class="empty-state-sm">Loading Rails routes...</div>' : '<div class="empty-state">No Rails environment detected</div>'}
         </div>
       </div>
 
@@ -472,17 +472,17 @@ export class PageMapGenerator {
         routesByNamespace.get(ns).push(r);
       });
 
-      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      let html = '<div class="max-h-60vh overflow-y-auto">';
       for (const [ns, routes] of routesByNamespace) {
         html += '<div style="margin-bottom:16px">';
         html += '<div style="font-weight:600;margin-bottom:8px;color:var(--accent)">📂 ' + ns + ' (' + routes.length + ')</div>';
         html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-        html += '<tr style="background:var(--bg3)"><th style="padding:6px;text-align:left">Method</th><th style="padding:6px;text-align:left">Path</th><th style="padding:6px;text-align:left">Controller#Action</th></tr>';
+        html += '<tr class="bg-surface"><th class="cell">Method</th><th class="cell">Path</th><th class="cell">Controller#Action</th></tr>';
         routes.slice(0, 20).forEach(r => {
           const methodColor = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',PATCH:'#f59e0b',DELETE:'#ef4444'}[r.method] || '#888';
           html += '<tr style="border-bottom:1px solid var(--border)">';
           html += '<td style="padding:6px"><span style="background:' + methodColor + ';color:white;padding:2px 6px;border-radius:3px;font-size:10px">' + r.method + '</span></td>';
-          html += '<td style="padding:6px;font-family:monospace">' + r.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>') + '</td>';
+          html += '<td style="padding:6px;font-family:monospace">' + r.path.replace(/:([a-z_]+)/g, '<span class="text-warning">:$1</span>') + '</td>';
           html += '<td style="padding:6px;color:var(--text2)">' + r.controller + '#' + r.action + '</td>';
           html += '</tr>';
         });
@@ -502,13 +502,13 @@ export class PageMapGenerator {
         return;
       }
 
-      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      let html = '<div class="max-h-60vh overflow-y-auto">';
       railsControllers.forEach(ctrl => {
-        html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-bottom:8px">';
-        html += '<div style="font-weight:600;margin-bottom:4px">' + ctrl.className + '</div>';
-        html += '<div style="font-size:11px;color:var(--text2);margin-bottom:8px">extends ' + ctrl.parentClass + '</div>';
+        html += '<div class="info-box">';
+        html += '<div class="section-title">' + ctrl.className + '</div>';
+        html += '<div class="hint mb-3">extends ' + ctrl.parentClass + '</div>';
         if (ctrl.actions && ctrl.actions.length > 0) {
-          html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+          html += '<div class="flex flex-wrap gap-1">';
           ctrl.actions.slice(0, 10).forEach(action => {
             const color = action.visibility === 'public' ? '#22c55e' : action.visibility === 'private' ? '#ef4444' : '#f59e0b';
             html += '<span style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:4px;font-size:11px;border-left:2px solid ' + color + '">' + action.name + '</span>';
@@ -529,16 +529,16 @@ export class PageMapGenerator {
         return;
       }
 
-      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      let html = '<div class="max-h-60vh overflow-y-auto">';
       railsModels.forEach(model => {
-        html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-bottom:8px">';
-        html += '<div style="font-weight:600;margin-bottom:4px">📦 ' + model.className + '</div>';
-        html += '<div style="display:flex;gap:16px;font-size:11px;color:var(--text2);margin-bottom:8px">';
+        html += '<div class="info-box">';
+        html += '<div class="section-title">📦 ' + model.className + '</div>';
+        html += '<div class="flex gap-3 hint mb-3">';
         html += '<span>📎 ' + (model.associations?.length || 0) + ' associations</span>';
         html += '<span>✓ ' + (model.validations?.length || 0) + ' validations</span>';
         html += '</div>';
         if (model.associations && model.associations.length > 0) {
-          html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+          html += '<div class="flex flex-wrap gap-1">';
           model.associations.slice(0, 8).forEach(assoc => {
             const typeColor = {belongs_to:'#3b82f6',has_many:'#22c55e',has_one:'#f59e0b'}[assoc.type] || '#888';
             html += '<span style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:4px;font-size:10px"><span style="color:' + typeColor + '">' + assoc.type + '</span> :' + assoc.name + '</span>';
@@ -564,24 +564,24 @@ export class PageMapGenerator {
         (b.usedIn?.length || 0) - (a.usedIn?.length || 0)
       );
 
-      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      let html = '<div class="max-h-60vh overflow-y-auto">';
 
       // Stats
       html += '<div style="display:flex;gap:16px;margin-bottom:16px;padding:12px;background:var(--bg3);border-radius:8px">';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:bold;color:var(--accent)">' + railsReact.summary.totalComponents + '</div><div style="font-size:10px;color:var(--text2)">Components</div></div>';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:bold;color:#22c55e">' + railsReact.summary.ssrComponents + '</div><div style="font-size:10px;color:var(--text2)">SSR</div></div>';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:bold;color:#3b82f6">' + railsReact.summary.clientComponents + '</div><div style="font-size:10px;color:var(--text2)">Client</div></div>';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:bold;color:#f59e0b">' + railsReact.summary.totalEntryPoints + '</div><div style="font-size:10px;color:var(--text2)">Entry Points</div></div>';
+      html += '<div class="text-center"><div style="font-size:20px;font-weight:bold;color:var(--accent)">' + railsReact.summary.totalComponents + '</div><div style="font-size:10px;color:var(--text2)">Components</div></div>';
+      html += '<div class="text-center"><div style="font-size:20px;font-weight:bold;color:#22c55e">' + railsReact.summary.ssrComponents + '</div><div style="font-size:10px;color:var(--text2)">SSR</div></div>';
+      html += '<div class="text-center"><div style="font-size:20px;font-weight:bold;color:#3b82f6">' + railsReact.summary.clientComponents + '</div><div style="font-size:10px;color:var(--text2)">Client</div></div>';
+      html += '<div class="text-center"><div style="font-size:20px;font-weight:bold;color:#f59e0b">' + railsReact.summary.totalEntryPoints + '</div><div style="font-size:10px;color:var(--text2)">Entry Points</div></div>';
       html += '</div>';
 
       sortedComponents.forEach(comp => {
         const usageCount = comp.usedIn?.length || 0;
-        const ssrBadge = comp.ssr ? '<span style="margin-left:6px;font-size:9px;background:#22c55e;color:white;padding:1px 4px;border-radius:2px">SSR</span>' : '';
+        const ssrBadge = comp.ssr ? '<span class="badge-success">SSR</span>' : '';
 
         html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-bottom:8px;cursor:pointer" onclick="showReactComponentDetail(\\'' + encodeURIComponent(JSON.stringify(comp)) + '\\')">';
         html += '<div style="display:flex;align-items:center;justify-content:space-between">';
-        html += '<div style="font-weight:600;display:flex;align-items:center"><span style="color:#61dafb;margin-right:6px">⚛</span>' + comp.name + ssrBadge + '</div>';
-        html += '<span style="font-size:11px;color:var(--text2)">' + usageCount + ' usage' + (usageCount !== 1 ? 's' : '') + '</span>';
+        html += '<div style="font-weight:600;display:flex;align-items:center"><span class="text-react mr-2">⚛</span>' + comp.name + ssrBadge + '</div>';
+        html += '<span class="hint">' + usageCount + ' usage' + (usageCount !== 1 ? 's' : '') + '</span>';
         html += '</div>';
 
         // Entry point info
@@ -602,7 +602,7 @@ export class PageMapGenerator {
             html += '<span style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:3px;font-size:10px;border-left:2px solid ' + patternColor + '">' + usage.controller + '/' + usage.action + '</span>';
           });
           if (comp.usedIn.length > 3) {
-            html += '<span style="font-size:10px;color:var(--text2)">+' + (comp.usedIn.length - 3) + ' more</span>';
+            html += '<span class="hint-sm">+' + (comp.usedIn.length - 3) + ' more</span>';
           }
           html += '</div>';
         }
@@ -686,17 +686,17 @@ export class PageMapGenerator {
         return;
       }
 
-      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      let html = '<div class="max-h-60vh overflow-y-auto">';
       railsGrpc.services.forEach(svc => {
-        html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-bottom:8px">';
-        html += '<div style="font-weight:600;margin-bottom:4px">🔌 ' + svc.className + '</div>';
+        html += '<div class="info-box">';
+        html += '<div class="section-title">🔌 ' + svc.className + '</div>';
         if (svc.namespace) {
-          html += '<div style="font-size:11px;color:var(--text2);margin-bottom:8px">namespace: ' + svc.namespace + '</div>';
+          html += '<div class="hint mb-3">namespace: ' + svc.namespace + '</div>';
         }
         if (svc.rpcs && svc.rpcs.length > 0) {
-          html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+          html += '<div class="flex flex-wrap gap-1">';
           svc.rpcs.slice(0, 15).forEach(rpc => {
-            html += '<span class="tag" style="background:var(--accent);font-size:10px">' + rpc.name + '</span>';
+            html += '<span class="tag tag-rpc tag-sm">' + rpc.name + '</span>';
           });
           if (svc.rpcs.length > 15) html += '<span style="color:var(--text2);font-size:11px">+' + (svc.rpcs.length - 15) + ' more</span>';
           html += '</div>';
@@ -718,7 +718,7 @@ export class PageMapGenerator {
       const routes = railsRoutes || [];
 
       if (pages.length === 0 && routes.length === 0) {
-        container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text2)">No Rails pages or routes found</div>';
+        container.innerHTML = '<div class="empty-state">No Rails pages or routes found</div>';
         return;
       }
 
@@ -885,7 +885,7 @@ export class PageMapGenerator {
           if (displayPath.length > 80) {
             displayPath = displayPath.slice(0, 77) + '...';
           }
-          const pathHighlighted = displayPath.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>');
+          const pathHighlighted = displayPath.replace(/:([a-z_]+)/g, '<span class="text-warning">:$1</span>');
 
           // Indicators for view, API, and response types
           let indicators = '';
@@ -915,7 +915,7 @@ export class PageMapGenerator {
 
           html += '<div class="page-item rails-route-item" data-path="' + searchPath + '"' + hiddenAttr + ' ' + filterAttrs.join(' ') + ' onclick="showRailsRouteDetail(\\''+encodeURIComponent(JSON.stringify(route))+'\\', true)" style="cursor:pointer;' + hiddenStyle + '">';
           html += '<span class="page-type" style="background:' + methodColor + ';min-width:50px;text-align:center">' + route.method + '</span>';
-          html += '<span class="page-path" style="font-family:monospace;font-size:12px;flex:1">' + pathHighlighted + '</span>';
+          html += '<span class="page-path">' + pathHighlighted + '</span>';
           html += indicators;
           html += '</div>';
         });
@@ -1001,7 +1001,7 @@ export class PageMapGenerator {
 
       html += '<div class="detail-section">';
       html += '<div class="detail-label">Path</div>';
-      html += '<div class="detail-value" style="font-family:monospace">' + route.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>') + '</div>';
+      html += '<div class="detail-value" style="font-family:monospace">' + route.path.replace(/:([a-z_]+)/g, '<span class="text-warning">:$1</span>') + '</div>';
       html += '</div>';
 
       html += '<div class="detail-section">';
@@ -1023,14 +1023,14 @@ export class PageMapGenerator {
             responseTypes.push('<span style="background:#8b5cf6;color:white;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:4px">' + f.toUpperCase() + '</span>');
           });
         }
-        html += responseTypes.length > 0 ? responseTypes.join('') : '<span style="color:var(--text2)">Unknown</span>';
+        html += responseTypes.length > 0 ? responseTypes.join('') : '<span class="text-muted">Unknown</span>';
         html += '</div></div>';
 
         // Redirect destination if exists
         if (action.redirectsTo) {
           html += '<div class="detail-section">';
           html += '<div class="detail-label">↪️ Redirects To</div>';
-          html += '<div class="detail-value" style="font-family:monospace;font-size:12px;background:var(--bg3);padding:8px;border-radius:4px">' + action.redirectsTo + '</div>';
+          html += '<div class="detail-value-block">' + action.redirectsTo + '</div>';
           html += '</div>';
         }
       }
@@ -1039,9 +1039,9 @@ export class PageMapGenerator {
       if (route.hasView && route.view) {
         html += '<div class="detail-section">';
         html += '<div class="detail-label">📄 View Template</div>';
-        html += '<div class="detail-value" style="font-family:monospace;font-size:12px">app/views/' + route.view.path + '</div>';
+        html += '<div class="detail-value">app/views/' + route.view.path + '</div>';
         if (route.view.partials && route.view.partials.length > 0) {
-          html += '<div style="margin-top:6px;font-size:11px;color:var(--text2)">Partials: ' + route.view.partials.slice(0, 5).join(', ') + (route.view.partials.length > 5 ? '...' : '') + '</div>';
+          html += '<div class="subtext">Partials: ' + route.view.partials.slice(0, 5).join(', ') + (route.view.partials.length > 5 ? '...' : '') + '</div>';
         }
         if (route.view.instanceVars && route.view.instanceVars.length > 0) {
           html += '<div style="margin-top:4px;font-size:11px;color:var(--text2)">Instance vars: @' + route.view.instanceVars.slice(0, 5).join(', @') + (route.view.instanceVars.length > 5 ? '...' : '') + '</div>';
@@ -1053,7 +1053,7 @@ export class PageMapGenerator {
       if (ctrl && (ctrl.beforeActions.length > 0 || ctrl.afterActions.length > 0)) {
         html += '<div class="detail-section">';
         html += '<div class="detail-label">🔒 Filters Applied to This Action</div>';
-        html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px">';
+        html += '<div class="code-block">';
 
         // Filter before_actions that apply to this action
         const applicableBeforeFilters = ctrl.beforeActions.filter(f => {
@@ -1066,7 +1066,7 @@ export class PageMapGenerator {
           html += '<div style="font-size:11px;margin-bottom:6px"><span style="color:#22c55e;font-weight:600">Before:</span></div>';
           html += '<div class="detail-items" style="margin-left:8px">';
           applicableBeforeFilters.forEach(f => {
-            let filterInfo = '<span class="tag" style="background:#22c55e;font-size:10px">before</span><span class="name">' + f.name + '</span>';
+            let filterInfo = '<span class="tag tag-before tag-sm">before</span><span class="name">' + f.name + '</span>';
             if (f.if) filterInfo += '<span style="font-size:10px;color:var(--text2);margin-left:4px">if: ' + f.if + '</span>';
             if (f.unless) filterInfo += '<span style="font-size:10px;color:var(--text2);margin-left:4px">unless: ' + f.unless + '</span>';
             html += '<div class="detail-item">' + filterInfo + '</div>';
@@ -1084,7 +1084,7 @@ export class PageMapGenerator {
           html += '<div style="font-size:11px;margin-top:8px;margin-bottom:6px"><span style="color:#f59e0b;font-weight:600">After:</span></div>';
           html += '<div class="detail-items" style="margin-left:8px">';
           applicableAfterFilters.forEach(f => {
-            let filterInfo = '<span class="tag" style="background:#f59e0b;font-size:10px">after</span><span class="name">' + f.name + '</span>';
+            let filterInfo = '<span class="tag tag-after tag-sm">after</span><span class="name">' + f.name + '</span>';
             html += '<div class="detail-item">' + filterInfo + '</div>';
           });
           html += '</div>';
@@ -1103,7 +1103,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">⚙️ Services Called</div>';
         html += '<div class="detail-items">';
         services.forEach(s => {
-          html += '<div class="detail-item"><span class="tag" style="background:#8b5cf6">Service</span><span class="name" style="font-family:monospace">' + s + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-service">Service</span><span class="name">' + s + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1114,7 +1114,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">🔌 gRPC Calls</div>';
         html += '<div class="detail-items">';
         route.grpcCalls.forEach(g => {
-          html += '<div class="detail-item"><span class="tag" style="background:#06b6d4">gRPC</span><span class="name" style="font-family:monospace">' + g + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-grpc">gRPC</span><span class="name">' + g + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1126,7 +1126,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">💾 Models Accessed</div>';
         html += '<div class="detail-items">';
         models.forEach(m => {
-          html += '<div class="detail-item"><span class="tag" style="background:#f59e0b">Model</span><span class="name" style="font-family:monospace">' + m + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-model">Model</span><span class="name">' + m + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1145,13 +1145,13 @@ export class PageMapGenerator {
           html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px;max-height:150px;overflow-y:auto">';
           html += '<div style="font-family:monospace;font-size:11px;line-height:1.6">';
           meaningfulCalls.forEach((call, i) => {
-            html += '<div style="padding:2px 0;border-bottom:1px solid var(--bg1)">';
+            html += '<div class="accordion-item">';
             html += '<span style="color:var(--text2);margin-right:8px">' + (i+1) + '.</span>';
-            html += '<span style="color:var(--accent)">' + call + '</span>';
+            html += '<span class="text-accent">' + call + '</span>';
             html += '</div>';
           });
           if (action.methodCalls.length > 15) {
-            html += '<div style="padding:4px 0;color:var(--text2);font-style:italic">...and ' + (action.methodCalls.length - 15) + ' more calls</div>';
+            html += '<div class="note">...and ' + (action.methodCalls.length - 15) + ' more calls</div>';
           }
           html += '</div></div></div>';
         }
@@ -1163,23 +1163,23 @@ export class PageMapGenerator {
       html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px;font-family:monospace;font-size:11px">';
 
       if (route.line > 0) {
-        html += '<div style="padding:4px 0;display:flex;align-items:center">';
-        html += '<span style="color:var(--text2);width:80px">Route:</span>';
-        html += '<span>config/routes.rb:<span style="color:#22c55e">' + route.line + '</span></span>';
+        html += '<div class="detail-item flex items-center py-1">';
+        html += '<span class="text-muted w-20">Route:</span>';
+        html += '<span>config/routes.rb:<span class="text-success">' + route.line + '</span></span>';
         html += '</div>';
       }
 
       if (ctrl) {
-        html += '<div style="padding:4px 0;display:flex;align-items:center">';
-        html += '<span style="color:var(--text2);width:80px">Controller:</span>';
+        html += '<div class="detail-item flex items-center py-1">';
+        html += '<span class="text-muted w-20">Controller:</span>';
         html += '<span>app/controllers/' + ctrl.filePath;
-        if (action && action.line) html += ':<span style="color:#22c55e">' + action.line + '</span>';
+        if (action && action.line) html += ':<span class="text-success">' + action.line + '</span>';
         html += '</span></div>';
       }
 
       if (route.hasView && route.view) {
-        html += '<div style="padding:4px 0;display:flex;align-items:center">';
-        html += '<span style="color:var(--text2);width:80px">View:</span>';
+        html += '<div class="detail-item flex items-center py-1">';
+        html += '<span class="text-muted w-20">View:</span>';
         html += '<span>app/views/' + route.view.path + '</span>';
         html += '</div>';
       }
@@ -1189,12 +1189,12 @@ export class PageMapGenerator {
       if (ctrl) {
         html += '<div class="detail-section">';
         html += '<div class="detail-label">📋 Controller Info</div>';
-        html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px">';
-        html += '<div style="font-weight:600;margin-bottom:4px">' + ctrl.className + '</div>';
+        html += '<div class="code-block">';
+        html += '<div class="section-title">' + ctrl.className + '</div>';
         html += '<div style="font-size:11px;color:var(--text2)">extends ' + ctrl.parentClass + '</div>';
         if (ctrl.concerns && ctrl.concerns.length > 0) {
           html += '<div style="margin-top:6px;font-size:11px">';
-          html += '<span style="color:var(--text2)">Concerns:</span> ' + ctrl.concerns.join(', ');
+          html += '<span class="text-muted">Concerns:</span> ' + ctrl.concerns.join(', ');
           html += '</div>';
         }
         html += '</div></div>';
@@ -1234,12 +1234,12 @@ export class PageMapGenerator {
       const withUsageCount = components.filter(c => c.usedIn && c.usedIn.length > 0).length;
 
       let html = '';
-      html += '<div style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:12px">';
+      html += '<div class="info-box mb-3">';
       html += '<div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="color:#61dafb">⚛</span> React Components (from Rails)</div>';
       html += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2)">';
       html += '<span>' + components.length + ' components</span>';
       html += '<span>•</span>';
-      html += '<span style="color:#22c55e">' + ssrCount + ' SSR</span>';
+      html += '<span class="text-success">' + ssrCount + ' SSR</span>';
       html += '<span>•</span>';
       html += '<span style="color:#3b82f6">' + (components.length - ssrCount) + ' client</span>';
       html += '<span>•</span>';
@@ -1264,9 +1264,9 @@ export class PageMapGenerator {
         withEntry.forEach(comp => {
           const usageCount = comp.usedIn?.length || 0;
           const tags = [];
-          if (comp.ssr) tags.push('<span class="tag" style="background:#166534;color:#86efac" title="Server-Side Rendering">SSR</span>');
-          if (usageCount > 0) tags.push('<span class="tag" style="background:#5b21b6;color:#c4b5fd" title="Used in ' + usageCount + ' view(s)">View:' + usageCount + '</span>');
-          if (comp.sourceFile) tags.push('<span class="tag" style="background:#1e3a5f;color:#93c5fd" title="Has source file">SRC</span>');
+          if (comp.ssr) tags.push('<span class="tag tag-ssr" title="Server-Side Rendering">SSR</span>');
+          if (usageCount > 0) tags.push('<span class="tag tag-view" title="Used in ' + usageCount + ' view(s)">View:' + usageCount + '</span>');
+          if (comp.sourceFile) tags.push('<span class="tag tag-src" title="Has source file">SRC</span>');
 
           // Find URL from routes based on controller/action OR infer from entry file
           let urlInfo = '';
@@ -1288,7 +1288,7 @@ export class PageMapGenerator {
 
           html += '<div class="page-item" data-path="' + comp.name.toLowerCase() + '" onclick="showReactComponentDetail(\\'' + encodeURIComponent(JSON.stringify(comp)) + '\\')">';
           html += '<div class="page-info">';
-          html += '<span class="page-name" style="display:flex;align-items:center"><span style="color:#61dafb;margin-right:6px">⚛</span>' + comp.name + '</span>';
+          html += '<span class="page-name" style="display:flex;align-items:center"><span class="text-react mr-2">⚛</span>' + comp.name + '</span>';
           html += '<span class="page-path" style="font-size:10px;color:var(--accent)">' + urlInfo + '</span>';
           html += '</div>';
           html += '<div class="page-tags">' + tags.join('') + '</div>';
@@ -1311,8 +1311,8 @@ export class PageMapGenerator {
         withoutEntry.forEach(comp => {
           const usageCount = comp.usedIn?.length || 0;
           const tags = [];
-          if (comp.ssr) tags.push('<span class="tag" style="background:#166534;color:#86efac" title="Server-Side Rendering">SSR</span>');
-          if (usageCount > 0) tags.push('<span class="tag" style="background:#5b21b6;color:#c4b5fd" title="Used in ' + usageCount + ' view(s)">View:' + usageCount + '</span>');
+          if (comp.ssr) tags.push('<span class="tag tag-ssr" title="Server-Side Rendering">SSR</span>');
+          if (usageCount > 0) tags.push('<span class="tag tag-view" title="Used in ' + usageCount + ' view(s)">View:' + usageCount + '</span>');
 
           // Find URL from routes based on controller/action
           let urlInfo = '';
@@ -1330,7 +1330,7 @@ export class PageMapGenerator {
 
           html += '<div class="page-item" data-path="' + comp.name.toLowerCase() + '" onclick="showReactComponentDetail(\\'' + encodeURIComponent(JSON.stringify(comp)) + '\\')">';
           html += '<div class="page-info">';
-          html += '<span class="page-name" style="display:flex;align-items:center"><span style="color:#61dafb;margin-right:6px">⚛</span>' + comp.name + '</span>';
+          html += '<span class="page-name" style="display:flex;align-items:center"><span class="text-react mr-2">⚛</span>' + comp.name + '</span>';
           html += '<span class="page-path" style="font-size:10px;color:var(--accent)">' + (urlInfo || 'View-only') + '</span>';
           html += '</div>';
           html += '<div class="page-tags">' + tags.join('') + '</div>';
@@ -1440,7 +1440,7 @@ export class PageMapGenerator {
       const totalWithPartials = enrichedViews.filter(v => v.partials.length > 0).length;
 
       let html = '';
-      html += '<div style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:12px">';
+      html += '<div class="info-box mb-3">';
       html += '<div style="font-weight:600;margin-bottom:8px">🖼️ Rails Screens (View Templates)</div>';
       html += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2)">';
       html += '<span>' + enrichedViews.length + ' screens</span>';
@@ -1487,7 +1487,7 @@ export class PageMapGenerator {
           if (!view.hasRoute) indicators += '<span class="route-tag route-tag-warn" title="No matching route found">⚠️</span>';
 
           // Display: URL path (if route exists) or controller/action
-          const displayName = view.hasRoute ? view.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>') : view.controller + '#' + view.action;
+          const displayName = view.hasRoute ? view.path.replace(/:([a-z_]+)/g, '<span class="text-warning">:$1</span>') : view.controller + '#' + view.action;
 
           // Search-friendly data-path includes path, controller, action
           const searchPath = [view.path || '', view.controller || '', view.action || '', view.viewPath || ''].join(' ').toLowerCase();
@@ -1525,7 +1525,7 @@ export class PageMapGenerator {
       html += '<div class="detail-section">';
       html += '<div class="detail-label">🌐 URL Path</div>';
       if (screen.hasRoute) {
-        html += '<div class="detail-value" style="font-family:monospace">' + screen.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>') + '</div>';
+        html += '<div class="detail-value" style="font-family:monospace">' + screen.path.replace(/:([a-z_]+)/g, '<span class="text-warning">:$1</span>') + '</div>';
       } else {
         html += '<div class="detail-value" style="color:var(--text2)">No route defined (orphan view)</div>';
       }
@@ -1618,7 +1618,7 @@ export class PageMapGenerator {
 
           const tooltip = assignment && assignment.assignedValue ? assignment.assignedValue.replace(/"/g, '&quot;') : '';
           html += '<div class="detail-item"' + hiddenClass + ' title="' + tooltip + '">';
-          html += '<span class="tag" style="background:#8b5cf6;font-size:10px">@</span>';
+          html += '<span class="tag tag-var tag-sm">@</span>';
           html += '<span class="name" style="font-family:monospace;font-weight:500">' + v + '</span>';
 
           if (linkedModel) {
@@ -1662,10 +1662,10 @@ export class PageMapGenerator {
         html += '<div class="detail-items">';
         screen.reactComponents.forEach(rc => {
           html += '<div class="detail-item">';
-          html += '<span class="tag" style="background:#61dafb;color:#222;font-size:10px;font-weight:600">React</span>';
+          html += '<span class="tag tag-react tag-sm" style="font-weight:600">React</span>';
           html += '<span class="name" style="font-family:monospace;font-weight:500">' + rc.name + '</span>';
           if (rc.ssr) {
-            html += '<span style="margin-left:6px;font-size:9px;background:#22c55e;color:white;padding:1px 4px;border-radius:2px">SSR</span>';
+            html += '<span class="badge-success">SSR</span>';
           }
           if (rc.propsVar) {
             html += '<span style="margin-left:auto;font-size:10px;color:var(--text2);font-family:monospace">props: ' + rc.propsVar + '</span>';
@@ -1686,7 +1686,7 @@ export class PageMapGenerator {
         html += '<div class="detail-items" id="' + partialListId + '">';
         screen.partials.forEach((p, idx) => {
           const hiddenClass = idx >= partialLimit ? ' style="display:none" data-hidden="true"' : '';
-          html += '<div class="detail-item"' + hiddenClass + '><span class="tag" style="background:#06b6d4;font-size:10px">PARTIAL</span><span class="name" style="font-family:monospace;font-size:11px">' + p + '</span></div>';
+          html += '<div class="detail-item"' + hiddenClass + '><span class="tag tag-partial tag-sm">PARTIAL</span><span class="name" style="font-family:monospace;font-size:11px">' + p + '</span></div>';
         });
         html += '</div>';
         if (hasMorePartials) {
@@ -1701,7 +1701,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">⚙️ Services Called</div>';
         html += '<div class="detail-items">';
         screen.services.forEach(s => {
-          html += '<div class="detail-item"><span class="tag" style="background:#8b5cf6">Service</span><span class="name" style="font-family:monospace">' + s + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-service">Service</span><span class="name">' + s + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1712,7 +1712,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">🔌 gRPC Calls</div>';
         html += '<div class="detail-items">';
         screen.grpcCalls.forEach(g => {
-          html += '<div class="detail-item"><span class="tag" style="background:#06b6d4">gRPC</span><span class="name" style="font-family:monospace">' + g + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-grpc">gRPC</span><span class="name">' + g + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1723,7 +1723,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">💾 Models Used</div>';
         html += '<div class="detail-items">';
         screen.modelAccess.forEach(m => {
-          html += '<div class="detail-item"><span class="tag" style="background:#f59e0b">Model</span><span class="name" style="font-family:monospace">' + m + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-model">Model</span><span class="name">' + m + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1731,10 +1731,10 @@ export class PageMapGenerator {
       // Controller Action info
       html += '<div class="detail-section">';
       html += '<div class="detail-label">🎮 Controller Action</div>';
-      html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px">';
+      html += '<div class="code-block">';
       html += '<div style="font-family:monospace;font-size:12px">' + screen.controller + '#' + screen.action + '</div>';
       if (screen.controllerInfo) {
-        html += '<div style="margin-top:6px;font-size:11px;color:var(--text2)">app/controllers/' + screen.controllerInfo.filePath;
+        html += '<div class="subtext">app/controllers/' + screen.controllerInfo.filePath;
         if (screen.actionLine) html += ':' + screen.actionLine;
         html += '</div>';
 
@@ -1747,7 +1747,7 @@ export class PageMapGenerator {
           });
           if (applicableFilters.length > 0) {
             html += '<div style="margin-top:8px;font-size:11px">';
-            html += '<span style="color:#22c55e">Before filters:</span> ' + applicableFilters.map(f => f.name).join(', ');
+            html += '<span class="text-success">Before filters:</span> ' + applicableFilters.map(f => f.name).join(', ');
             html += '</div>';
           }
         }
@@ -1812,7 +1812,7 @@ export class PageMapGenerator {
       html += '<div class="detail-label">Method & Path</div>';
       html += '<div class="detail-value">';
       html += '<span style="background:' + methodColor + ';color:white;padding:2px 8px;border-radius:4px;font-weight:600;margin-right:8px">' + (route.method || 'GET') + '</span>';
-      html += '<span style="font-family:monospace">' + route.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>') + '</span>';
+      html += '<span class="mono">' + route.path.replace(/:([a-z_]+)/g, '<span class="text-warning">:$1</span>') + '</span>';
       html += '</div></div>';
 
       html += '<div class="detail-section">';
@@ -1834,7 +1834,7 @@ export class PageMapGenerator {
             responseTypes.push('<span style="background:#8b5cf6;color:white;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:4px">' + f.toUpperCase() + '</span>');
           });
         }
-        html += responseTypes.length > 0 ? responseTypes.join('') : '<span style="color:var(--text2)">Unknown</span>';
+        html += responseTypes.length > 0 ? responseTypes.join('') : '<span class="text-muted">Unknown</span>';
         html += '</div></div>';
 
         if (actionDetails.redirectsTo) {
@@ -1852,7 +1852,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">📄 View Template</div>';
         html += '<div class="detail-value" style="font-family:monospace;font-size:12px">app/views/' + view.path + '</div>';
         if (view.partials && view.partials.length > 0) {
-          html += '<div style="margin-top:6px;font-size:11px;color:var(--text2)">Partials: ' + view.partials.slice(0, 5).join(', ') + '</div>';
+          html += '<div class="subtext">Partials: ' + view.partials.slice(0, 5).join(', ') + '</div>';
         }
         if (view.instanceVars && view.instanceVars.length > 0) {
           html += '<div style="margin-top:4px;font-size:11px;color:var(--text2)">Instance vars: @' + view.instanceVars.slice(0, 5).join(', @') + '</div>';
@@ -1864,7 +1864,7 @@ export class PageMapGenerator {
       if (controllerInfo && (controllerInfo.beforeActions.length > 0 || controllerInfo.afterActions.length > 0)) {
         html += '<div class="detail-section">';
         html += '<div class="detail-label">🔒 Filters Applied</div>';
-        html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px">';
+        html += '<div class="code-block">';
 
         const applicableBeforeFilters = controllerInfo.beforeActions.filter(f => {
           if (f.only && f.only.length > 0) return f.only.includes(route.action);
@@ -1876,7 +1876,7 @@ export class PageMapGenerator {
           html += '<div style="font-size:11px;margin-bottom:4px"><span style="color:#22c55e;font-weight:600">Before:</span> ';
           html += applicableBeforeFilters.map(f => {
             let info = f.name;
-            if (f.if) info += ' <span style="color:var(--text2)">(if: ' + f.if + ')</span>';
+            if (f.if) info += ' <span class="text-muted">(if: ' + f.if + ')</span>';
             return info;
           }).join(', ');
           html += '</div>';
@@ -1907,7 +1907,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">⚙️ Services Called</div>';
         html += '<div class="detail-items">';
         services.forEach(s => {
-          html += '<div class="detail-item"><span class="tag" style="background:#8b5cf6">Service</span><span class="name" style="font-family:monospace">' + s + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-service">Service</span><span class="name">' + s + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1919,7 +1919,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">🔌 gRPC Calls</div>';
         html += '<div class="detail-items">';
         grpcCalls.forEach(g => {
-          html += '<div class="detail-item"><span class="tag" style="background:#06b6d4">gRPC</span><span class="name" style="font-family:monospace">' + g + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-grpc">gRPC</span><span class="name">' + g + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1931,7 +1931,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">💾 Models Accessed</div>';
         html += '<div class="detail-items">';
         models.forEach(m => {
-          html += '<div class="detail-item"><span class="tag" style="background:#f59e0b">Model</span><span class="name" style="font-family:monospace">' + m + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-model">Model</span><span class="name">' + m + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -1949,13 +1949,13 @@ export class PageMapGenerator {
           html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px;max-height:150px;overflow-y:auto">';
           html += '<div style="font-family:monospace;font-size:11px;line-height:1.6">';
           meaningfulCalls.forEach((call, i) => {
-            html += '<div style="padding:2px 0;border-bottom:1px solid var(--bg1)">';
+            html += '<div class="accordion-item">';
             html += '<span style="color:var(--text2);margin-right:8px">' + (i+1) + '.</span>';
-            html += '<span style="color:var(--accent)">' + call + '</span>';
+            html += '<span class="text-accent">' + call + '</span>';
             html += '</div>';
           });
           if (actionDetails.methodCalls.length > 15) {
-            html += '<div style="padding:4px 0;color:var(--text2);font-style:italic">...and ' + (actionDetails.methodCalls.length - 15) + ' more</div>';
+            html += '<div class="note">...and ' + (actionDetails.methodCalls.length - 15) + ' more</div>';
           }
           html += '</div></div></div>';
         }
@@ -1967,16 +1967,16 @@ export class PageMapGenerator {
       html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px;font-family:monospace;font-size:11px">';
 
       if (controllerInfo) {
-        html += '<div style="padding:4px 0;display:flex;align-items:center">';
-        html += '<span style="color:var(--text2);width:80px">Controller:</span>';
+        html += '<div class="detail-item flex items-center py-1">';
+        html += '<span class="text-muted w-20">Controller:</span>';
         html += '<span>app/controllers/' + controllerInfo.filePath;
-        if (actionDetails && actionDetails.line) html += ':<span style="color:#22c55e">' + actionDetails.line + '</span>';
+        if (actionDetails && actionDetails.line) html += ':<span class="text-success">' + actionDetails.line + '</span>';
         html += '</span></div>';
       }
 
       if (view) {
-        html += '<div style="padding:4px 0;display:flex;align-items:center">';
-        html += '<span style="color:var(--text2);width:80px">View:</span>';
+        html += '<div class="detail-item flex items-center py-1">';
+        html += '<span class="text-muted w-20">View:</span>';
         html += '<span>app/views/' + view.path + '</span>';
         html += '</div>';
       }
@@ -1986,12 +1986,12 @@ export class PageMapGenerator {
       if (controllerInfo) {
         html += '<div class="detail-section">';
         html += '<div class="detail-label">📋 Controller Info</div>';
-        html += '<div style="background:var(--bg3);padding:10px;border-radius:6px;margin-top:6px">';
-        html += '<div style="font-weight:600;margin-bottom:4px">' + controllerInfo.className + '</div>';
+        html += '<div class="code-block">';
+        html += '<div class="section-title">' + controllerInfo.className + '</div>';
         html += '<div style="font-size:11px;color:var(--text2)">extends ' + controllerInfo.parentClass + '</div>';
         if (controllerInfo.concerns && controllerInfo.concerns.length > 0) {
           html += '<div style="margin-top:6px;font-size:11px">';
-          html += '<span style="color:var(--text2)">Concerns:</span> ' + controllerInfo.concerns.join(', ');
+          html += '<span class="text-muted">Concerns:</span> ' + controllerInfo.concerns.join(', ');
           html += '</div>';
         }
         html += '</div></div>';
@@ -2030,7 +2030,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">Partials Used</div>';
         html += '<div class="detail-items">';
         view.partials.forEach(p => {
-          html += '<div class="detail-item"><span class="tag" style="background:#6b7280">PARTIAL</span><span class="name">' + p + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-partial">PARTIAL</span><span class="name">' + p + '</span></div>';
         });
         html += '</div></div>';
       }
@@ -2040,7 +2040,7 @@ export class PageMapGenerator {
         html += '<div class="detail-label">Instance Variables</div>';
         html += '<div class="detail-items">';
         view.instanceVars.slice(0, 10).forEach(v => {
-          html += '<div class="detail-item"><span class="tag" style="background:#f59e0b">@</span><span class="name">' + v + '</span></div>';
+          html += '<div class="detail-item"><span class="tag tag-var">@</span><span class="name">' + v + '</span></div>';
         });
         if (view.instanceVars.length > 10) {
           html += '<div style="padding:4px 8px;color:var(--text2);font-size:11px">...and ' + (view.instanceVars.length - 10) + ' more</div>';
@@ -2245,7 +2245,7 @@ export class PageMapGenerator {
             // Path header with depth visual
             dataHtml += '<div class="data-path-group" style="margin:8px 0">' +
               '<div class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+(ops[0]?.depth * 8)+'px">' +
-              depthIndicator + '<span style="color:var(--accent)">' + pathLabel + '</span> (' + ops.length + ')' +
+              depthIndicator + '<span class="text-accent">' + pathLabel + '</span> (' + ops.length + ')' +
               '</div>';
 
             ops.forEach(op => {
@@ -2266,7 +2266,7 @@ export class PageMapGenerator {
           dataHtml += '<div class="detail-section"><h4>Used Components</h4>';
           uniqueComponentRefs.forEach(df => {
             const name = df.operationName || '';
-            dataHtml += '<div class="detail-item" style="cursor:default"><span class="tag" style="background:var(--text2);color:var(--bg)">COMPONENT</span> '+name+'</div>';
+            dataHtml += '<div class="detail-item" style="cursor:default"><span class="tag tag-default">COMPONENT</span> '+name+'</div>';
           });
           dataHtml += '</div>';
         }
@@ -2291,7 +2291,7 @@ export class PageMapGenerator {
           const methodColors = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',DELETE:'#ef4444',PATCH:'#8b5cf6'};
           const color = methodColors[api.method] || '#6b7280';
           restApiHtml += '<div class="detail-item api-item" onclick="event.stopPropagation(); showApiDetail(\\''+api.id.replace(/'/g, "\\\\'")+'\\')">' +
-            '<div class="api-row"><span class="tag" style="background:'+color+'">'+api.method+'</span><span class="api-url">'+api.url+'</span></div>' +
+            '<div class="api-row"><span class="tag" style="background:'+color+';color:white">'+api.method+'</span><span class="api-url">'+api.url+'</span></div>' +
             (api.filePath ? '<div class="api-route">'+api.callType+' in '+api.filePath+'</div>' : '') +
             '</div>';
         });
@@ -2438,7 +2438,7 @@ export class PageMapGenerator {
         html += '<div style="margin-bottom:12px">';
         html += '<div class="detail-item" style="cursor:pointer;background:var(--bg3);border-radius:4px" onclick="toggleGroupList(this)">';
         html += '<div class="detail-label" style="display:flex;align-items:center;gap:6px"><span class="group-toggle">▸</span>/'+g+'</div>';
-        html += '<span style="color:var(--accent)">'+groupPages.length+' pages</span></div>';
+        html += '<span class="text-accent">'+groupPages.length+' pages</span></div>';
         html += '<div class="group-page-list" style="display:none;margin-left:16px;margin-top:4px">';
         groupPages.sort((a,b) => a.path.localeCompare(b.path)).forEach(p => {
           const isAuth = p.authentication?.required;
@@ -2446,7 +2446,7 @@ export class PageMapGenerator {
           html += '<div class="detail-item rel-item" style="cursor:pointer;padding:6px 8px" onclick="event.stopPropagation(); selectPage(\\''+p.path+'\\')">'+
             '<span style="font-family:monospace;font-size:11px;color:var(--text)">'+p.path+'</span>'+
             (isAuth ? '<span class="tag tag-auth" style="margin-left:6px;font-size:9px">AUTH</span>' : '')+
-            (isDynamic ? '<span class="tag" style="margin-left:6px;font-size:9px;background:#6366f1">DYNAMIC</span>' : '')+
+            (isDynamic ? '<span class="tag tag-info" style="margin-left:6px" title="Dynamic Route">DYNAMIC</span>' : '')+
             '</div>';
         });
         html += '</div></div>';
@@ -2559,7 +2559,7 @@ export class PageMapGenerator {
       const fragments = Array.from(gqlMap.values()).filter(o => o.type === 'fragment');
 
       if (queries.length > 0) {
-        html += '<div style="margin:8px 0;font-size:11px;color:var(--accent)">Queries ('+queries.length+')</div>';
+        html += '<div class="subtext-accent">Queries ('+queries.length+')</div>';
         queries.slice(0, 20).forEach(op => {
           html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
             '<span class="tag tag-query">QUERY</span> '+op.name+'</div>';
@@ -2570,7 +2570,7 @@ export class PageMapGenerator {
       }
 
       if (mutations.length > 0) {
-        html += '<div style="margin:8px 0;font-size:11px;color:var(--accent)">Mutations ('+mutations.length+')</div>';
+        html += '<div class="subtext-accent">Mutations ('+mutations.length+')</div>';
         mutations.slice(0, 10).forEach(op => {
           html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
             '<span class="tag tag-mutation">MUTATION</span> '+op.name+'</div>';
@@ -2581,10 +2581,10 @@ export class PageMapGenerator {
       }
 
       if (fragments.length > 0) {
-        html += '<div style="margin:8px 0;font-size:11px;color:var(--accent)">Fragments ('+fragments.length+')</div>';
+        html += '<div class="subtext-accent">Fragments ('+fragments.length+')</div>';
         fragments.slice(0, 5).forEach(op => {
           html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
-            '<span class="tag" style="background:#6b7280">FRAGMENT</span> '+op.name+'</div>';
+            '<span class="tag tag-default">FRAGMENT</span> '+op.name+'</div>';
         });
         if (fragments.length > 5) {
           html += '<div style="color:var(--text2);font-size:10px;padding:4px">... and '+(fragments.length-5)+' more fragments</div>';
@@ -2609,7 +2609,7 @@ export class PageMapGenerator {
           const methodColors = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',DELETE:'#ef4444',PATCH:'#8b5cf6'};
           const color = methodColors[api.method] || '#6b7280';
           html += '<div class="detail-item api-item" onclick="event.stopPropagation(); showApiDetail(\\''+api.id.replace(/'/g, "\\\\'")+'\\')">' +
-            '<div class="api-row"><span class="tag" style="background:'+color+'">'+api.method+'</span><span class="api-url">'+api.url+'</span></div>' +
+            '<div class="api-row"><span class="tag" style="background:'+color+';color:white">'+api.method+'</span><span class="api-url">'+api.url+'</span></div>' +
             '<div class="api-route">'+api.callType+' in '+api.filePath+'</div>' +
             '</div>';
         });
@@ -2644,7 +2644,7 @@ export class PageMapGenerator {
 
       if (api.category && api.category !== 'internal') {
         html += '<div class="detail-section"><h4>Category</h4>' +
-          '<span class="tag" style="background:var(--accent);color:white">'+api.category.toUpperCase()+'</span></div>';
+          '<span class="tag tag-accent">'+api.category.toUpperCase()+'</span></div>';
       }
 
       // Show in modal
@@ -2751,7 +2751,7 @@ export class PageMapGenerator {
         // Source info
         if (sourcePath) {
           const isHook = sourcePath.startsWith('use');
-          html += '<div class="detail-section"><h4>Source</h4><div class="detail-item" style="font-size:12px">via '+(isHook?'Hook':'Component')+': <span style="color:var(--accent)">'+sourcePath+'</span></div></div>';
+          html += '<div class="detail-section"><h4>Source</h4><div class="detail-item" style="font-size:12px">via '+(isHook?'Hook':'Component')+': <span class="text-accent">'+sourcePath+'</span></div></div>';
         }
 
         // Operation Name with copy button
@@ -2829,7 +2829,7 @@ export class PageMapGenerator {
             });
             if (queries.length > 5) {
               const remaining = queries.slice(5).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'query\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" style="color:var(--accent);font-size:10px;cursor:pointer;padding:4px 0">▸ Show ' + (queries.length - 5) + ' more queries</div>';
+              html += '<div class="expand-more" onclick="expandMore(\\'query\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (queries.length - 5) + ' more queries</div>';
             }
           }
 
@@ -2841,7 +2841,7 @@ export class PageMapGenerator {
             });
             if (mutations.length > 5) {
               const remaining = mutations.slice(5).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'mutation\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" style="color:var(--accent);font-size:10px;cursor:pointer;padding:4px 0">▸ Show ' + (mutations.length - 5) + ' more mutations</div>';
+              html += '<div class="expand-more" onclick="expandMore(\\'mutation\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (mutations.length - 5) + ' more mutations</div>';
             }
           }
 
@@ -2849,11 +2849,11 @@ export class PageMapGenerator {
             html += '<div style="margin:8px 0;font-size:10px;color:var(--text2)">Fragments ('+fragments.length+')</div>';
             fragments.slice(0,3).forEach(op => {
               html += '<div class="detail-item data-op" onclick="showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
-                '<span class="tag" style="background:#6b7280">FRAGMENT</span> '+op.name+'</div>';
+                '<span class="tag tag-default">FRAGMENT</span> '+op.name+'</div>';
             });
             if (fragments.length > 3) {
               const remaining = fragments.slice(3).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'fragment\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" style="color:var(--accent);font-size:10px;cursor:pointer;padding:4px 0">▸ Show ' + (fragments.length - 3) + ' more fragments</div>';
+              html += '<div class="expand-more" onclick="expandMore(\\'fragment\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (fragments.length - 3) + ' more fragments</div>';
             }
           }
 
@@ -2969,7 +2969,7 @@ export class PageMapGenerator {
             });
             if (queries.length > 8) {
               const remaining = queries.slice(8).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'query\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" style="color:var(--accent);font-size:10px;cursor:pointer;padding:4px 0">▸ Show ' + (queries.length - 8) + ' more</div>';
+              html += '<div class="expand-more" onclick="expandMore(\\'query\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (queries.length - 8) + ' more</div>';
             }
           }
 
@@ -2981,7 +2981,7 @@ export class PageMapGenerator {
             });
             if (mutations.length > 5) {
               const remaining = mutations.slice(5).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'mutation\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" style="color:var(--accent);font-size:10px;cursor:pointer;padding:4px 0">▸ Show ' + (mutations.length - 5) + ' more</div>';
+              html += '<div class="expand-more" onclick="expandMore(\\'mutation\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (mutations.length - 5) + ' more</div>';
             }
           }
 
@@ -2989,11 +2989,11 @@ export class PageMapGenerator {
             html += '<div style="margin:8px 0 6px;font-size:10px;color:var(--text2)">Fragments ('+fragments.length+')</div>';
             fragments.slice(0, 3).forEach(op => {
               html += '<div class="detail-item data-op" onclick="showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
-                '<span class="tag" style="background:#6b7280">FRAGMENT</span> '+op.name+'</div>';
+                '<span class="tag tag-default">FRAGMENT</span> '+op.name+'</div>';
             });
             if (fragments.length > 3) {
               const remaining = fragments.slice(3).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'fragment\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" style="color:var(--accent);font-size:10px;cursor:pointer;padding:4px 0">▸ Show ' + (fragments.length - 3) + ' more</div>';
+              html += '<div class="expand-more" onclick="expandMore(\\'fragment\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (fragments.length - 3) + ' more</div>';
             }
           }
 
@@ -3617,7 +3617,7 @@ export class PageMapGenerator {
                 ? p.filePath.replace(/\.tsx?$/, '').replace(/^(frontend\/src\/|src\/)/, '')
                 : p.path;
             const spaTag = isSpaComponent
-              ? '<span class="tag" style="background:#6366f1;color:white" title="SPA Component Page">SPA</span>'
+              ? '<span class="tag tag-info" title="SPA Component Page">SPA</span>'
               : '';
 
             return `<div class="page-item" data-path="${p.path}" data-repo="${repoName}" onclick="selectPage('${

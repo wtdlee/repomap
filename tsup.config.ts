@@ -14,7 +14,7 @@ export default defineConfig({
   splitting: true,
   clean: true,
   treeshake: true,
-  minify: false, // Keep readable for debugging
+  minify: true, // Reduce package size
   external: [
     // Node.js built-ins
     'fs',
