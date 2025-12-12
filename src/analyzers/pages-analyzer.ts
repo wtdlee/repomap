@@ -18,6 +18,8 @@ import type {
  */
 export class PagesAnalyzer extends BaseAnalyzer {
   private project: Project;
+  // Codegen Document → Operation name mapping
+  private codegenMap = new Map<string, { operationName: string; operationType: string }>();
 
   constructor(config: RepositoryConfig) {
     super(config);
@@ -33,6 +35,12 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   async analyze(): Promise<Partial<AnalysisResult>> {
     this.log('Starting page analysis...');
+
+    // Load codegen mapping if available
+    await this.loadCodegenMapping();
+
+    // Analyze _app.tsx for global providers/context
+    await this.analyzeAppFile();
 
     const pagesDir = this.getSetting('pagesDir', 'src/pages');
     const pagesPath = this.resolvePath(pagesDir);
@@ -638,19 +646,38 @@ export class PagesAnalyzer extends BaseAnalyzer {
     return dataFetching;
   }
 
+  // Symbol tracking cache to avoid re-analyzing the same files
+  private symbolTraceCache = new Map<string, DataFetchingInfo[]>();
+
   /**
-   * Analyze an imported component file for GraphQL queries
+   * Analyze an imported component file for GraphQL queries with full symbol tracing
+   * 임포트된 컴포넌트를 재귀적으로 완전 추적
    */
   private analyzeImportedComponent(
     sourceFileDir: string,
     moduleSpec: string,
-    componentName: string
+    componentName: string,
+    visited: Set<string> = new Set(),
+    depth: number = 0
   ): DataFetchingInfo[] {
+    const MAX_DEPTH = 10; // 무한 루프 방지
+    if (depth > MAX_DEPTH) return [];
+
     const queries: DataFetchingInfo[] = [];
 
     try {
       // Resolve the import path
       const resolvedPath = path.resolve(sourceFileDir, moduleSpec);
+
+      // Create a unique key for cycle detection
+      const cacheKey = `${resolvedPath}:${componentName}`;
+      if (visited.has(cacheKey)) return []; // 순환 참조 방지
+      visited.add(cacheKey);
+
+      // Check cache
+      if (this.symbolTraceCache.has(cacheKey)) {
+        return this.symbolTraceCache.get(cacheKey)!;
+      }
 
       // Try different file extensions and index files
       const possiblePaths = [
@@ -704,119 +731,146 @@ export class PagesAnalyzer extends BaseAnalyzer {
         );
       });
 
-      // Also check for custom hooks that might use GraphQL internally
-      const customHookImports = componentFile.getImportDeclarations().filter((imp) => {
+      // Get all relative imports for full symbol tracing
+      const relativeImports = componentFile.getImportDeclarations().filter((imp) => {
         const spec = imp.getModuleSpecifierValue();
-        if (!spec.startsWith('./') && !spec.startsWith('../')) return false;
-        // Look for hook imports
-        const namedImports = imp.getNamedImports().map((n) => n.getName());
-        return namedImports.some((n) => /^use[A-Z]/.test(n));
+        return spec.startsWith('./') || spec.startsWith('../');
       });
 
-      // Analyze custom hooks for GraphQL usage
-      for (const hookImp of customHookImports) {
-        const hookSpec = hookImp.getModuleSpecifierValue();
-        const hookNames = hookImp.getNamedImports().map((n) => n.getName()).filter((n) => /^use[A-Z]/.test(n));
+      // 1. Analyze custom hooks (use* pattern)
+      for (const imp of relativeImports) {
+        const hookSpec = imp.getModuleSpecifierValue();
+        const hookNames = imp
+          .getNamedImports()
+          .map((n) => n.getName())
+          .filter((n) => /^use[A-Z]/.test(n));
 
         for (const hookName of hookNames) {
           const hookQueries = this.analyzeCustomHook(
             path.dirname(componentFile.getFilePath()),
             hookSpec,
-            hookName
+            hookName,
+            visited,
+            depth + 1
           );
           queries.push(...hookQueries);
         }
       }
 
-      if (!hasGraphQLImport && queries.length === 0) {
-        // No direct GraphQL import, but check imported components (one level deeper)
-        // This handles: Page → WrapperComponent → ContainerWithGraphQL pattern
-        const nestedComponentImports = componentFile.getImportDeclarations().filter((imp) => {
-          const spec = imp.getModuleSpecifierValue();
-          // Look for relative imports that might be Container/Component files
-          return spec.startsWith('./') || spec.startsWith('../');
-        });
+      // 2. Deep trace all imported components (not just Container/Page)
+      for (const imp of relativeImports) {
+        const nestedSpec = imp.getModuleSpecifierValue();
+        const namedImports = imp.getNamedImports().map((n) => n.getName());
+        const defaultImport = imp.getDefaultImport()?.getText();
 
-        for (const nestedImp of nestedComponentImports) {
-          const nestedSpec = nestedImp.getModuleSpecifierValue();
-          const namedImports = nestedImp.getNamedImports().map((n) => n.getName());
+        // Analyze ALL PascalCase imports (components)
+        const componentImports = namedImports.filter(
+          (n) => /^[A-Z]/.test(n) && this.isComponentName(n)
+        );
 
-          // Look for Container, Page, or other component-like imports
-          const containerImports = namedImports.filter(
-            (n) => n.includes('Container') || n.includes('Page') || n.includes('Component')
+        for (const nestedComponentName of componentImports) {
+          const nestedQueries = this.analyzeImportedComponent(
+            path.dirname(componentFile.getFilePath()),
+            nestedSpec,
+            nestedComponentName,
+            visited,
+            depth + 1
           );
-
-          for (const containerName of containerImports) {
-            const nestedQueries = this.analyzeImportedComponent(
-              path.dirname(componentFile.getFilePath()),
-              nestedSpec,
-              containerName
-            );
-            queries.push(...nestedQueries);
-          }
+          queries.push(...nestedQueries);
         }
 
-        return queries;
+        // Also check default imports
+        if (defaultImport && /^[A-Z]/.test(defaultImport) && this.isComponentName(defaultImport)) {
+          const nestedQueries = this.analyzeImportedComponent(
+            path.dirname(componentFile.getFilePath()),
+            nestedSpec,
+            defaultImport,
+            visited,
+            depth + 1
+          );
+          queries.push(...nestedQueries);
+        }
       }
 
-      // Find GraphQL hook calls in the component
-      const hookCalls = componentFile
-        .getDescendantsOfKind(SyntaxKind.CallExpression)
-        .filter((call) => {
-          const expression = call.getExpression().getText();
-          return ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'].includes(
-            expression
-          );
-        });
+      // 3. If has GraphQL imports, look for direct hook calls
+      if (hasGraphQLImport) {
+        // Find GraphQL hook calls in the component
+        const hookCalls = componentFile
+          .getDescendantsOfKind(SyntaxKind.CallExpression)
+          .filter((call) => {
+            const expression = call.getExpression().getText();
+            return ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'].includes(
+              expression
+            );
+          });
 
-      for (const call of hookCalls) {
-        const hookName = call.getExpression().getText();
-        const args = call.getArguments();
+        for (const call of hookCalls) {
+          const hookName = call.getExpression().getText();
+          const args = call.getArguments();
 
-        if (args.length === 0) continue;
+          if (args.length === 0) continue;
 
-        const firstArg = args[0];
-        const firstArgText = firstArg.getText();
+          const firstArg = args[0];
+          const firstArgText = firstArg.getText();
 
-        // Extract operation name from the first argument
-        let operationName = firstArgText;
+          // Extract operation name from the first argument
+          let operationName = firstArgText;
+          let operationType: string | null = null;
 
-        // Handle codegen Document pattern: SomeQueryDocument → SomeQuery
-        if (firstArgText.endsWith('Document')) {
-          operationName = firstArgText.replace(/Document$/, '');
-        }
-        // If it's a variable reference, try to find the actual query name
-        else if (/^[A-Z]/.test(firstArgText) || /^[a-z]/.test(firstArgText)) {
-          // Look for gql template literals assigned to this variable
-          const varDecl = componentFile.getVariableDeclaration(firstArgText);
-          if (varDecl) {
-            const initializer = varDecl.getInitializer();
-            if (initializer) {
-              const text = initializer.getText();
-              // Extract query name from gql`query QueryName { ... }`
-              const match = text.match(/(?:query|mutation|subscription)\s+(\w+)/);
-              if (match) {
-                operationName = match[1];
+          // Try codegen mapping first
+          const codegenInfo = this.resolveDocumentName(firstArgText);
+          if (codegenInfo) {
+            operationName = codegenInfo.operationName;
+            operationType = codegenInfo.operationType;
+          }
+          // Handle codegen Document pattern: SomeQueryDocument → SomeQuery
+          else if (firstArgText.endsWith('Document')) {
+            operationName = firstArgText.replace(/Document$/, '');
+          }
+          // If it's a variable reference, try to find the actual query name
+          else if (/^[A-Z]/.test(firstArgText) || /^[a-z]/.test(firstArgText)) {
+            // Look for gql template literals assigned to this variable
+            const varDecl = componentFile.getVariableDeclaration(firstArgText);
+            if (varDecl) {
+              const initializer = varDecl.getInitializer();
+              if (initializer) {
+                const text = initializer.getText();
+                // Extract query name from gql`query QueryName { ... }`
+                const match = text.match(/(?:query|mutation|subscription)\s+(\w+)/);
+                if (match) {
+                  operationName = match[1];
+                }
               }
             }
           }
+
+          // Clean up operation name
+          operationName = operationName.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
+
+          const type = operationType
+            ? operationType === 'mutation'
+              ? 'useMutation'
+              : operationType === 'subscription'
+                ? 'useSubscription'
+                : hookName.includes('Lazy')
+                  ? 'useLazyQuery'
+                  : 'useQuery'
+            : hookName.includes('Mutation')
+              ? 'useMutation'
+              : hookName.includes('Lazy')
+                ? 'useLazyQuery'
+                : 'useQuery';
+
+          queries.push({
+            type: type as DataFetchingInfo['type'],
+            operationName,
+            variables: [],
+          });
         }
-
-        // Clean up operation name
-        operationName = operationName.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
-
-        const type = hookName.includes('Mutation')
-          ? 'useMutation'
-          : hookName.includes('Lazy')
-            ? 'useLazyQuery'
-            : 'useQuery';
-
-        queries.push({
-          type: type as DataFetchingInfo['type'],
-          operationName,
-          variables: [],
-        });
       }
+
+      // Cache the results
+      this.symbolTraceCache.set(cacheKey, queries);
     } catch {
       // Failed to analyze imported component, skip
     }
@@ -825,18 +879,34 @@ export class PagesAnalyzer extends BaseAnalyzer {
   }
 
   /**
-   * Analyze a custom hook file for GraphQL queries
+   * Analyze a custom hook file for GraphQL queries with recursive tracing
    */
   private analyzeCustomHook(
     sourceFileDir: string,
     moduleSpec: string,
-    hookName: string
+    hookName: string,
+    visited: Set<string> = new Set(),
+    depth: number = 0
   ): DataFetchingInfo[] {
+    const MAX_DEPTH = 10;
+    if (depth > MAX_DEPTH) return [];
+
     const queries: DataFetchingInfo[] = [];
 
     try {
       // Resolve the import path
       const resolvedPath = path.resolve(sourceFileDir, moduleSpec);
+
+      // Create a unique key for cycle detection
+      const cacheKey = `hook:${resolvedPath}:${hookName}`;
+      if (visited.has(cacheKey)) return [];
+      visited.add(cacheKey);
+
+      // Check cache
+      if (this.symbolTraceCache.has(cacheKey)) {
+        return this.symbolTraceCache.get(cacheKey)!;
+      }
+
       const possiblePaths = [
         `${resolvedPath}.tsx`,
         `${resolvedPath}.ts`,
@@ -870,15 +940,40 @@ export class PagesAnalyzer extends BaseAnalyzer {
         );
       });
 
-      if (!hasGraphQLImport) return queries;
+      // Also trace nested custom hooks even if no direct GraphQL import
+      const relativeImports = hookFile.getImportDeclarations().filter((imp) => {
+        const spec = imp.getModuleSpecifierValue();
+        return spec.startsWith('./') || spec.startsWith('../');
+      });
+
+      for (const imp of relativeImports) {
+        const nestedSpec = imp.getModuleSpecifierValue();
+        const nestedHookNames = imp
+          .getNamedImports()
+          .map((n) => n.getName())
+          .filter((n) => /^use[A-Z]/.test(n));
+
+        for (const nestedHookName of nestedHookNames) {
+          const nestedQueries = this.analyzeCustomHook(
+            path.dirname(hookFile.getFilePath()),
+            nestedSpec,
+            nestedHookName,
+            visited,
+            depth + 1
+          );
+          queries.push(...nestedQueries);
+        }
+      }
+
+      if (!hasGraphQLImport && queries.length === 0) {
+        return queries;
+      }
 
       // Find useQuery/useMutation calls in the hook
-      const hookCalls = hookFile
-        .getDescendantsOfKind(SyntaxKind.CallExpression)
-        .filter((call) => {
-          const expression = call.getExpression().getText();
-          return ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'].includes(expression);
-        });
+      const hookCalls = hookFile.getDescendantsOfKind(SyntaxKind.CallExpression).filter((call) => {
+        const expression = call.getExpression().getText();
+        return ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'].includes(expression);
+      });
 
       for (const call of hookCalls) {
         const callHookName = call.getExpression().getText();
@@ -888,9 +983,16 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
         const firstArgText = args[0].getText();
         let operationName = firstArgText;
+        let operationType: string | null = null;
 
+        // Try codegen mapping first
+        const codegenInfo = this.resolveDocumentName(firstArgText);
+        if (codegenInfo) {
+          operationName = codegenInfo.operationName;
+          operationType = codegenInfo.operationType;
+        }
         // Handle codegen Document pattern: SomeQueryDocument → SomeQuery
-        if (firstArgText.endsWith('Document')) {
+        else if (firstArgText.endsWith('Document')) {
           operationName = firstArgText.replace(/Document$/, '');
         } else {
           // Try to find gql template literal
@@ -910,11 +1012,19 @@ export class PagesAnalyzer extends BaseAnalyzer {
         // Clean up operation name
         operationName = operationName.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
 
-        const type = callHookName.includes('Mutation')
-          ? 'useMutation'
-          : callHookName.includes('Lazy')
-            ? 'useLazyQuery'
-            : 'useQuery';
+        const type = operationType
+          ? operationType === 'mutation'
+            ? 'useMutation'
+            : operationType === 'subscription'
+              ? 'useSubscription'
+              : callHookName.includes('Lazy')
+                ? 'useLazyQuery'
+                : 'useQuery'
+          : callHookName.includes('Mutation')
+            ? 'useMutation'
+            : callHookName.includes('Lazy')
+              ? 'useLazyQuery'
+              : 'useQuery';
 
         queries.push({
           type: type as DataFetchingInfo['type'],
@@ -922,11 +1032,195 @@ export class PagesAnalyzer extends BaseAnalyzer {
           variables: [],
         });
       }
+
+      // Cache the results
+      this.symbolTraceCache.set(cacheKey, queries);
     } catch {
       // Failed to analyze hook
     }
 
     return queries;
+  }
+
+  // Global context providers and their GraphQL queries
+  private globalContextQueries: DataFetchingInfo[] = [];
+
+  /**
+   * Analyze _app.tsx for global providers that use GraphQL
+   * _app.tsx에서 전역 Context Provider의 GraphQL 분석
+   */
+  private async analyzeAppFile(): Promise<void> {
+    const pagesDir = this.getSetting('pagesDir', 'src/pages');
+    const possiblePaths = [
+      this.resolvePath(`${pagesDir}/_app.tsx`),
+      this.resolvePath(`${pagesDir}/_app.ts`),
+    ];
+
+    for (const appPath of possiblePaths) {
+      try {
+        const appFile = this.project.addSourceFileAtPath(appPath);
+        if (!appFile) continue;
+
+        // Find Provider components used in _app
+        const jsxElements = appFile.getDescendantsOfKind(SyntaxKind.JsxElement);
+        const jsxSelfClosing = appFile.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement);
+
+        const providerNames = new Set<string>();
+
+        for (const el of [...jsxElements, ...jsxSelfClosing]) {
+          const tagName = el.getFirstDescendantByKind(SyntaxKind.Identifier)?.getText();
+          if (tagName && (tagName.includes('Provider') || tagName.includes('Context'))) {
+            providerNames.add(tagName);
+          }
+        }
+
+        // Find imports for these providers
+        for (const imp of appFile.getImportDeclarations()) {
+          const spec = imp.getModuleSpecifierValue();
+          if (!spec.startsWith('./') && !spec.startsWith('../')) continue;
+
+          const namedImports = imp.getNamedImports().map((n) => n.getName());
+          const defaultImport = imp.getDefaultImport()?.getText();
+
+          for (const providerName of providerNames) {
+            if (namedImports.includes(providerName) || defaultImport === providerName) {
+              // Analyze the provider file for GraphQL usage
+              const providerQueries = this.analyzeImportedComponent(
+                path.dirname(appPath),
+                spec,
+                providerName,
+                new Set(),
+                0
+              );
+
+              for (const q of providerQueries) {
+                // Mark as global context
+                this.globalContextQueries.push({
+                  ...q,
+                  operationName: `[Global] ${q.operationName}`,
+                });
+              }
+            }
+          }
+        }
+
+        if (this.globalContextQueries.length > 0) {
+          this.log(`Found ${this.globalContextQueries.length} global context queries from _app`);
+        }
+        return;
+      } catch {
+        // File doesn't exist, continue
+      }
+    }
+  }
+
+  /**
+   * Load codegen mapping from __generated__ folders (optional)
+   * 코드젠 폴더가 있으면 Document → Operation name 매핑 로드
+   */
+  private async loadCodegenMapping(): Promise<void> {
+    const possibleDirs = [
+      '__generated__',
+      'src/__generated__',
+      'src/__generated__/gql-graphql-gateway',
+      'generated',
+      'src/generated',
+    ];
+
+    for (const dir of possibleDirs) {
+      const generatedPath = this.resolvePath(dir);
+      try {
+        const files = await fg(['**/*.ts', '**/*.tsx'], {
+          cwd: generatedPath,
+          absolute: true,
+          onlyFiles: true,
+        });
+
+        for (const file of files) {
+          try {
+            const sourceFile = this.project.addSourceFileAtPath(file);
+
+            // Look for DocumentNode exports with operation names
+            // Pattern 1: export const SomeQueryDocument = gql`query SomeName { ... }`
+            // Pattern 2: export type SomeQueryDocument = DocumentNode
+            const varDecls = sourceFile.getVariableDeclarations();
+            for (const varDecl of varDecls) {
+              const name = varDecl.getName();
+              if (name.endsWith('Document')) {
+                const initializer = varDecl.getInitializer()?.getText() ?? '';
+
+                // Extract operation name and type from gql template
+                const operationMatch = initializer.match(/(?:query|mutation|subscription)\s+(\w+)/);
+                const typeMatch = initializer.match(/(query|mutation|subscription)\s+/);
+
+                if (operationMatch) {
+                  this.codegenMap.set(name, {
+                    operationName: operationMatch[1],
+                    operationType: typeMatch ? typeMatch[1] : 'query',
+                  });
+                }
+              }
+            }
+
+            // Pattern 3: Look at type definitions
+            // export type SomeQuery = { ... }
+            // This indicates SomeQueryDocument exists
+            const typeAliases = sourceFile.getTypeAliases();
+            for (const typeAlias of typeAliases) {
+              const name = typeAlias.getName();
+              if (
+                (name.endsWith('Query') ||
+                  name.endsWith('Mutation') ||
+                  name.endsWith('Subscription')) &&
+                !name.endsWith('Variables')
+              ) {
+                const docName = name + 'Document';
+                if (!this.codegenMap.has(docName)) {
+                  const operationType = name.endsWith('Mutation')
+                    ? 'mutation'
+                    : name.endsWith('Subscription')
+                      ? 'subscription'
+                      : 'query';
+                  this.codegenMap.set(docName, {
+                    operationName: name,
+                    operationType,
+                  });
+                }
+              }
+            }
+          } catch {
+            // Skip file on error
+          }
+        }
+
+        if (this.codegenMap.size > 0) {
+          this.log(`Loaded ${this.codegenMap.size} codegen mappings from ${dir}`);
+          return; // Found and loaded, no need to check other dirs
+        }
+      } catch {
+        // Directory doesn't exist, continue
+      }
+    }
+  }
+
+  /**
+   * Resolve Document name to operation name using codegen map
+   */
+  private resolveDocumentName(
+    documentName: string
+  ): { operationName: string; operationType: string } | null {
+    // Direct lookup
+    if (this.codegenMap.has(documentName)) {
+      return this.codegenMap.get(documentName)!;
+    }
+
+    // Try with Document suffix
+    const withSuffix = documentName.endsWith('Document') ? documentName : documentName + 'Document';
+    if (this.codegenMap.has(withSuffix)) {
+      return this.codegenMap.get(withSuffix)!;
+    }
+
+    return null;
   }
 
   /**
