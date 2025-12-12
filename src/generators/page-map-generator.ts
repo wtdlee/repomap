@@ -281,7 +281,7 @@ export class PageMapGenerator {
         hasRails && railsAnalysis
           ? `
       <!-- Rails Stats -->
-      <h3 style="margin-top:16px;font-size:10px;text-transform:uppercase;color:var(--text2);letter-spacing:1px;cursor:pointer" onclick="switchToRailsTab()">🛤️ Rails Backend</h3>
+      <h3 style="margin-top:16px;font-size:10px;text-transform:uppercase;color:var(--text2);letter-spacing:1px;cursor:pointer" onclick="switchToRailsTab()">Rails Backend</h3>
       <div class="stats" id="rails-stats">
         <div class="stat" data-filter="rails-routes" onclick="switchToRailsTab()"><div class="stat-val">${railsAnalysis.summary.totalRoutes}</div><div class="stat-label">Routes</div></div>
         <div class="stat" data-filter="rails-controllers" onclick="showRailsControllers()"><div class="stat-val">${railsAnalysis.summary.totalControllers}</div><div class="stat-label">Controllers</div></div>

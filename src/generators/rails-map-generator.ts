@@ -333,8 +333,7 @@ export class RailsMapGenerator {
       
       return \`
         <div class="panel-header">
-          <div class="panel-title">Routes</div>
-          <div class="panel-count">\${Math.min(routesDisplayCount, filtered.length)} / \${filtered.length}</div>
+          <div class="panel-title">Routes <span class="panel-count">(\${Math.min(routesDisplayCount, filtered.length)} / \${filtered.length})</span></div>
         </div>
         <table class="routes-table">
           <thead>
@@ -384,8 +383,7 @@ export class RailsMapGenerator {
 
       return \`
         <div class="panel-header">
-          <div class="panel-title">Controllers</div>
-          <div class="panel-count">\${Math.min(controllersDisplayCount, filteredControllers.length)} / \${filteredControllers.length}</div>
+          <div class="panel-title">Controllers <span class="panel-count">(\${Math.min(controllersDisplayCount, filteredControllers.length)} / \${filteredControllers.length})</span></div>
         </div>
         <div>
           \${displayed.map((ctrl, idx) => \`
@@ -436,8 +434,7 @@ export class RailsMapGenerator {
 
       return \`
         <div class="panel-header">
-          <div class="panel-title">Models</div>
-          <div class="panel-count">\${Math.min(modelsDisplayCount, filteredModels.length)} / \${filteredModels.length}</div>
+          <div class="panel-title">Models <span class="panel-count">(\${Math.min(modelsDisplayCount, filteredModels.length)} / \${filteredModels.length})</span></div>
         </div>
         <div>
           \${displayed.map((model, idx) => \`
