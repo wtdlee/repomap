@@ -547,6 +547,43 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Must be PascalCase (start with uppercase)
     if (!/^[A-Z]/.test(name)) return false;
 
+    // Exclude React/Next.js type definitions (not actual components)
+    const typeDefinitions = new Set([
+      'NextPage',
+      'NextPageContext',
+      'NextApiRequest',
+      'NextApiResponse',
+      'GetServerSideProps',
+      'GetStaticProps',
+      'GetStaticPaths',
+      'InferGetServerSidePropsType',
+      'InferGetStaticPropsType',
+      'FC',
+      'FunctionComponent',
+      'VFC',
+      'Component',
+      'PureComponent',
+      'ReactNode',
+      'ReactElement',
+      'PropsWithChildren',
+      'ComponentProps',
+      'ComponentType',
+      'ElementType',
+      'RefObject',
+      'MutableRefObject',
+      'Dispatch',
+      'SetStateAction',
+      'ChangeEvent',
+      'MouseEvent',
+      'KeyboardEvent',
+      'FormEvent',
+      'SyntheticEvent',
+    ]);
+
+    if (typeDefinitions.has(name)) {
+      return false;
+    }
+
     // Common component suffixes that likely contain data fetching
     const componentSuffixes = [
       'Container',
