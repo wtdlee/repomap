@@ -45,12 +45,223 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     const inlineOperations = await this.analyzeInlineGraphQL();
     operations.push(...inlineOperations);
 
-    // Find where each operation is used
-    await this.findOperationUsage(operations);
+    // Analyze GraphQL Code Generator output (__generated__/graphql.ts)
+    const codegenOperations = await this.analyzeCodegenGenerated();
+    operations.push(...codegenOperations);
 
-    this.log(`Found ${operations.length} GraphQL operations`);
+    // Deduplicate operations by name (keep first occurrence)
+    const uniqueOperations = this.deduplicateOperations(operations);
 
-    return { graphqlOperations: operations };
+    // Find where each operation is used (including Document imports)
+    await this.findOperationUsage(uniqueOperations);
+
+    this.log(`Found ${uniqueOperations.length} GraphQL operations`);
+
+    return { graphqlOperations: uniqueOperations };
+  }
+
+  /**
+   * Deduplicate operations by name, keeping the first occurrence
+   */
+  private deduplicateOperations(operations: GraphQLOperation[]): GraphQLOperation[] {
+    const seen = new Map<string, GraphQLOperation>();
+    for (const op of operations) {
+      if (!seen.has(op.name)) {
+        seen.set(op.name, op);
+      } else {
+        // Merge usedIn arrays
+        const existing = seen.get(op.name);
+        if (existing) {
+          for (const usedIn of op.usedIn) {
+            if (!existing.usedIn.includes(usedIn)) {
+              existing.usedIn.push(usedIn);
+            }
+          }
+        }
+      }
+    }
+    return Array.from(seen.values());
+  }
+
+  /**
+   * Analyze GraphQL Code Generator output files
+   * Supports client preset pattern: __generated__/graphql.ts
+   */
+  private async analyzeCodegenGenerated(): Promise<GraphQLOperation[]> {
+    const operations: GraphQLOperation[] = [];
+
+    // Find potential codegen output files
+    const generatedFiles = await fg(
+      ['**/__generated__/graphql.ts', '**/__generated__/gql.ts', '**/generated/graphql.ts'],
+      {
+        cwd: this.basePath,
+        ignore: ['**/node_modules/**', '**/.next/**'],
+        absolute: true,
+      }
+    );
+
+    for (const filePath of generatedFiles) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        const relativePath = path.relative(this.basePath, filePath);
+
+        // Optimized line-by-line parsing (Document definitions are on single lines)
+        const lines = content.split('\n');
+        for (const line of lines) {
+          // Quick check before regex
+          if (!line.includes('Document =') || !line.includes('DocumentNode')) continue;
+
+          // Match: export const XxxDocument = {...} as unknown as DocumentNode
+          const match = line.match(
+            /export\s+const\s+(\w+Document)\s*=\s*(\{"kind":"Document".+\})\s*as\s+unknown\s+as\s+DocumentNode/
+          );
+          if (!match) continue;
+
+          const documentName = match[1];
+          const documentJson = match[2];
+
+          try {
+            const documentObj = JSON.parse(documentJson);
+
+            if (documentObj.kind === 'Document' && documentObj.definitions) {
+              // Only process first definition (main operation)
+              const def = documentObj.definitions[0];
+              if (def?.kind === 'OperationDefinition') {
+                const operationName = def.name?.value || documentName.replace(/Document$/, '');
+                const operationType = def.operation as 'query' | 'mutation' | 'subscription';
+
+                // Extract variables (simplified for performance)
+                const variables: VariableInfo[] = (def.variableDefinitions || []).map(
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  (varDef: any) => ({
+                    name: varDef.variable?.name?.value || 'unknown',
+                    type: this.extractTypeFromAst(varDef.type),
+                    required: varDef.type?.kind === 'NonNullType',
+                  })
+                );
+
+                operations.push({
+                  name: operationName,
+                  type: operationType,
+                  filePath: relativePath,
+                  usedIn: [],
+                  variables,
+                  returnType: this.inferReturnTypeFromAst(def),
+                  fragments: [], // Skip fragment extraction for performance
+                  fields: [], // Skip field extraction for performance
+                });
+              }
+            }
+          } catch {
+            // Skip unparseable JSON
+          }
+        }
+
+        this.log(`Found ${operations.length} operations in codegen output: ${relativePath}`);
+      } catch (error) {
+        this.warn(`Failed to analyze codegen file ${filePath}: ${(error as Error).message}`);
+      }
+    }
+
+    return operations;
+  }
+
+  /**
+   * Extract type string from AST type node
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractTypeFromAst(typeNode: any): string {
+    if (!typeNode) return 'unknown';
+
+    if (typeNode.kind === 'NonNullType') {
+      return `${this.extractTypeFromAst(typeNode.type)}!`;
+    }
+    if (typeNode.kind === 'ListType') {
+      return `[${this.extractTypeFromAst(typeNode.type)}]`;
+    }
+    if (typeNode.kind === 'NamedType') {
+      return typeNode.name?.value || 'unknown';
+    }
+    return 'unknown';
+  }
+
+  /**
+   * Extract fields from AST selection set
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractFieldsFromAst(selectionSet: any, depth: number = 0): GraphQLField[] {
+    if (!selectionSet?.selections || depth > 5) return [];
+
+    const fields: GraphQLField[] = [];
+    for (const selection of selectionSet.selections) {
+      if (selection.kind === 'Field') {
+        const field: GraphQLField = {
+          name: selection.name?.value || 'unknown',
+        };
+
+        if (selection.arguments?.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const args = selection.arguments.map((arg: any) => arg.name?.value).join(', ');
+          field.type = `(${args})`;
+        }
+
+        if (selection.selectionSet) {
+          field.fields = this.extractFieldsFromAst(selection.selectionSet, depth + 1);
+        }
+
+        fields.push(field);
+      } else if (selection.kind === 'FragmentSpread') {
+        fields.push({ name: `...${selection.name?.value}`, type: 'fragment' });
+      } else if (selection.kind === 'InlineFragment') {
+        const typeName = selection.typeCondition?.name?.value || 'inline';
+        fields.push({
+          name: `... on ${typeName}`,
+          type: 'inline-fragment',
+          fields: this.extractFieldsFromAst(selection.selectionSet, depth + 1),
+        });
+      }
+    }
+    return fields;
+  }
+
+  /**
+   * Extract fragment references from AST
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractFragmentReferencesFromAst(definition: any): string[] {
+    const fragments: string[] = [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const visit = (node: any) => {
+      if (!node) return;
+
+      if (node.kind === 'FragmentSpread') {
+        fragments.push(node.name?.value);
+      }
+
+      if (node.selectionSet?.selections) {
+        for (const selection of node.selectionSet.selections) {
+          visit(selection);
+        }
+      }
+    };
+
+    visit(definition);
+    return fragments.filter(Boolean);
+  }
+
+  /**
+   * Infer return type from AST definition
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private inferReturnTypeFromAst(definition: any): string {
+    if (definition.selectionSet?.selections?.length > 0) {
+      const firstSelection = definition.selectionSet.selections[0];
+      if (firstSelection.kind === 'Field') {
+        return firstSelection.name?.value || 'unknown';
+      }
+    }
+    return 'unknown';
   }
 
   private async analyzeGraphQLFiles(): Promise<GraphQLOperation[]> {
@@ -414,13 +625,15 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   private async findOperationUsage(operations: GraphQLOperation[]): Promise<void> {
     const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
-      ignore: ['**/node_modules/**', '**/.next/**'],
+      ignore: ['**/node_modules/**', '**/.next/**', '**/__generated__/**'],
       absolute: true,
     });
 
     const operationNames = new Map<string, GraphQLOperation>();
     for (const op of operations) {
       operationNames.set(op.name, op);
+      // Also map Document name for codegen pattern
+      operationNames.set(`${op.name}Document`, op);
     }
 
     for (const filePath of tsFiles) {
@@ -429,15 +642,42 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         const relativePath = path.relative(this.basePath, filePath);
 
         for (const [name, operation] of operationNames) {
-          // Check if the operation is used in this file
-          if (
-            content.includes(`useQuery<${name}`) ||
-            content.includes(`useMutation<${name}`) ||
-            content.includes(`useLazyQuery<${name}`) ||
-            content.includes(`${name}Query`) ||
-            content.includes(`${name}Mutation`) ||
-            content.includes(`${name}Variables`)
-          ) {
+          // Skip if this is the definition file itself
+          if (relativePath === operation.filePath) continue;
+
+          // Check traditional patterns
+          const traditionalPatterns = [
+            `useQuery<${name}`,
+            `useMutation<${name}`,
+            `useLazyQuery<${name}`,
+            `useSubscription<${name}`,
+            `${name}Query`,
+            `${name}Mutation`,
+            `${name}Variables`,
+          ];
+
+          // Check codegen Document import patterns
+          const codegenPatterns = [
+            // Import pattern: import { XxxDocument } from
+            new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from`),
+            // useQuery(XxxDocument) or useMutation(XxxDocument)
+            new RegExp(`useQuery\\s*\\(\\s*${name}`),
+            new RegExp(`useMutation\\s*\\(\\s*${name}`),
+            new RegExp(`useLazyQuery\\s*\\(\\s*${name}`),
+            new RegExp(`useSubscription\\s*\\(\\s*${name}`),
+            // useSuspenseQuery(XxxDocument)
+            new RegExp(`useSuspenseQuery\\s*\\(\\s*${name}`),
+            // Apollo client.query({ query: XxxDocument })
+            new RegExp(`query\\s*:\\s*${name}`),
+            new RegExp(`mutation\\s*:\\s*${name}`),
+          ];
+
+          const hasTraditionalMatch = traditionalPatterns.some((pattern) =>
+            content.includes(pattern)
+          );
+          const hasCodegenMatch = codegenPatterns.some((pattern) => pattern.test(content));
+
+          if (hasTraditionalMatch || hasCodegenMatch) {
             if (!operation.usedIn.includes(relativePath)) {
               operation.usedIn.push(relativePath);
             }
