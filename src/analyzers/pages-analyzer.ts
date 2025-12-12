@@ -959,6 +959,12 @@ export class PagesAnalyzer extends BaseAnalyzer {
       return true;
     }
 
+    // Match PascalCase names that look like feature components
+    // e.g., CancellationEngagement, UserProfile, ProjectSettings
+    if (/^[A-Z][a-z]+[A-Z][a-z]+/.test(name)) {
+      return true;
+    }
+
     return false;
   }
 
