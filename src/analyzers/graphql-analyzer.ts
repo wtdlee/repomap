@@ -38,22 +38,31 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     const operations: GraphQLOperation[] = [];
 
     // Analyze .graphql files
+    this.log('[GraphQLAnalyzer] Step 1: Analyzing .graphql files...');
     const graphqlOperations = await this.analyzeGraphQLFiles();
     operations.push(...graphqlOperations);
+    this.log(`[GraphQLAnalyzer] Step 1 done: ${graphqlOperations.length} from .graphql files`);
 
     // Analyze gql`` template literals in TypeScript files
+    this.log('[GraphQLAnalyzer] Step 2: Analyzing inline GraphQL...');
     const inlineOperations = await this.analyzeInlineGraphQL();
     operations.push(...inlineOperations);
+    this.log(`[GraphQLAnalyzer] Step 2 done: ${inlineOperations.length} inline operations`);
 
     // Analyze GraphQL Code Generator output (__generated__/graphql.ts)
+    this.log('[GraphQLAnalyzer] Step 3: Analyzing codegen output...');
     const codegenOperations = await this.analyzeCodegenGenerated();
     operations.push(...codegenOperations);
+    this.log(`[GraphQLAnalyzer] Step 3 done: ${codegenOperations.length} from codegen`);
 
     // Deduplicate operations by name (keep first occurrence)
     const uniqueOperations = this.deduplicateOperations(operations);
+    this.log(`[GraphQLAnalyzer] Deduplicated: ${uniqueOperations.length} unique operations`);
 
     // Find where each operation is used (including Document imports)
+    this.log('[GraphQLAnalyzer] Step 4: Finding operation usage...');
     await this.findOperationUsage(uniqueOperations);
+    this.log('[GraphQLAnalyzer] Step 4 done');
 
     this.log(`Found ${uniqueOperations.length} GraphQL operations`);
 
@@ -147,8 +156,8 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
                   usedIn: [],
                   variables,
                   returnType: this.inferReturnTypeFromAst(def),
-                  fragments: [], // Skip fragment extraction for performance
-                  fields: [], // Skip field extraction for performance
+                  fragments: this.extractFragmentReferencesFromAst(def),
+                  fields: this.extractFieldsFromAst(def.selectionSet),
                 });
               }
             }
@@ -406,6 +415,19 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
                       document,
                       relativePath
                     );
+
+                    // Extract variable name from parent declaration
+                    // e.g., export const GET_USER = graphql(`...`) -> variableName = "GET_USER"
+                    const variableName = this.extractVariableNameFromCall(call);
+                    if (variableName) {
+                      for (const op of fileOperations) {
+                        op.variableNames = op.variableNames || [];
+                        op.variableNames.push(variableName);
+                        // Also add Document variant
+                        op.variableNames.push(`${op.name}Document`);
+                      }
+                    }
+
                     operations.push(...fileOperations);
                   } catch {
                     // Skip unparseable GraphQL
@@ -453,6 +475,27 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     }
 
     return operations;
+  }
+
+  /**
+   * Extract variable name from parent declaration
+   * e.g., export const GET_USER = graphql(`...`) -> "GET_USER"
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractVariableNameFromCall(call: any): string | null {
+    try {
+      // Walk up the AST to find the variable declaration
+      let parent = call.getParent();
+      while (parent) {
+        if (parent.isKind?.(SyntaxKind.VariableDeclaration)) {
+          return parent.getName?.() || null;
+        }
+        parent = parent.getParent?.();
+      }
+    } catch {
+      // Ignore errors
+    }
+    return null;
   }
 
   private extractOperationsFromDocument(
@@ -634,14 +677,40 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     // Build lookup maps for O(1) access
     const operationByName = new Map<string, GraphQLOperation>();
     const operationByDocument = new Map<string, GraphQLOperation>();
+    const operationByVariableName = new Map<string, GraphQLOperation>();
+
     for (const op of operations) {
       operationByName.set(op.name, op);
       operationByDocument.set(`${op.name}Document`, op);
+      // Map all variable names to operation
+      if (op.variableNames) {
+        for (const varName of op.variableNames) {
+          operationByVariableName.set(varName, op);
+        }
+      }
     }
 
-    // Build a single regex to match all Document names at once
-    const allDocumentNames = operations.map((op) => `${op.name}Document`);
-    const documentNamesPattern = new RegExp(`\\b(${allDocumentNames.join('|')})\\b`, 'g');
+    // Collect all searchable names for single regex
+    const allSearchableNames = new Set<string>();
+    for (const op of operations) {
+      allSearchableNames.add(`${op.name}Document`);
+      if (op.variableNames) {
+        for (const varName of op.variableNames) {
+          allSearchableNames.add(varName);
+        }
+      }
+    }
+
+    // Build a single regex to match all names at once (if not too large)
+    let namesPattern: RegExp | null = null;
+    const namesArray = Array.from(allSearchableNames);
+    if (namesArray.length > 0 && namesArray.length < 2000) {
+      // Escape special regex chars and sort by length (longest first) for proper matching
+      const escaped = namesArray
+        .sort((a, b) => b.length - a.length)
+        .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      namesPattern = new RegExp(`\\b(${escaped.join('|')})\\b`, 'g');
+    }
 
     // Process files in parallel batches
     const batchSize = 50;
@@ -659,26 +728,33 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               !content.includes('useQuery') &&
               !content.includes('useMutation') &&
               !content.includes('Query') &&
-              !content.includes('Mutation')
+              !content.includes('Mutation') &&
+              !content.includes('GET_') &&
+              !content.includes('SEARCH_') &&
+              !content.includes('CREATE_') &&
+              !content.includes('UPDATE_') &&
+              !content.includes('DELETE_')
             ) {
               return;
             }
 
-            // Find all Document references in one pass
-            const foundDocuments = new Set<string>();
-            let match;
-            while ((match = documentNamesPattern.exec(content)) !== null) {
-              foundDocuments.add(match[1]);
-            }
-            // Reset regex state
-            documentNamesPattern.lastIndex = 0;
+            // Find all references using single regex
+            if (namesPattern) {
+              const foundNames = new Set<string>();
+              let match;
+              while ((match = namesPattern.exec(content)) !== null) {
+                foundNames.add(match[1]);
+              }
+              namesPattern.lastIndex = 0;
 
-            // Map found Documents to operations
-            for (const docName of foundDocuments) {
-              const operation = operationByDocument.get(docName);
-              if (operation && relativePath !== operation.filePath) {
-                if (!operation.usedIn.includes(relativePath)) {
-                  operation.usedIn.push(relativePath);
+              // Map found names to operations
+              for (const name of foundNames) {
+                const operation =
+                  operationByDocument.get(name) || operationByVariableName.get(name);
+                if (operation && relativePath !== operation.filePath) {
+                  if (!operation.usedIn.includes(relativePath)) {
+                    operation.usedIn.push(relativePath);
+                  }
                 }
               }
             }
@@ -686,7 +762,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
             // Also check traditional patterns (useQuery<Name>, etc.)
             for (const [name, operation] of operationByName) {
               if (relativePath === operation.filePath) continue;
-              if (operation.usedIn.includes(relativePath)) continue; // Already found
+              if (operation.usedIn.includes(relativePath)) continue;
 
               if (
                 content.includes(`useQuery<${name}`) ||

@@ -185,6 +185,8 @@ export interface GraphQLOperation {
   returnType: string;
   fragments: string[];
   fields: GraphQLField[];
+  /** Variable names that reference this operation (e.g., GET_USER_QUERY, GetUserDocument) */
+  variableNames?: string[];
 }
 
 export interface GraphQLField {

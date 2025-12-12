@@ -1,6 +1,7 @@
-import { Project, SyntaxKind, SourceFile, Node, FunctionDeclaration } from 'ts-morph';
+import { parseSync, Module } from '@swc/core';
 import fg from 'fast-glob';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
 import type {
   AnalysisResult,
@@ -11,19 +12,14 @@ import type {
 } from '../types.js';
 
 /**
- * Analyzer for data flow patterns
- * データフローパターンの分析器
+ * Analyzer for data flow patterns using @swc/core for fast parsing
+ * データフローパターンの分析器 (@swc/core使用)
  */
 export class DataFlowAnalyzer extends BaseAnalyzer {
-  private project: Project;
   private componentCache: Map<string, ComponentInfo> = new Map();
 
   constructor(config: RepositoryConfig) {
     super(config);
-    this.project = new Project({
-      tsConfigFilePath: this.resolvePath('tsconfig.json'),
-      skipAddingFilesFromTsConfig: true,
-    });
   }
 
   getName(): string {
@@ -72,24 +68,60 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
 
     const dirs = [...new Set([...configuredDirs, ...commonDirs])];
 
-    for (const dir of dirs) {
-      const files = await fg(['**/*.tsx'], {
-        cwd: this.resolvePath(dir),
-        ignore: ['**/*.test.*', '**/*.spec.*', '**/*.stories.*'],
-        absolute: true,
-      });
+    // Search all directories at once using glob patterns
+    const patterns = dirs.map((dir) => `${dir}/**/*.tsx`);
+    const files = await fg(patterns, {
+      cwd: this.basePath,
+      ignore: [
+        '**/*.test.*',
+        '**/*.spec.*',
+        '**/*.stories.*',
+        '**/node_modules/**',
+        '**/__generated__/**',
+      ],
+      absolute: true,
+      onlyFiles: true,
+      unique: true,
+    });
 
-      for (const filePath of files) {
+    this.log(`[DataFlowAnalyzer] Found ${files.length} component files to analyze`);
+
+    // Process files in batches to avoid overwhelming I/O
+    const batchSize = 100;
+    for (let i = 0; i < files.length; i += batchSize) {
+      const batch = files.slice(i, i + batchSize);
+
+      // Read batch files in parallel
+      const fileContents = await Promise.all(
+        batch.map(async (filePath) => {
+          try {
+            const content = await fs.readFile(filePath, 'utf-8');
+            return { filePath, content };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      // Parse and analyze each file
+      for (const file of fileContents) {
+        if (!file) continue;
         try {
-          const sourceFile = this.project.addSourceFileAtPath(filePath);
-          const relativePath = path.relative(this.basePath, filePath);
-          const componentInfos = this.analyzeComponentFile(sourceFile, relativePath);
+          const ast = parseSync(file.content, {
+            syntax: 'typescript',
+            tsx: true,
+            comments: false,
+          });
+          const relativePath = path.relative(this.basePath, file.filePath);
+          const componentInfos = this.analyzeComponentFile(ast, relativePath, file.content);
           components.push(...componentInfos);
-        } catch (error) {
-          this.warn(`Failed to analyze ${filePath}: ${(error as Error).message}`);
+        } catch {
+          // Skip files that can't be parsed
         }
       }
     }
+
+    this.log(`[DataFlowAnalyzer] Extracted ${components.length} components`);
 
     // Build dependency graph
     this.buildDependencyGraph(components);
@@ -97,61 +129,116 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     return components;
   }
 
-  private analyzeComponentFile(sourceFile: SourceFile, filePath: string): ComponentInfo[] {
+  private analyzeComponentFile(ast: Module, filePath: string, content: string): ComponentInfo[] {
     const components: ComponentInfo[] = [];
+    const imports = this.extractImports(ast);
 
-    // Find function components
-    const functionDeclarations = sourceFile.getFunctions();
-    for (const func of functionDeclarations) {
-      const name = func.getName();
-      if (name && this.isComponentName(name)) {
-        const info = this.extractComponentInfo(func, name, filePath);
-        components.push(info);
-        this.componentCache.set(name, info);
-      }
-    }
-
-    // Find arrow function components
-    const variableDeclarations = sourceFile.getVariableDeclarations();
-    for (const varDecl of variableDeclarations) {
-      const name = varDecl.getName();
-      if (this.isComponentName(name)) {
-        const initializer = varDecl.getInitializer();
-        if (
-          initializer &&
-          (initializer.isKind(SyntaxKind.ArrowFunction) ||
-            initializer.isKind(SyntaxKind.FunctionExpression))
-        ) {
-          const info = this.extractComponentInfo(initializer, name, filePath);
+    for (const item of ast.body) {
+      // Export function declaration: export function ComponentName() {}
+      if (item.type === 'ExportDeclaration' && item.declaration?.type === 'FunctionDeclaration') {
+        const name = item.declaration.identifier?.value;
+        if (name && this.isComponentName(name)) {
+          const info = this.extractComponentInfo(name, filePath, content, imports);
           components.push(info);
           this.componentCache.set(name, info);
         }
       }
-    }
 
-    // Find exported hooks
-    const hookFunctions = sourceFile.getFunctions().filter((f) => {
-      const name = f.getName();
-      return name && name.startsWith('use');
-    });
+      // Function declaration: function ComponentName() {}
+      if (item.type === 'FunctionDeclaration') {
+        const name = item.identifier?.value;
+        if (name && this.isComponentName(name)) {
+          const info = this.extractComponentInfo(name, filePath, content, imports);
+          components.push(info);
+          this.componentCache.set(name, info);
+        }
+      }
 
-    for (const hook of hookFunctions) {
-      const name = hook.getName() ?? '';
-      const info = this.extractHookInfo(hook, name, filePath);
-      components.push(info);
-      this.componentCache.set(name, info);
+      // Export default function: export default function ComponentName() {}
+      if (item.type === 'ExportDefaultDeclaration' && item.decl?.type === 'FunctionExpression') {
+        const name = item.decl.identifier?.value;
+        if (name && this.isComponentName(name)) {
+          const info = this.extractComponentInfo(name, filePath, content, imports);
+          components.push(info);
+          this.componentCache.set(name, info);
+        }
+      }
+
+      // Variable declaration: const ComponentName = () => {} or export const ComponentName = ...
+      if (item.type === 'VariableDeclaration') {
+        for (const d of item.declarations) {
+          if (d.id?.type === 'Identifier') {
+            const name = d.id.value;
+            if (
+              name &&
+              (this.isComponentName(name) || name.startsWith('use')) &&
+              d.init &&
+              (d.init.type === 'ArrowFunctionExpression' || d.init.type === 'FunctionExpression')
+            ) {
+              const info = this.extractComponentInfo(name, filePath, content, imports);
+              components.push(info);
+              this.componentCache.set(name, info);
+            }
+          }
+        }
+      }
+
+      // Export variable declaration: export const ComponentName = () => {}
+      if (item.type === 'ExportDeclaration' && item.declaration?.type === 'VariableDeclaration') {
+        for (const d of item.declaration.declarations) {
+          if (d.id?.type === 'Identifier') {
+            const name = d.id.value;
+            if (
+              name &&
+              (this.isComponentName(name) || name.startsWith('use')) &&
+              d.init &&
+              (d.init.type === 'ArrowFunctionExpression' || d.init.type === 'FunctionExpression')
+            ) {
+              const info = this.extractComponentInfo(name, filePath, content, imports);
+              components.push(info);
+              this.componentCache.set(name, info);
+            }
+          }
+        }
+      }
     }
 
     return components;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractImports(ast: Module): Map<string, string> {
+    const imports = new Map<string, string>();
+
+    for (const item of ast.body) {
+      if (item.type === 'ImportDeclaration') {
+        const source = item.source?.value || '';
+        if (source.startsWith('.') || source.startsWith('@/')) {
+          for (const spec of item.specifiers || []) {
+            if (spec.type === 'ImportSpecifier' && spec.local?.value) {
+              imports.set(spec.local.value, source);
+            }
+            if (spec.type === 'ImportDefaultSpecifier' && spec.local?.value) {
+              imports.set(spec.local.value, source);
+            }
+          }
+        }
+      }
+    }
+
+    return imports;
   }
 
   private isComponentName(name: string): boolean {
     return /^[A-Z][a-zA-Z0-9]*$/.test(name);
   }
 
-  private extractComponentInfo(node: Node, name: string, filePath: string): ComponentInfo {
-    const sourceFile = node.getSourceFile();
-
+  private extractComponentInfo(
+    name: string,
+    filePath: string,
+    content: string,
+    imports: Map<string, string>
+  ): ComponentInfo {
     // Determine component type based on path and naming conventions
     let type: ComponentInfo['type'] = 'presentational';
 
@@ -162,36 +249,35 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     } else if (name.includes('Container') || name.includes('Provider')) {
       type = 'container';
     } else if (
-      // Layout detection - various naming patterns
       name.includes('Layout') ||
       name.includes('Shell') ||
       name.includes('Wrapper') ||
       name.includes('Frame') ||
       name.includes('Scaffold') ||
-      // Path-based layout detection
       filePath.includes('/layouts/') ||
       filePath.includes('/layout/')
     ) {
       type = 'layout';
+    } else if (name.startsWith('use')) {
+      type = 'hook';
     }
 
-    // Extract props
-    const props = this.extractProps(node);
+    // Extract hooks used (using regex for speed)
+    const hooks = this.extractHooksUsed(content);
 
-    // Extract hooks used
-    const hooks = this.extractHooksUsed(node);
-
-    // Extract dependencies (imported components)
-    const dependencies = this.extractDependencies(sourceFile);
+    // Extract dependencies from imports
+    const dependencies = Array.from(imports.keys()).filter(
+      (name) => this.isComponentName(name) || name.startsWith('use')
+    );
 
     // Extract state management patterns
-    const stateManagement = this.extractStateManagement(node);
+    const stateManagement = this.extractStateManagement(content);
 
     return {
       name,
       filePath,
       type,
-      props,
+      props: [], // Skip detailed prop extraction for performance
       dependencies,
       dependents: [], // Will be filled later
       hooks,
@@ -199,177 +285,98 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     };
   }
 
-  private extractHookInfo(
-    node: FunctionDeclaration,
-    name: string,
-    filePath: string
-  ): ComponentInfo {
-    const sourceFile = node.getSourceFile();
+  private extractHooksUsed(content: string): string[] {
+    const hooks: string[] = [];
 
-    const props = this.extractProps(node);
-    const hooks = this.extractHooksUsed(node);
-    const dependencies = this.extractDependencies(sourceFile);
-    const stateManagement = this.extractStateManagement(node);
+    // Match useQuery/useMutation/useLazyQuery with first argument (Document name)
+    // Pattern: useQuery(DocumentName or useQuery<Type>(DocumentName
+    const graphqlHookRegex =
+      /\b(useQuery|useMutation|useLazyQuery)(?:<[^>]*>)?\s*\(\s*([A-Z_][A-Za-z0-9_]*)/g;
+    let gqlMatch;
+    while ((gqlMatch = graphqlHookRegex.exec(content)) !== null) {
+      const hookName = gqlMatch[1];
+      const docName = gqlMatch[2];
 
-    return {
-      name,
-      filePath,
-      type: 'hook',
-      props,
-      dependencies,
-      dependents: [],
-      hooks,
-      stateManagement,
-    };
-  }
+      // Skip generic variable names like Query, Mutation, QUERY, MUTATION
+      if (/^(Query|Mutation|QUERY|MUTATION)$/i.test(docName)) {
+        continue;
+      }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractProps(node: any): PropInfo[] {
-    const props: PropInfo[] = [];
+      const operationName = this.extractOperationName(docName);
 
-    // Get parameter type
-    const parameters = node.getParameters?.() || [];
-    if (parameters.length > 0) {
-      const propsParam = parameters[0];
-      const typeNode = propsParam.getTypeNode?.();
-
-      if (typeNode) {
-        // Extract properties from type
-        const members = typeNode.getDescendantsOfKind?.(SyntaxKind.PropertySignature) || [];
-        for (const member of members) {
-          props.push({
-            name: member.getName(),
-            type: member.getType().getText(),
-            required: !member.hasQuestionToken(),
-          });
-        }
+      if (hookName === 'useQuery' || hookName === 'useLazyQuery') {
+        const hookInfo = operationName ? `Query: ${operationName}` : `Query: ${docName}`;
+        if (!hooks.includes(hookInfo)) hooks.push(hookInfo);
+      } else if (hookName === 'useMutation') {
+        const hookInfo = operationName ? `Mutation: ${operationName}` : `Mutation: ${docName}`;
+        if (!hooks.includes(hookInfo)) hooks.push(hookInfo);
       }
     }
 
-    return props;
-  }
+    // Match other hooks (useState, useEffect, etc.)
+    const hookRegex = /\b(use[A-Z][a-zA-Z0-9]*)\s*\(/g;
+    let match;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractHooksUsed(node: any): string[] {
-    const hooks: string[] = [];
+    while ((match = hookRegex.exec(content)) !== null) {
+      const hookName = match[1];
 
-    const callExpressions = node.getDescendantsOfKind?.(SyntaxKind.CallExpression) || [];
-    for (const call of callExpressions) {
-      try {
-        const callName = call.getExpression().getText();
-        if (callName.startsWith('use')) {
-          // For useQuery/useMutation, try to extract the operation name
-          if (
-            callName === 'useQuery' ||
-            callName === 'useMutation' ||
-            callName === 'useLazyQuery'
-          ) {
-            const operationInfo = this.extractOperationName(call, callName);
-            if (!hooks.includes(operationInfo)) {
-              hooks.push(operationInfo);
-            }
-          } else if (callName === 'useContext') {
-            const contextInfo = this.extractContextName(call);
-            if (!hooks.includes(contextInfo)) {
-              hooks.push(contextInfo);
-            }
-          } else if (!hooks.includes(callName)) {
-            hooks.push(callName);
-          }
+      // Skip already processed GraphQL hooks
+      if (hookName === 'useQuery' || hookName === 'useMutation' || hookName === 'useLazyQuery') {
+        continue;
+      }
+
+      if (hookName === 'useContext') {
+        // Try to extract context name
+        const contextMatch = content
+          .slice(match.index)
+          .match(/useContext\s*\(\s*([A-Z][A-Za-z0-9]*)/);
+        if (contextMatch) {
+          const contextName = contextMatch[1].replace(/Context$/, '');
+          const hookInfo = `🔄 Context: ${contextName}`;
+          if (!hooks.includes(hookInfo)) hooks.push(hookInfo);
         }
-      } catch {
-        // Skip on error
+      } else if (!hooks.includes(hookName)) {
+        hooks.push(hookName);
       }
     }
 
     return hooks;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractOperationName(call: any, hookType: string): string {
-    try {
-      const args = call.getArguments?.() || [];
-      if (args.length > 0) {
-        const firstArg = args[0].getText();
-        // Clean up the operation name
-        const cleanName = firstArg
-          .replace(/^(GET_|FETCH_|CREATE_|UPDATE_|DELETE_)/, '')
-          .replace(/_QUERY$|_MUTATION$/, '')
-          .replace(/Document$/, '')
-          .replace(/Query$|Mutation$/, '');
+  private extractOperationName(args: string): string | null {
+    if (!args) return null;
 
-        // Format nicely
-        const icon = hookType === 'useMutation' ? '✏️' : '📡';
-        const type = hookType === 'useMutation' ? 'Mutation' : 'Query';
-        return `${icon} ${type}: ${cleanName}`;
-      }
-    } catch {
-      // Ignore errors
-    }
-    return hookType;
-  }
+    // Get the first argument (operation name/document)
+    const firstArg = args.split(',')[0].trim();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractContextName(call: any): string {
-    try {
-      const args = call.getArguments?.() || [];
-      if (args.length > 0) {
-        const contextName = args[0]
-          .getText()
-          .replace(/Context$/, '')
-          .replace(/^Session|^Token|^Apollo/, (m: string) => m);
-        return `🔄 Context: ${contextName}`;
-      }
-    } catch {
-      // Ignore errors
-    }
-    return 'useContext';
-  }
+    // Skip object/array/string literals
+    if (/^[{[\'"` ]/.test(firstArg)) return null;
 
-  private extractDependencies(sourceFile: SourceFile): string[] {
-    const dependencies: string[] = [];
+    // Clean up the operation name
+    const cleanName = firstArg
+      .replace(/^(GET_|FETCH_|CREATE_|UPDATE_|DELETE_)/, '')
+      .replace(/_QUERY$|_MUTATION$/, '')
+      .replace(/Document$/, '')
+      .replace(/Query$|Mutation$/, '');
 
-    const importDeclarations = sourceFile.getImportDeclarations();
-    for (const importDecl of importDeclarations) {
-      const moduleSpecifier = importDecl.getModuleSpecifierValue();
-
-      // Only track local imports
-      if (moduleSpecifier.startsWith('.') || moduleSpecifier.startsWith('@/')) {
-        const namedImports = importDecl.getNamedImports();
-        for (const namedImport of namedImports) {
-          const name = namedImport.getName();
-          if (this.isComponentName(name) || name.startsWith('use')) {
-            dependencies.push(name);
-          }
-        }
-
-        const defaultImport = importDecl.getDefaultImport();
-        if (defaultImport) {
-          const name = defaultImport.getText();
-          if (this.isComponentName(name)) {
-            dependencies.push(name);
-          }
-        }
-      }
+    // Skip generic variable names
+    if (!cleanName || cleanName.trim() === '' || /^(QUERY|MUTATION)$/i.test(cleanName.trim())) {
+      return null;
     }
 
-    return dependencies;
+    return cleanName;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractStateManagement(node: any): string[] {
+  private extractStateManagement(content: string): string[] {
     const statePatterns: string[] = [];
 
-    const nodeText = node.getText?.() || '';
-
-    // Check for various state management patterns
-    if (nodeText.includes('useState')) statePatterns.push('useState');
-    if (nodeText.includes('useReducer')) statePatterns.push('useReducer');
-    if (nodeText.includes('useContext')) statePatterns.push('useContext');
-    if (nodeText.includes('useQuery')) statePatterns.push('Apollo Query');
-    if (nodeText.includes('useMutation')) statePatterns.push('Apollo Mutation');
-    if (nodeText.includes('useRecoil')) statePatterns.push('Recoil');
-    if (nodeText.includes('useSelector') || nodeText.includes('useDispatch')) {
+    if (content.includes('useState')) statePatterns.push('useState');
+    if (content.includes('useReducer')) statePatterns.push('useReducer');
+    if (content.includes('useContext')) statePatterns.push('useContext');
+    if (content.includes('useQuery')) statePatterns.push('Apollo Query');
+    if (content.includes('useMutation')) statePatterns.push('Apollo Mutation');
+    if (content.includes('useRecoil')) statePatterns.push('Recoil');
+    if (content.includes('useSelector') || content.includes('useDispatch')) {
       statePatterns.push('Redux');
     }
 
@@ -457,7 +464,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       for (const hook of queryHooks) {
         const operationName = hook.includes(':') ? hook.split(':')[1].trim() : comp.name;
         flows.push({
-          name: `📡 ${operationName}`,
+          name: `Query: ${operationName}`,
           description: `${comp.name} fetches ${operationName} via Apollo`,
           source: { type: 'api', name: `GraphQL: ${operationName}` },
           target: { type: 'component', name: comp.name },
@@ -473,7 +480,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       for (const hook of mutationHooks) {
         const operationName = hook.includes(':') ? hook.split(':')[1].trim() : comp.name;
         flows.push({
-          name: `✏️ ${operationName}`,
+          name: `Mutation: ${operationName}`,
           description: `${comp.name} mutates ${operationName} via Apollo`,
           source: { type: 'component', name: comp.name },
           target: { type: 'api', name: `GraphQL: ${operationName}` },
