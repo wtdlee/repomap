@@ -12,6 +12,8 @@ import type {
 } from '../types.js';
 import { DocGeneratorEngine } from '../core/engine.js';
 import { PageMapGenerator } from '../generators/page-map-generator.js';
+import { detectEnvironments, type EnvironmentDetectionResult } from '../utils/env-detector.js';
+import { analyzeRailsApp, type RailsAnalysisResult } from '../analyzers/rails/index.js';
 
 export interface DocServerOptions {
   noCache?: boolean;
@@ -29,6 +31,8 @@ export class DocServer {
   private io: Server;
   private engine: DocGeneratorEngine;
   private currentReport: DocumentationReport | null = null;
+  private envResult: EnvironmentDetectionResult | null = null;
+  private railsAnalysis: RailsAnalysisResult | null = null;
 
   constructor(config: DocGeneratorConfig, port: number = 3030, options?: DocServerOptions) {
     this.config = config;
@@ -51,14 +55,35 @@ export class DocServer {
       res.redirect('/page-map');
     });
 
-    // Interactive page map (main view)
+    // Interactive page map (main view) - now with environment awareness
     this.app.get('/page-map', (req, res) => {
       if (!this.currentReport) {
         res.status(503).send('Documentation not ready yet');
         return;
       }
       const generator = new PageMapGenerator();
-      res.send(generator.generatePageMapHtml(this.currentReport));
+      res.send(
+        generator.generatePageMapHtml(this.currentReport, {
+          envResult: this.envResult,
+          railsAnalysis: this.railsAnalysis,
+        })
+      );
+    });
+
+    // Rails map (standalone view if needed)
+    this.app.get('/rails-map', (req, res) => {
+      if (!this.railsAnalysis) {
+        res.status(404).send('No Rails environment detected');
+        return;
+      }
+      const generator = new PageMapGenerator();
+      res.send(
+        generator.generatePageMapHtml(this.currentReport!, {
+          envResult: this.envResult,
+          railsAnalysis: this.railsAnalysis,
+          activeTab: 'rails',
+        })
+      );
     });
 
     // Markdown pages - index
@@ -75,6 +100,20 @@ export class DocServer {
     // API endpoints
     this.app.get('/api/report', (req, res) => {
       res.json(this.currentReport);
+    });
+
+    // Environment detection result
+    this.app.get('/api/env', (req, res) => {
+      res.json(this.envResult);
+    });
+
+    // Rails analysis result
+    this.app.get('/api/rails', (req, res) => {
+      if (this.railsAnalysis) {
+        res.json(this.railsAnalysis);
+      } else {
+        res.status(404).json({ error: 'No Rails analysis available' });
+      }
     });
 
     this.app.get('/api/diagram/:name', (req, res) => {
@@ -1717,13 +1756,41 @@ export class DocServer {
   }
 
   async start(openBrowser: boolean = true): Promise<void> {
-    // Generate initial documentation
-    console.log('Generating initial documentation...');
+    // Detect environments first
+    const rootPath = this.config.repositories[0]?.path || process.cwd();
+    console.log('🔍 Detecting project environments...');
+    this.envResult = await detectEnvironments(rootPath);
+
+    if (this.envResult.environments.length > 0) {
+      console.log(`   Found: ${this.envResult.environments.map((e) => e.type).join(', ')}`);
+      for (const env of this.envResult.environments) {
+        if (env.features.length > 0) {
+          console.log(`   ${env.type} features: ${env.features.join(', ')}`);
+        }
+      }
+    }
+
+    // Generate initial documentation for frontend
+    console.log('\n📚 Generating documentation...');
     this.currentReport = await this.engine.generate();
+
+    // If Rails is detected, also analyze Rails
+    if (this.envResult.hasRails) {
+      console.log('\n🛤️  Analyzing Rails application...');
+      try {
+        this.railsAnalysis = await analyzeRailsApp(rootPath);
+        console.log(`   ✅ Rails analysis complete`);
+      } catch (error) {
+        console.error(`   ⚠️ Rails analysis failed:`, (error as Error).message);
+      }
+    }
 
     // Start server
     this.server.listen(this.port, () => {
       console.log(`\n🌐 Documentation server running at http://localhost:${this.port}`);
+      if (this.envResult?.hasRails && this.envResult?.hasNextjs) {
+        console.log('   📊 Multiple environments detected - use tabs to switch views');
+      }
       console.log('   Press Ctrl+C to stop\n');
     });
 
@@ -1742,6 +1809,17 @@ export class DocServer {
   private async regenerate(): Promise<void> {
     console.log('\n🔄 Regenerating documentation...');
     this.currentReport = await this.engine.generate();
+
+    // Re-analyze Rails if detected
+    if (this.envResult?.hasRails) {
+      const rootPath = this.config.repositories[0]?.path || process.cwd();
+      try {
+        this.railsAnalysis = await analyzeRailsApp(rootPath);
+      } catch (error) {
+        console.error(`⚠️ Rails re-analysis failed:`, (error as Error).message);
+      }
+    }
+
     this.io.emit('reload');
     console.log('✅ Documentation regenerated');
   }

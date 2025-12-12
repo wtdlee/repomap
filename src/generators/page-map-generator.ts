@@ -1,4 +1,6 @@
 import type { PageInfo, DocumentationReport, GraphQLOperation, APICall } from '../types.js';
+import type { EnvironmentDetectionResult } from '../utils/env-detector.js';
+import type { RailsAnalysisResult } from '../analyzers/rails/index.js';
 
 interface PageNode extends PageInfo {
   repo: string;
@@ -21,6 +23,12 @@ interface ComponentData {
   dependencies: string[];
 }
 
+export interface PageMapOptions {
+  envResult?: EnvironmentDetectionResult | null;
+  railsAnalysis?: RailsAnalysisResult | null;
+  activeTab?: 'pages' | 'rails' | 'api';
+}
+
 /**
  * Interactive page map generator
  */
@@ -29,8 +37,11 @@ export class PageMapGenerator {
   private apiCalls: APICall[] = [];
   private components: ComponentData[] = [];
 
-  generatePageMapHtml(report: DocumentationReport): string {
+  generatePageMapHtml(report: DocumentationReport, options?: PageMapOptions): string {
     const allPages: PageNode[] = [];
+    const envResult = options?.envResult;
+    const railsAnalysis = options?.railsAnalysis;
+    const activeTab = options?.activeTab || 'pages';
 
     // Get repository name for display
     const repoName =
@@ -66,7 +77,11 @@ export class PageMapGenerator {
 
     const { rootPages, relations } = this.buildHierarchy(allPages);
 
-    return this.renderPageMapHtml(allPages, rootPages, relations, repoName);
+    return this.renderPageMapHtml(allPages, rootPages, relations, repoName, {
+      envResult,
+      railsAnalysis,
+      activeTab,
+    });
   }
 
   private buildHierarchy(pages: PageNode[]): { rootPages: PageNode[]; relations: PageRelation[] } {
@@ -135,8 +150,17 @@ export class PageMapGenerator {
     allPages: PageNode[],
     rootPages: PageNode[],
     relations: PageRelation[],
-    repoName: string
+    repoName: string,
+    options?: {
+      envResult?: EnvironmentDetectionResult | null;
+      railsAnalysis?: RailsAnalysisResult | null;
+      activeTab?: 'pages' | 'rails' | 'api';
+    }
   ): string {
+    const envResult = options?.envResult;
+    const railsAnalysis = options?.railsAnalysis;
+    const activeTab = options?.activeTab || 'pages';
+
     const graphqlOpsJson = JSON.stringify(
       this.graphqlOps.map((op) => ({
         name: op.name,
@@ -149,6 +173,19 @@ export class PageMapGenerator {
     );
 
     const componentsJson = JSON.stringify(this.components);
+
+    // Rails data for integrated view
+    const railsRoutesJson = railsAnalysis ? JSON.stringify(railsAnalysis.routes.routes) : '[]';
+    const railsControllersJson = railsAnalysis
+      ? JSON.stringify(railsAnalysis.controllers.controllers)
+      : '[]';
+    const railsModelsJson = railsAnalysis ? JSON.stringify(railsAnalysis.models.models) : '[]';
+    const railsSummaryJson = railsAnalysis ? JSON.stringify(railsAnalysis.summary) : 'null';
+
+    // Environment info
+    const hasRails = envResult?.hasRails || false;
+    const hasNextjs = envResult?.hasNextjs || false;
+    const hasReact = envResult?.hasReact || false;
 
     // Group by first path segment
     const groups = new Map<string, PageNode[]>();
@@ -217,6 +254,20 @@ export class PageMapGenerator {
       font-size: 13px;
     }
     .tab.active { background: var(--accent); color: white; }
+    
+    /* Environment filter badges */
+    .env-badge {
+      padding: 4px 10px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 11px;
+      transition: all 0.15s;
+    }
+    .env-badge:hover { background: #475569; }
+    .env-badge-active, .env-badge.active { background: var(--accent); color: white; border-color: var(--accent); }
     
     .search {
       padding: 6px 12px;
@@ -424,12 +475,23 @@ export class PageMapGenerator {
     <div style="display:flex;align-items:center;gap:24px">
       <h1 style="cursor:pointer" onclick="location.href='/'">📊 ${repoName}</h1>
       <nav style="display:flex;gap:4px">
-        <a href="/page-map" class="nav-link active">Page Map</a>
+        <a href="/page-map" class="nav-link ${activeTab === 'pages' ? 'active' : ''}">Page Map</a>
+        ${hasRails ? `<a href="/rails-map" class="nav-link ${activeTab === 'rails' ? 'active' : ''}">🛤️ Rails Map</a>` : ''}
         <a href="/docs" class="nav-link">Docs</a>
         <a href="/api/report" class="nav-link" target="_blank">API</a>
       </nav>
     </div>
     <div style="display:flex;gap:12px;align-items:center">
+      <!-- Environment filter badges -->
+      ${
+        hasRails && hasNextjs
+          ? `<div class="env-filters" style="display:flex;gap:4px;margin-right:8px">
+          <button class="env-badge env-badge-active" data-env="all" onclick="filterByEnv('all')">All</button>
+          <button class="env-badge" data-env="nextjs" onclick="filterByEnv('nextjs')">⚛️ Next.js</button>
+          <button class="env-badge" data-env="rails" onclick="filterByEnv('rails')">🛤️ Rails</button>
+        </div>`
+          : ''
+      }
       <input class="search" type="text" placeholder="Search pages, queries..." oninput="filter(this.value)">
       <div class="tabs">
         <button class="tab active" onclick="setView('tree')">List</button>
@@ -461,6 +523,8 @@ export class PageMapGenerator {
         <div class="legend-item"><span class="tag tag-mutation">MUTATION</span> update</div>
       </div>
       
+      <!-- Frontend Stats -->
+      <h3 style="margin-top:16px;font-size:10px;text-transform:uppercase;color:var(--text2);letter-spacing:1px">Frontend</h3>
       <div class="stats" id="stats-container">
         <div class="stat" data-filter="pages"><div class="stat-val">${allPages.length}</div><div class="stat-label">Pages</div></div>
         <div class="stat" data-filter="hierarchies"><div class="stat-val">${
@@ -473,6 +537,21 @@ export class PageMapGenerator {
           this.apiCalls.length
         }</div><div class="stat-label">REST API</div></div>
       </div>
+      
+      ${
+        hasRails && railsAnalysis
+          ? `
+      <!-- Rails Stats -->
+      <h3 style="margin-top:16px;font-size:10px;text-transform:uppercase;color:var(--text2);letter-spacing:1px">🛤️ Rails Backend</h3>
+      <div class="stats" id="rails-stats">
+        <div class="stat" data-filter="rails-routes" onclick="showRailsRoutes()"><div class="stat-val">${railsAnalysis.summary.totalRoutes}</div><div class="stat-label">Routes</div></div>
+        <div class="stat" data-filter="rails-controllers" onclick="showRailsControllers()"><div class="stat-val">${railsAnalysis.summary.totalControllers}</div><div class="stat-label">Controllers</div></div>
+        <div class="stat" data-filter="rails-models" onclick="showRailsModels()"><div class="stat-val">${railsAnalysis.summary.totalModels}</div><div class="stat-label">Models</div></div>
+        <div class="stat" data-filter="rails-grpc" onclick="showRailsGrpc()"><div class="stat-val">${railsAnalysis.summary.totalGrpcServices}</div><div class="stat-label">gRPC</div></div>
+      </div>
+      `
+          : ''
+      }
     </aside>
     
     <div class="content">
@@ -516,6 +595,14 @@ export class PageMapGenerator {
   </div>
 
   <script>
+    // Environment detection results
+    const envInfo = {
+      hasRails: ${hasRails},
+      hasNextjs: ${hasNextjs},
+      hasReact: ${hasReact}
+    };
+    
+    // Frontend data
     const pages = ${JSON.stringify(allPages)};
     const relations = ${JSON.stringify(relations)};
     const graphqlOps = ${graphqlOpsJson};
@@ -526,8 +613,20 @@ export class PageMapGenerator {
     const gqlMap = new Map(graphqlOps.map(op => [op.name, op]));
     const compMap = new Map(components.map(c => [c.name, c]));
     
+    // Rails data (if available)
+    const railsRoutes = ${railsRoutesJson};
+    const railsControllers = ${railsControllersJson};
+    const railsModels = ${railsModelsJson};
+    const railsSummary = ${railsSummaryJson};
+    
+    // Current active tab state
+    let currentMainTab = '${activeTab}';
+    
     // Modal history stack for back navigation
     const modalHistory = [];
+    
+    // Current environment filter
+    let currentEnvFilter = 'all';
     
     function setView(v) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -535,6 +634,143 @@ export class PageMapGenerator {
       document.getElementById('tree-view').classList.toggle('active', v === 'tree');
       document.getElementById('graph-view').classList.toggle('active', v === 'graph');
       if (v === 'graph') setTimeout(initGraph, 100);
+    }
+    
+    // Environment filtering
+    function filterByEnv(env) {
+      currentEnvFilter = env;
+      
+      // Update badge styles
+      document.querySelectorAll('.env-badge').forEach(b => {
+        b.classList.remove('active', 'env-badge-active');
+        if (b.dataset.env === env) {
+          b.classList.add('active', 'env-badge-active');
+        }
+      });
+      
+      // Apply filter to page list
+      applyEnvFilter();
+    }
+    
+    function applyEnvFilter() {
+      // For now, this affects visibility of stats sections
+      const frontendStats = document.getElementById('stats-container');
+      const railsStats = document.getElementById('rails-stats');
+      
+      if (currentEnvFilter === 'all') {
+        if (frontendStats) frontendStats.style.display = '';
+        if (railsStats) railsStats.style.display = '';
+      } else if (currentEnvFilter === 'nextjs') {
+        if (frontendStats) frontendStats.style.display = '';
+        if (railsStats) railsStats.style.display = 'none';
+      } else if (currentEnvFilter === 'rails') {
+        if (frontendStats) frontendStats.style.display = 'none';
+        if (railsStats) railsStats.style.display = '';
+      }
+    }
+    
+    // Rails related functions
+    function showRailsRoutes() {
+      if (!railsRoutes || railsRoutes.length === 0) {
+        showModal('Rails Routes', '<div style="color:var(--text2)">No routes found</div>');
+        return;
+      }
+      
+      const routesByNamespace = new Map();
+      railsRoutes.forEach(r => {
+        const ns = r.namespace || 'root';
+        if (!routesByNamespace.has(ns)) routesByNamespace.set(ns, []);
+        routesByNamespace.get(ns).push(r);
+      });
+      
+      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      for (const [ns, routes] of routesByNamespace) {
+        html += '<div style="margin-bottom:16px">';
+        html += '<div style="font-weight:600;margin-bottom:8px;color:var(--accent)">📂 ' + ns + ' (' + routes.length + ')</div>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+        html += '<tr style="background:var(--bg3)"><th style="padding:6px;text-align:left">Method</th><th style="padding:6px;text-align:left">Path</th><th style="padding:6px;text-align:left">Controller#Action</th></tr>';
+        routes.slice(0, 20).forEach(r => {
+          const methodColor = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',PATCH:'#f59e0b',DELETE:'#ef4444'}[r.method] || '#888';
+          html += '<tr style="border-bottom:1px solid var(--border)">';
+          html += '<td style="padding:6px"><span style="background:' + methodColor + ';color:white;padding:2px 6px;border-radius:3px;font-size:10px">' + r.method + '</span></td>';
+          html += '<td style="padding:6px;font-family:monospace">' + r.path.replace(/:([a-z_]+)/g, '<span style="color:#f59e0b">:$1</span>') + '</td>';
+          html += '<td style="padding:6px;color:var(--text2)">' + r.controller + '#' + r.action + '</td>';
+          html += '</tr>';
+        });
+        if (routes.length > 20) {
+          html += '<tr><td colspan="3" style="padding:6px;color:var(--text2)">...and ' + (routes.length - 20) + ' more</td></tr>';
+        }
+        html += '</table></div>';
+      }
+      html += '</div>';
+      
+      showModal('🛤️ Rails Routes (' + railsRoutes.length + ')', html);
+    }
+    
+    function showRailsControllers() {
+      if (!railsControllers || railsControllers.length === 0) {
+        showModal('Rails Controllers', '<div style="color:var(--text2)">No controllers found</div>');
+        return;
+      }
+      
+      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      railsControllers.forEach(ctrl => {
+        html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-bottom:8px">';
+        html += '<div style="font-weight:600;margin-bottom:4px">' + ctrl.className + '</div>';
+        html += '<div style="font-size:11px;color:var(--text2);margin-bottom:8px">extends ' + ctrl.parentClass + '</div>';
+        if (ctrl.actions && ctrl.actions.length > 0) {
+          html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+          ctrl.actions.slice(0, 10).forEach(action => {
+            const color = action.visibility === 'public' ? '#22c55e' : action.visibility === 'private' ? '#ef4444' : '#f59e0b';
+            html += '<span style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:4px;font-size:11px;border-left:2px solid ' + color + '">' + action.name + '</span>';
+          });
+          if (ctrl.actions.length > 10) html += '<span style="color:var(--text2);font-size:11px">+' + (ctrl.actions.length - 10) + ' more</span>';
+          html += '</div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+      
+      showModal('🎮 Rails Controllers (' + railsControllers.length + ')', html);
+    }
+    
+    function showRailsModels() {
+      if (!railsModels || railsModels.length === 0) {
+        showModal('Rails Models', '<div style="color:var(--text2)">No models found</div>');
+        return;
+      }
+      
+      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      railsModels.forEach(model => {
+        html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-bottom:8px">';
+        html += '<div style="font-weight:600;margin-bottom:4px">📦 ' + model.className + '</div>';
+        html += '<div style="display:flex;gap:16px;font-size:11px;color:var(--text2);margin-bottom:8px">';
+        html += '<span>📎 ' + (model.associations?.length || 0) + ' associations</span>';
+        html += '<span>✓ ' + (model.validations?.length || 0) + ' validations</span>';
+        html += '</div>';
+        if (model.associations && model.associations.length > 0) {
+          html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+          model.associations.slice(0, 8).forEach(assoc => {
+            const typeColor = {belongs_to:'#3b82f6',has_many:'#22c55e',has_one:'#f59e0b'}[assoc.type] || '#888';
+            html += '<span style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:4px;font-size:10px"><span style="color:' + typeColor + '">' + assoc.type + '</span> :' + assoc.name + '</span>';
+          });
+          if (model.associations.length > 8) html += '<span style="color:var(--text2);font-size:10px">+' + (model.associations.length - 8) + '</span>';
+          html += '</div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+      
+      showModal('📦 Rails Models (' + railsModels.length + ')', html);
+    }
+    
+    function showRailsGrpc() {
+      if (!railsSummary || railsSummary.totalGrpcServices === 0) {
+        showModal('gRPC Services', '<div style="color:var(--text2)">No gRPC services found</div>');
+        return;
+      }
+      
+      showModal('🔌 gRPC Services', '<div style="color:var(--text2)">Total ' + railsSummary.totalGrpcServices + ' services with ' + railsSummary.totalRpcs + ' RPCs</div><div style="margin-top:8px;font-size:12px">View full details in Rails Map tab</div>');
     }
     
     function toggleGroup(el) {
