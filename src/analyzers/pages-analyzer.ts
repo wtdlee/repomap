@@ -29,6 +29,113 @@ export class PagesAnalyzer extends BaseAnalyzer {
     });
   }
 
+  /**
+   * Extract GraphQL operation name from a gql template literal or function call
+   * Handles multiple patterns:
+   * - gql`query Name { ... }`
+   * - gql(/‌* GraphQL *‌/ `query Name { ... }`)
+   * - graphql(`query Name { ... }`)
+   */
+  private extractOperationNameFromGql(text: string): string | null {
+    // Pattern 1: Direct operation keyword with name
+    const directMatch = text.match(/(?:query|mutation|subscription)\s+(\w+)/);
+    if (directMatch && directMatch[1]) {
+      return directMatch[1];
+    }
+
+    // Pattern 2: After backtick (with possible whitespace/newlines)
+    const backtickMatch = text.match(/`\s*(?:query|mutation|subscription)\s+(\w+)/);
+    if (backtickMatch && backtickMatch[1]) {
+      return backtickMatch[1];
+    }
+
+    // Pattern 3: After GraphQL comment
+    const commentMatch = text.match(
+      /GraphQL[^`]*`\s*(?:\n\s*)?(?:query|mutation|subscription)\s+(\w+)/
+    );
+    if (commentMatch && commentMatch[1]) {
+      return commentMatch[1];
+    }
+
+    return null;
+  }
+
+  /**
+   * Find and extract operation name from a variable declaration in source file
+   * Handles cases like: const Query = gql(comment `query ActualName...`)
+   */
+  private findOperationNameFromVariable(
+    sourceFile: SourceFile,
+    variableName: string
+  ): string | null {
+    // Method 1: Try to find variable declaration directly
+    let varDecl = sourceFile.getVariableDeclaration(variableName);
+
+    // Method 2: Try exported declarations
+    if (!varDecl) {
+      const exportedDecls = sourceFile.getExportedDeclarations();
+      const exported = exportedDecls.get(variableName);
+      if (exported && exported.length > 0) {
+        const firstExport = exported[0];
+        if (Node.isVariableDeclaration(firstExport)) {
+          varDecl = firstExport;
+        }
+      }
+    }
+
+    // Method 3: Search all variable declarations
+    if (!varDecl) {
+      const allVarDecls = sourceFile.getVariableDeclarations();
+      varDecl = allVarDecls.find((v) => v.getName() === variableName);
+    }
+
+    // Method 4: Full text search for pattern (most comprehensive)
+    // This handles cases where the variable might not be found through AST
+    if (!varDecl) {
+      const fullText = sourceFile.getFullText();
+      // Match: const Query = gql(/* GraphQL */ `query ActualName...
+      // Or: const Query = gql`query ActualName...
+      const patterns = [
+        // gql(/* GraphQL */ `query Name...
+        new RegExp(
+          `(?:const|let|var)\\s+${variableName}\\s*=\\s*gql\\s*\\(\\s*/\\*[^*]*\\*/\\s*\`\\s*(?:query|mutation|subscription)\\s+(\\w+)`,
+          's'
+        ),
+        // gql`query Name...
+        new RegExp(
+          `(?:const|let|var)\\s+${variableName}\\s*=\\s*gql\`\\s*(?:query|mutation|subscription)\\s+(\\w+)`,
+          's'
+        ),
+        // gql(`query Name... (without comment)
+        new RegExp(
+          `(?:const|let|var)\\s+${variableName}\\s*=\\s*gql\\s*\\(\`\\s*(?:query|mutation|subscription)\\s+(\\w+)`,
+          's'
+        ),
+        // graphql(`query Name...
+        new RegExp(
+          `(?:const|let|var)\\s+${variableName}\\s*=\\s*graphql\\s*\\(\`\\s*(?:query|mutation|subscription)\\s+(\\w+)`,
+          's'
+        ),
+      ];
+
+      for (const pattern of patterns) {
+        const match = fullText.match(pattern);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+
+      return null;
+    }
+
+    // Extract from initializer
+    const initializer = varDecl.getInitializer();
+    if (!initializer) return null;
+
+    const text = initializer.getText();
+    return this.extractOperationNameFromGql(text);
+  }
+
   getName(): string {
     return 'PagesAnalyzer';
   }
@@ -592,6 +699,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
         moduleSpec.startsWith('@') === false; // Skip scoped packages
 
       if (isRelativeImport || isInternalAlias) {
+        // Skip codegen/generated folders - these contain GraphQL types, not components
+        if (moduleSpec.includes('__generated__') || moduleSpec.includes('/generated/')) {
+          continue;
+        }
+
         // Collect component names from this import
         const componentNames: string[] = [];
 
@@ -627,7 +739,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
             for (const query of importedQueries) {
               dataFetching.push({
                 type: query.type,
-                operationName: `→ ${query.operationName} (${componentName})`,
+                operationName: query.operationName.startsWith('→')
+                  ? `→ ${query.operationName} (${componentName})`
+                  : `→ ${query.operationName} (${componentName})`,
                 variables: query.variables,
               });
             }
@@ -671,7 +785,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
       // Create a unique key for cycle detection
       const cacheKey = `${resolvedPath}:${componentName}`;
-      if (visited.has(cacheKey)) return []; // 순환 참조 방지
+      if (visited.has(cacheKey)) {
+        return []; // 순환 참조 방지
+      }
       visited.add(cacheKey);
 
       // Check cache
@@ -828,43 +944,20 @@ export class PagesAnalyzer extends BaseAnalyzer {
             operationName = firstArgText.replace(/Document$/, '');
           }
           // If it's a variable reference, try to find the actual query name
-          else if (/^[A-Z]/.test(firstArgText) || /^[a-z]/.test(firstArgText)) {
-            // Look for gql template literals assigned to this variable
-            // Try both regular and exported variable declarations
-            let varDecl = componentFile.getVariableDeclaration(firstArgText);
-            if (!varDecl) {
-              // Try to find in exported declarations
-              const exportedDecls = componentFile.getExportedDeclarations();
-              const exported = exportedDecls.get(firstArgText);
-              if (exported && exported.length > 0) {
-                const firstExport = exported[0];
-                if (Node.isVariableDeclaration(firstExport)) {
-                  varDecl = firstExport;
-                }
-              }
+          else if (/^[A-Za-z]/.test(firstArgText)) {
+            // Use the helper function to find operation name from variable
+            const extractedName = this.findOperationNameFromVariable(componentFile, firstArgText);
+            if (extractedName) {
+              operationName = extractedName;
             }
 
-            // Also try to find by searching all variable statements
-            if (!varDecl) {
-              const allVarDecls = componentFile.getVariableDeclarations();
-              varDecl = allVarDecls.find((v) => v.getName() === firstArgText);
-            }
-
-            if (varDecl) {
-              const initializer = varDecl.getInitializer();
-              if (initializer) {
-                const text = initializer.getText();
-                // Extract query name from gql`query QueryName { ... }` or gql(/* GraphQL */ `query QueryName { ... }`)
-                const match = text.match(/(?:query|mutation|subscription)\s+(\w+)/);
-                if (match) {
-                  operationName = match[1];
-                }
-              }
-            }
-
-            // If still using the original variable name, extract operation name from it
-            // e.g., ProfilePreviewQuery → ProfilePreview
-            if (operationName === firstArgText) {
+            // If still using the original variable name and it's a common pattern,
+            // try to extract operation name from it (e.g., ProfilePreviewQuery → ProfilePreview)
+            if (
+              operationName === firstArgText &&
+              firstArgText !== 'Query' &&
+              firstArgText !== 'Mutation'
+            ) {
               const nameMatch = firstArgText.match(/^(.+?)(Query|Mutation|Subscription)$/);
               if (nameMatch) {
                 operationName = nameMatch[1];
@@ -1038,40 +1131,22 @@ export class PagesAnalyzer extends BaseAnalyzer {
         // Handle codegen Document pattern: SomeQueryDocument → SomeQuery
         else if (firstArgText.endsWith('Document')) {
           operationName = firstArgText.replace(/Document$/, '');
-        } else {
-          // Try to find gql template literal
-          let varDecl = hookFile.getVariableDeclaration(firstArgText);
-          if (!varDecl) {
-            // Try to find in exported declarations
-            const exportedDecls = hookFile.getExportedDeclarations();
-            const exported = exportedDecls.get(firstArgText);
-            if (exported && exported.length > 0) {
-              const firstExport = exported[0];
-              if (Node.isVariableDeclaration(firstExport)) {
-                varDecl = firstExport;
-              }
-            }
+        }
+        // If it's a variable reference, try to find the actual query name
+        else if (/^[A-Za-z]/.test(firstArgText)) {
+          // Use the helper function to find operation name from variable
+          const extractedName = this.findOperationNameFromVariable(hookFile, firstArgText);
+          if (extractedName) {
+            operationName = extractedName;
           }
 
-          // Also try to find by searching all variable statements
-          if (!varDecl) {
-            const allVarDecls = hookFile.getVariableDeclarations();
-            varDecl = allVarDecls.find((v) => v.getName() === firstArgText);
-          }
-
-          if (varDecl) {
-            const initializer = varDecl.getInitializer();
-            if (initializer) {
-              const text = initializer.getText();
-              const match = text.match(/(?:query|mutation|subscription)\s+(\w+)/);
-              if (match) {
-                operationName = match[1];
-              }
-            }
-          }
-
-          // If still using the original variable name, extract operation name from it
-          if (operationName === firstArgText) {
+          // If still using the original variable name and it's a common pattern,
+          // try to extract operation name from it (e.g., ProfilePreviewQuery → ProfilePreview)
+          if (
+            operationName === firstArgText &&
+            firstArgText !== 'Query' &&
+            firstArgText !== 'Mutation'
+          ) {
             const nameMatch = firstArgText.match(/^(.+?)(Query|Mutation|Subscription)$/);
             if (nameMatch) {
               operationName = nameMatch[1];
@@ -1290,6 +1365,12 @@ export class PagesAnalyzer extends BaseAnalyzer {
   private resolveDocumentName(
     documentName: string
   ): { operationName: string; operationType: string } | null {
+    // Skip generic GraphQL type names - these are not actual operation names
+    const genericTypeNames = new Set(['Query', 'Mutation', 'Subscription']);
+    if (genericTypeNames.has(documentName)) {
+      return null;
+    }
+
     // Direct lookup
     if (this.codegenMap.has(documentName)) {
       return this.codegenMap.get(documentName)!;
@@ -1401,6 +1482,22 @@ export class PagesAnalyzer extends BaseAnalyzer {
   private isComponentName(name: string): boolean {
     // Must be PascalCase (start with uppercase)
     if (!/^[A-Z]/.test(name)) return false;
+
+    // Exclude GraphQL-related type names (not actual components)
+    // These are generated types from codegen or GraphQL operations
+    if (
+      name.endsWith('Query') ||
+      name.endsWith('Mutation') ||
+      name.endsWith('Subscription') ||
+      name.endsWith('Fragment') ||
+      name.endsWith('Document') ||
+      name.endsWith('Variables') ||
+      name === 'Query' ||
+      name === 'Mutation' ||
+      name === 'Subscription'
+    ) {
+      return false;
+    }
 
     // Exclude React/Next.js type definitions (not actual components)
     const typeDefinitions = new Set([

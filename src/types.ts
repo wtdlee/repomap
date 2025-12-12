@@ -154,9 +154,10 @@ export interface AuthRequirement {
 }
 
 export interface DataFetchingInfo {
-  type: 'useQuery' | 'useMutation' | 'useLazyQuery' | 'getServerSideProps' | 'getStaticProps' | 'component';
+  type: 'useQuery' | 'useMutation' | 'useLazyQuery' | 'getServerSideProps' | 'getStaticProps' | 'component' | 'useSubscription';
   operationName: string;
   variables?: string[];
+  source?: string; // Source component or hook name
 }
 
 export interface NavigationInfo {

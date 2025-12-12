@@ -379,7 +379,9 @@ export class PageMapGenerator {
     .detail-body { padding: 14px; }
     .detail-section { margin-bottom: 16px; }
     .detail-section h4 { font-size: 10px; text-transform: uppercase; color: var(--text2); margin-bottom: 8px; }
-    .detail-item { background: var(--bg3); padding: 8px 10px; border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
+    .detail-item { background: var(--bg3); padding: 8px 10px; border-radius: 4px; margin-bottom: 4px; font-size: 12px; display: flex; align-items: center; gap: 6px; overflow: hidden; word-break: break-all; }
+    .detail-item > .tag { flex-shrink: 0; }
+    .detail-item > span:not(.tag), .detail-item > code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .detail-label { font-size: 9px; color: var(--text2); margin-bottom: 2px; }
     
     .rel-item {
@@ -620,31 +622,22 @@ export class PageMapGenerator {
           let queryName = rawName.replace(/^[→\\s]+/, '').replace(/^\\u2192\\s*/g, '');
           let sourcePath = '';
           
-          // Extract "(via X)" or "(ComponentName)" suffix
+          // Extract "(via X)" for hook
           const viaMatch = queryName.match(/\\s*\\(via\\s+([^)]+)\\)/);
-          const compMatch = queryName.match(/\\s*\\(([A-Z][a-zA-Z]+)\\)/);
-          
           if (viaMatch) {
             sourcePath = viaMatch[1];
             queryName = queryName.replace(viaMatch[0], '').trim();
-          } else if (compMatch) {
-            sourcePath = compMatch[1];
+          }
+          
+          // Extract "(ComponentName)" for component - check after removing via
+          const compMatch = queryName.match(/\\s*\\(([A-Z][a-zA-Z0-9]+)\\)$/);
+          if (compMatch) {
+            if (!sourcePath) sourcePath = compMatch[1];
             queryName = queryName.replace(compMatch[0], '').trim();
           }
           
           // Further clean the query name
           queryName = queryName.replace(/^[→\\s]+/, '').trim();
-          
-          // If queryName is empty or just a generic name, use the original operationName
-          if (!queryName || queryName === 'Query' || queryName === 'Mutation') {
-            // Try to extract from operationName
-            const opNameMatch = rawName.match(/([A-Z][a-zA-Z0-9]+(?:Query|Mutation)?)/);
-            if (opNameMatch && opNameMatch[1] !== 'Query' && opNameMatch[1] !== 'Mutation') {
-              queryName = opNameMatch[1];
-            } else {
-              queryName = queryName || 'Unknown';
-            }
-          }
           
           return {
             ...df,
@@ -718,7 +711,8 @@ export class PageMapGenerator {
             
             ops.forEach(op => {
               const isQ = !op.type?.includes('Mutation');
-              dataHtml += '<div class="detail-item data-op" style="padding-left:'+(8 + op.depth * 8)+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+'\\')">' +
+              const srcArg = op.sourcePath !== 'Direct' ? ",\\'"+op.sourcePath.replace(/'/g, "\\\\'")+"\\'": '';
+              dataHtml += '<div class="detail-item data-op" style="padding-left:'+(8 + op.depth * 8)+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
                 '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'" style="font-size:10px">'+(isQ?'Q':'M')+'</span> '+op.queryName+'</div>';
             });
             
@@ -1114,7 +1108,7 @@ export class PageMapGenerator {
       container.innerHTML = html;
     };
     
-    function showDataDetail(rawName) {
+    function showDataDetail(rawName, sourcePath) {
       // Clean up name: remove "→ " prefix and " (ComponentName)" suffix
       const name = rawName
         .replace(/^[→\\->\\s]+/, '')
@@ -1169,6 +1163,12 @@ export class PageMapGenerator {
       if (op) {
         // Found GraphQL operation
         html = '<div class="detail-section"><h4>Type</h4><span class="tag '+(op.type==='mutation'?'tag-mutation':'tag-query')+'">'+op.type.toUpperCase()+'</span></div>';
+        
+        // Source info
+        if (sourcePath) {
+          const isHook = sourcePath.startsWith('use');
+          html += '<div class="detail-section"><h4>Source</h4><div class="detail-item" style="font-size:12px">via '+(isHook?'Hook':'Component')+': <span style="color:var(--accent)">'+sourcePath+'</span></div></div>';
+        }
         
         // Operation Name with copy button
         html += '<div class="detail-section"><h4 style="display:flex;justify-content:space-between;align-items:center">Operation Name<button class="copy-btn" onclick="copyToClipboard(\\''+op.name+'\\', this)" title="Copy operation name">📋</button></h4>';
