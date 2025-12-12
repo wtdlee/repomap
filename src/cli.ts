@@ -164,6 +164,7 @@ program
   .option('-o, --output <path>', 'Output directory')
   .option('--repo <name>', 'Analyze specific repository only')
   .option('--watch', 'Watch for changes and regenerate')
+  .option('--no-cache', 'Disable caching (always analyze from scratch)')
   .action(async (options) => {
     console.log(chalk.blue.bold('\n📚 Repomap - Documentation Generator\n'));
 
@@ -186,7 +187,7 @@ program
       }
 
       // Create engine and generate
-      const engine = new DocGeneratorEngine(config);
+      const engine = new DocGeneratorEngine(config, { noCache: !options.cache });
 
       if (options.watch) {
         console.log(chalk.yellow('\n👀 Watch mode enabled. Press Ctrl+C to stop.\n'));
@@ -211,6 +212,7 @@ program
   .option('--path <path>', 'Path to repository to analyze (auto-detect if no config)')
   .option('-p, --port <number>', 'Server port', '3030')
   .option('--no-open', "Don't open browser automatically")
+  .option('--no-cache', 'Disable caching (always analyze from scratch)')
   .action(async (options) => {
     console.log(chalk.blue.bold('\n🌐 Repomap - Documentation Server\n'));
 
@@ -218,7 +220,7 @@ program
       const targetPath = options.path || process.cwd();
       const config = await loadConfig(options.config, targetPath);
 
-      const server = new DocServer(config, parseInt(options.port));
+      const server = new DocServer(config, parseInt(options.port), { noCache: !options.cache });
       await server.start(!options.open);
     } catch (error) {
       console.error(chalk.red('\n❌ Error:'), (error as Error).message);

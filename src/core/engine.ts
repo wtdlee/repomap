@@ -30,11 +30,13 @@ export class DocGeneratorEngine {
   private config: DocGeneratorConfig;
   private mermaidGenerator: MermaidGenerator;
   private markdownGenerator: MarkdownGenerator;
+  private noCache: boolean;
 
-  constructor(config: DocGeneratorConfig) {
+  constructor(config: DocGeneratorConfig, options?: { noCache?: boolean }) {
     this.config = config;
     this.mermaidGenerator = new MermaidGenerator();
     this.markdownGenerator = new MarkdownGenerator();
+    this.noCache = options?.noCache ?? false;
   }
 
   /**
@@ -100,17 +102,13 @@ export class DocGeneratorEngine {
       ignore: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**'],
       absolute: true,
     });
-    console.log(`  Scanning ${sourceFiles.length} source files for cache key...`);
     const contentHash = await cache.computeFilesHash(sourceFiles);
     const cacheKey = `analysis_${repoConfig.name}_${commitHash}`;
-    console.log(
-      `  Cache key: ${cacheKey.substring(0, 50)}... Hash: ${contentHash.substring(0, 8)}...`
-    );
 
-    // Check cache
-    const cachedResult = cache.get<AnalysisResult>(cacheKey, contentHash);
+    // Check cache (skip if noCache is enabled)
+    const cachedResult = this.noCache ? null : cache.get<AnalysisResult>(cacheKey, contentHash);
     if (cachedResult) {
-      console.log(`  ⚡ Using cached analysis (${cache.getStats().entries} entries)`);
+      console.log(`  ⚡ Using cached analysis`);
 
       const summary = {
         totalPages: cachedResult.pages.length,

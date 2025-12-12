@@ -13,6 +13,10 @@ import type {
 import { DocGeneratorEngine } from '../core/engine.js';
 import { PageMapGenerator } from '../generators/page-map-generator.js';
 
+export interface DocServerOptions {
+  noCache?: boolean;
+}
+
 /**
  * Documentation server with live reload
  * ライブリロード機能付きドキュメントサーバー
@@ -26,13 +30,13 @@ export class DocServer {
   private engine: DocGeneratorEngine;
   private currentReport: DocumentationReport | null = null;
 
-  constructor(config: DocGeneratorConfig, port: number = 3030) {
+  constructor(config: DocGeneratorConfig, port: number = 3030, options?: DocServerOptions) {
     this.config = config;
     this.port = port;
     this.app = express();
     this.server = http.createServer(this.app);
     this.io = new Server(this.server);
-    this.engine = new DocGeneratorEngine(config);
+    this.engine = new DocGeneratorEngine(config, { noCache: options?.noCache });
 
     this.setupRoutes();
     this.setupSocketIO();
