@@ -352,6 +352,20 @@ export class PagesAnalyzer extends BaseAnalyzer {
   private extractDataFetching(sourceFile: SourceFile): DataFetchingInfo[] {
     const dataFetching: DataFetchingInfo[] = [];
 
+    // Type names that should be filtered out (not GraphQL operations)
+    const invalidOperationNames = new Set([
+      'NextPage',
+      'FC',
+      'VFC',
+      'React',
+      'Component',
+      'unknown',
+      'undefined',
+      'null',
+      'true',
+      'false',
+    ]);
+
     // Find useQuery calls
     const useQueryCalls = sourceFile
       .getDescendantsOfKind(SyntaxKind.CallExpression)
@@ -372,6 +386,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
           .getText()
           .replace(/Document$/, '')
           .replace(/Query$|Mutation$/, '');
+      }
+
+      // Skip invalid operation names (type names, keywords, etc.)
+      if (invalidOperationNames.has(operationName)) {
+        continue;
       }
 
       if (args.length > 1) {
