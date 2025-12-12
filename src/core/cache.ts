@@ -13,7 +13,9 @@ interface CacheManifest {
   entries: Record<string, CacheEntry>;
 }
 
-const CACHE_VERSION = '1.0';
+// Increment this version when analyzer logic changes significantly
+// This will invalidate all existing caches
+const CACHE_VERSION = '1.1';
 
 /**
  * File-based cache for analysis results

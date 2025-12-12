@@ -107,7 +107,9 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
           // Check if gql is imported from GraphQL-related modules
           return (
-            (namedImports.includes('gql') || namedImports.includes('graphql') || defaultImport === 'gql') &&
+            (namedImports.includes('gql') ||
+              namedImports.includes('graphql') ||
+              defaultImport === 'gql') &&
             (spec.includes('graphql') ||
               spec.includes('apollo') ||
               spec.includes('gql') ||

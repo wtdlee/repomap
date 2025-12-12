@@ -103,7 +103,8 @@ export class DocGeneratorEngine {
       absolute: true,
     });
     const contentHash = await cache.computeFilesHash(sourceFiles);
-    const cacheKey = `analysis_${repoConfig.name}_${commitHash}`;
+    // Include repomap version in cache key to invalidate when analyzer logic changes
+    const cacheKey = `analysis_v${version}_${repoConfig.name}_${commitHash}`;
 
     // Check cache (skip if noCache is enabled)
     if (this.noCache) {
