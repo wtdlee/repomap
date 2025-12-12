@@ -186,6 +186,8 @@ body { background: var(--bg); color: var(--text); }
 .detail-item > span:not(.tag), .detail-item > code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .detail-label { font-size: 9px; color: var(--text2); margin-bottom: 2px; }
 .detail-items { max-height: 300px; overflow-y: auto; }
+.more-link { color: var(--accent); font-size: 11px; padding: 6px 4px; cursor: pointer; transition: all 0.15s; }
+.more-link:hover { color: var(--accent-light); background: var(--bg3); border-radius: 4px; }
 .code-path { background: var(--bg3); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 12px; word-break: break-all; }
 .usage-name { font-family: monospace; font-weight: 500; word-break: break-all; min-width: 0; }
 .line-num { margin-left: auto; font-size: 10px; color: var(--text2); flex-shrink: 0; }

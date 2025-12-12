@@ -21,6 +21,7 @@ interface ComponentData {
   filePath: string;
   type: string;
   dependencies: string[];
+  hooks: string[];
 }
 
 export interface PageMapOptions {
@@ -59,6 +60,7 @@ export class PageMapGenerator {
           filePath: comp.filePath,
           type: comp.type,
           dependencies: comp.dependencies || [],
+          hooks: comp.hooks || [],
         });
       }
     }
@@ -2145,11 +2147,63 @@ export class PageMapGenerator {
       }
 
       // Data operations - show grouped by source path, sorted by depth
+      // Also include GraphQL from related components (including their dependencies)
       let dataHtml = '';
-      if (page.dataFetching && page.dataFetching.length > 0) {
+      
+      // Recursively extract GraphQL from component and its dependencies
+      function extractComponentGraphQL(comp, visited = new Set(), depth = 0) {
+        const results = [];
+        if (!comp || visited.has(comp.name) || depth > 10) return results;
+        visited.add(comp.name);
+        
+        // Extract GraphQL from this component's hooks
+        if (comp.hooks) {
+          comp.hooks.forEach(hook => {
+            if (hook.includes('Query') || hook.includes('Mutation')) {
+              let queryName = hook.replace('Query: ', '').replace('Mutation: ', '').trim();
+              // Skip empty names or hooks without actual operation names
+              if (!queryName) {
+                return;
+              }
+              const isM = hook.includes('Mutation');
+              const depthArrows = '→ '.repeat(depth + 1);
+              results.push({
+                type: isM ? 'useMutation' : 'useQuery',
+                operationName: depthArrows + queryName + ' (via ' + comp.name + ')',
+                variables: []
+              });
+            }
+          });
+        }
+        
+        // Recursively check dependencies
+        if (comp.dependencies) {
+          comp.dependencies.forEach(depName => {
+            const depComp = componentByName.get(depName);
+            if (depComp) {
+              results.push(...extractComponentGraphQL(depComp, visited, depth + 1));
+            }
+          });
+        }
+        
+        return results;
+      }
+      
+      // Get GraphQL from page's components (including dependencies)
+      const pageComps = getPageComponents(page);
+      const componentGraphQL = [];
+      const visited = new Set();
+      pageComps.forEach(comp => {
+        componentGraphQL.push(...extractComponentGraphQL(comp, visited, 0));
+      });
+      
+      // Combine direct dataFetching with component GraphQL
+      const allDataFetching = [...(page.dataFetching || []), ...componentGraphQL];
+      
+      if (allDataFetching.length > 0) {
         // Separate actual GraphQL operations from component references
-        const graphqlOps = page.dataFetching.filter(df => df.type !== 'component');
-        const componentRefs = page.dataFetching.filter(df => df.type === 'component');
+        const graphqlOps = allDataFetching.filter(df => df.type !== 'component');
+        const componentRefs = allDataFetching.filter(df => df.type === 'component');
 
         // Parse operations to extract path info and depth
         const parsedOps = graphqlOps.map(df => {
@@ -2233,9 +2287,16 @@ export class PageMapGenerator {
 
         dataHtml = '';
 
+        // Count direct vs component queries for header
+        const directOps = groupedByPath.get('Direct') || [];
+        const componentOpCount = uniqueOps.length - directOps.length;
+
         // Show grouped GraphQL operations
         if (sortedPaths.length > 0) {
-          dataHtml += '<div class="detail-section"><h4>Data Operations</h4>';
+          const countLabel = componentOpCount > 0 
+            ? directOps.length + ' direct, +' + componentOpCount + ' from components' 
+            : directOps.length + ' total';
+          dataHtml += '<div class="detail-section"><h4>Data Operations <span style="font-weight:normal;font-size:11px;color:var(--text2)">(' + countLabel + ')</span></h4>';
 
           sortedPaths.forEach(pathName => {
             const ops = groupedByPath.get(pathName);
@@ -2324,11 +2385,110 @@ export class PageMapGenerator {
     let currentFilter = null;
 
     // Build sets for filtering
-    const pagesWithGraphQL = new Set(pages.filter(p =>
-      p.dataFetching && p.dataFetching.some(df =>
-        df.type === 'useQuery' || df.type === 'useMutation' || df.type === 'useLazyQuery'
-      )
-    ).map(p => p.path));
+    // Build component lookup maps for dependency tracking
+    const componentByFile = new Map();
+    const componentByName = new Map();
+    components.forEach(c => {
+      if (c.filePath) componentByFile.set(c.filePath, c);
+      if (c.name) componentByName.set(c.name, c);
+    });
+
+    // Check if a component (or its dependencies) uses GraphQL
+    function componentUsesGraphQL(comp, visited = new Set()) {
+      if (!comp || visited.has(comp.name)) return false;
+      visited.add(comp.name);
+      
+      // Check hooks for GraphQL queries
+      if (comp.hooks && comp.hooks.some(h => 
+        h.includes('Query') || h.includes('Mutation')
+      )) {
+        return true;
+      }
+      
+      // Check dependencies recursively (limit depth to avoid infinite loops)
+      if (comp.dependencies && visited.size < 20) {
+        for (const dep of comp.dependencies) {
+          const depComp = componentByName.get(dep);
+          if (depComp && componentUsesGraphQL(depComp, visited)) {
+            return true;
+          }
+        }
+      }
+      
+      return false;
+    }
+
+    // Find components related to a page (strict matching only)
+    function getPageComponents(page) {
+      const relatedComps = [];
+      
+      // 1. Find by page file path (exact match)
+      if (page.filePath) {
+        const pageComp = componentByFile.get(page.filePath);
+        if (pageComp) relatedComps.push(pageComp);
+        
+        // Check for PageContainer pattern based on file name
+        const baseName = page.filePath.split('/').pop()?.replace(/\\.(tsx?|jsx?)$/, '') || '';
+        const containerName = baseName.charAt(0).toUpperCase() + baseName.slice(1) + 'PageContainer';
+        const container = componentByName.get(containerName);
+        if (container) relatedComps.push(container);
+        
+        // Check for feature-based container: /pages/app/agencies → AgenciesPageContainer
+        const pathParts = page.filePath.split('/');
+        const pageIndex = pathParts.indexOf('pages');
+        if (pageIndex >= 0 && pathParts.length > pageIndex + 2) {
+          // Get the main feature segment (e.g., 'agencies' from '/pages/app/agencies/...')
+          const featureSegment = pathParts[pageIndex + 2];
+          if (featureSegment && !featureSegment.startsWith('[')) {
+            const featurePascal = featureSegment.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+            const featureContainer = componentByName.get(featurePascal + 'PageContainer');
+            if (featureContainer) relatedComps.push(featureContainer);
+          }
+        }
+      }
+      
+      // 2. Find by component name from page data
+      if (page.component) {
+        const comp = componentByName.get(page.component);
+        if (comp) relatedComps.push(comp);
+        
+        // Also check for Container pattern
+        const containerName = page.component + 'Container';
+        const container = componentByName.get(containerName);
+        if (container) relatedComps.push(container);
+      }
+      
+      return relatedComps;
+    }
+
+    // Include pages with direct GraphQL usage OR pages whose components use GraphQL
+    const pagesWithGraphQL = new Set([
+      // Pages with direct dataFetching
+      ...pages.filter(p =>
+        p.dataFetching && p.dataFetching.some(df =>
+          df.type === 'useQuery' || df.type === 'useMutation' || df.type === 'useLazyQuery' ||
+          df.type === 'getServerSideProps' || df.type === 'getStaticProps'
+        )
+      ).map(p => p.path),
+      // Pages whose components (or dependencies) use GraphQL
+      ...pages.filter(p => {
+        const pageComps = getPageComponents(p);
+        return pageComps.some(comp => componentUsesGraphQL(comp));
+      }).map(p => p.path),
+      // Pages whose files are referenced in GraphQL operation usedIn
+      ...pages.filter(p => {
+        if (!p.filePath) return false;
+        return Object.values(gqlMap).some(op =>
+          op.usedIn && op.usedIn.some(u => u === p.filePath || u.endsWith('/' + p.filePath))
+        );
+      }).map(p => p.path)
+    ]);
+
+    // Debug: log pagesWithGraphQL count
+    console.log('📊 GraphQL Stats: totalComponents=' + components.length + 
+      ', componentsWithGraphQL=' + components.filter(c => c.hooks && c.hooks.some(h => h.includes('Query') || h.includes('Mutation'))).length +
+      ', pagesWithGraphQL=' + pagesWithGraphQL.size + 
+      ', totalPages=' + pages.length);
 
     const pagesWithRestApi = new Set(pages.filter(p => {
       // Check if any API call is in this page's file or related feature directory
@@ -2550,7 +2710,14 @@ export class PageMapGenerator {
       });
     }
 
+    // Track expanded state for GraphQL list
+    let gqlListExpanded = { queries: false, mutations: false, fragments: false };
+
     function showGraphQLList() {
+      renderGraphQLList();
+    }
+
+    function renderGraphQLList() {
       // Show GraphQL operations in detail panel
       let html = '<div class="detail-section"><h4>All GraphQL Operations ('+Object.keys(Object.fromEntries(gqlMap)).length+')</h4>';
 
@@ -2558,36 +2725,55 @@ export class PageMapGenerator {
       const mutations = Array.from(gqlMap.values()).filter(o => o.type === 'mutation');
       const fragments = Array.from(gqlMap.values()).filter(o => o.type === 'fragment');
 
+      const initialLimit = 20;
+      const mutationLimit = 10;
+      const fragmentLimit = 5;
+
       if (queries.length > 0) {
         html += '<div class="subtext-accent">Queries ('+queries.length+')</div>';
-        queries.slice(0, 20).forEach(op => {
+        const showCount = gqlListExpanded.queries ? queries.length : Math.min(initialLimit, queries.length);
+        queries.slice(0, showCount).forEach(op => {
           html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
             '<span class="tag tag-query">QUERY</span> '+op.name+'</div>';
         });
-        if (queries.length > 20) {
-          html += '<div style="color:var(--text2);font-size:10px;padding:4px">... and '+(queries.length-20)+' more queries</div>';
+        if (queries.length > initialLimit) {
+          if (gqlListExpanded.queries) {
+            html += '<div class="more-link" onclick="event.stopPropagation(); toggleGqlSection(\\'queries\\', false)">▲ Show less</div>';
+          } else {
+            html += '<div class="more-link" onclick="event.stopPropagation(); toggleGqlSection(\\'queries\\', true)">... and '+(queries.length-initialLimit)+' more queries ▼</div>';
+          }
         }
       }
 
       if (mutations.length > 0) {
-        html += '<div class="subtext-accent">Mutations ('+mutations.length+')</div>';
-        mutations.slice(0, 10).forEach(op => {
+        html += '<div class="subtext-accent" style="margin-top:12px">Mutations ('+mutations.length+')</div>';
+        const showCount = gqlListExpanded.mutations ? mutations.length : Math.min(mutationLimit, mutations.length);
+        mutations.slice(0, showCount).forEach(op => {
           html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
             '<span class="tag tag-mutation">MUTATION</span> '+op.name+'</div>';
         });
-        if (mutations.length > 10) {
-          html += '<div style="color:var(--text2);font-size:10px;padding:4px">... and '+(mutations.length-10)+' more mutations</div>';
+        if (mutations.length > mutationLimit) {
+          if (gqlListExpanded.mutations) {
+            html += '<div class="more-link" onclick="event.stopPropagation(); toggleGqlSection(\\'mutations\\', false)">▲ Show less</div>';
+          } else {
+            html += '<div class="more-link" onclick="event.stopPropagation(); toggleGqlSection(\\'mutations\\', true)">... and '+(mutations.length-mutationLimit)+' more mutations ▼</div>';
+          }
         }
       }
 
       if (fragments.length > 0) {
-        html += '<div class="subtext-accent">Fragments ('+fragments.length+')</div>';
-        fragments.slice(0, 5).forEach(op => {
+        html += '<div class="subtext-accent" style="margin-top:12px">Fragments ('+fragments.length+')</div>';
+        const showCount = gqlListExpanded.fragments ? fragments.length : Math.min(fragmentLimit, fragments.length);
+        fragments.slice(0, showCount).forEach(op => {
           html += '<div class="detail-item data-op" onclick="event.stopPropagation(); showDataDetail(\\''+op.name.replace(/'/g, "\\\\'")+'\\')">' +
             '<span class="tag tag-default">FRAGMENT</span> '+op.name+'</div>';
         });
-        if (fragments.length > 5) {
-          html += '<div style="color:var(--text2);font-size:10px;padding:4px">... and '+(fragments.length-5)+' more fragments</div>';
+        if (fragments.length > fragmentLimit) {
+          if (gqlListExpanded.fragments) {
+            html += '<div class="more-link" onclick="event.stopPropagation(); toggleGqlSection(\\'fragments\\', false)">▲ Show less</div>';
+          } else {
+            html += '<div class="more-link" onclick="event.stopPropagation(); toggleGqlSection(\\'fragments\\', true)">... and '+(fragments.length-fragmentLimit)+' more fragments ▼</div>';
+          }
         }
       }
 
@@ -2597,6 +2783,11 @@ export class PageMapGenerator {
       document.getElementById('detail-body').innerHTML = html;
       document.getElementById('detail').classList.add('open');
     }
+
+    window.toggleGqlSection = function(section, expand) {
+      gqlListExpanded[section] = expand;
+      renderGraphQLList();
+    };
 
     function showRestApiList() {
       const apis = window.apiCalls || [];
@@ -2718,12 +2909,24 @@ export class PageMapGenerator {
       }
 
       // If not found, try removing common suffixes (Query, Mutation, Document)
-      // But don't remove if it would result in an empty string
       if (!op) {
         const baseName = name.replace(/Query$|Mutation$|Document$/, '');
-        if (baseName) {  // Only try if baseName is not empty
+        if (baseName) {
           op = gqlMap.get(baseName);
         }
+      }
+
+      // Try with "Get" prefix (common GraphQL naming convention)
+      if (!op) {
+        const pascalName = toPascalCase(name);
+        op = gqlMap.get('Get' + pascalName) || gqlMap.get('Get' + pascalName + 'Query');
+      }
+
+      // Try removing Fragment suffix or adding it
+      if (!op) {
+        const pascalName = toPascalCase(name);
+        const withoutFragment = pascalName.replace(/Fragment$/, '');
+        op = gqlMap.get(withoutFragment) || gqlMap.get('Get' + withoutFragment) || gqlMap.get('Get' + withoutFragment + 'Fragment');
       }
 
       // Also try with suffix if original didn't have one
@@ -2736,6 +2939,17 @@ export class PageMapGenerator {
         const pascalBase = toPascalCase(name.replace(/_QUERY$|_MUTATION$|_DOCUMENT$/i, ''));
         if (pascalBase !== name) {
           op = gqlMap.get(pascalBase + 'Query') || gqlMap.get(pascalBase + 'Mutation') || gqlMap.get(pascalBase);
+        }
+      }
+
+      // Fuzzy search: find operation whose name contains the search term
+      if (!op) {
+        const searchLower = toPascalCase(name).toLowerCase();
+        for (const [opName, opData] of gqlMap.entries()) {
+          if (opName.toLowerCase().includes(searchLower) || searchLower.includes(opName.toLowerCase().replace(/^get/, ''))) {
+            op = opData;
+            break;
+          }
         }
       }
 
@@ -3534,6 +3748,65 @@ export class PageMapGenerator {
       selectedNode = null;
       drawGraph();
     }
+
+    // Calculate and display Q/M counts for each page in list
+    function updatePageGqlCounts() {
+      document.querySelectorAll('.page-item').forEach(item => {
+        const pagePath = item.getAttribute('data-path');
+        const page = pageMap.get(pagePath);
+        if (!page) return;
+
+        // Get page's components and calculate total GraphQL
+        const pageComps = getPageComponents(page);
+        const visited = new Set();
+        let queries = 0;
+        let mutations = 0;
+
+        // Count from direct dataFetching
+        (page.dataFetching || []).forEach(df => {
+          if (df.type?.includes('Mutation')) {
+            mutations++;
+          } else if (df.type && !df.type.includes('component')) {
+            queries++;
+          }
+        });
+
+        // Count from component hooks (simplified - just count hooks)
+        pageComps.forEach(comp => {
+          if (!comp || visited.has(comp.name)) return;
+          visited.add(comp.name);
+          (comp.hooks || []).forEach(hook => {
+            if (hook.includes('Mutation:')) mutations++;
+            else if (hook.includes('Query:')) queries++;
+          });
+        });
+
+        // Update Q tag
+        const qTag = item.querySelector('.tag-query');
+        if (qTag) {
+          if (queries > 0) {
+            qTag.textContent = 'Q:' + queries;
+            qTag.style.display = '';
+          } else {
+            qTag.style.display = 'none';
+          }
+        }
+
+        // Update M tag
+        const mTag = item.querySelector('.tag-mutation');
+        if (mTag) {
+          if (mutations > 0) {
+            mTag.textContent = 'M:' + mutations;
+            mTag.style.display = '';
+          } else {
+            mTag.style.display = 'none';
+          }
+        }
+      });
+    }
+
+    // Initialize Q/M counts on page load
+    setTimeout(updatePageGqlCounts, 100);
   </script>
 </body>
 </html>`;
@@ -3582,12 +3855,6 @@ export class PageMapGenerator {
         const pagesHtml = sorted
           .map((p) => {
             const type = this.getPageType(p.path);
-            const queries = (p.dataFetching || []).filter(
-              (d) => !d.type?.includes('Mutation')
-            ).length;
-            const mutations = (p.dataFetching || []).filter((d) =>
-              d.type?.includes('Mutation')
-            ).length;
             const depth = depthMap.get(p.path) ?? 0;
 
             const pageNode = p as PageNode;
@@ -3620,6 +3887,7 @@ export class PageMapGenerator {
               ? '<span class="tag tag-info" title="SPA Component Page">SPA</span>'
               : '';
 
+            // Q/M counts will be calculated dynamically in JavaScript
             return `<div class="page-item" data-path="${p.path}" data-repo="${repoName}" onclick="selectPage('${
               p.path
             }')" style="--depth:${depth}">
@@ -3629,8 +3897,8 @@ export class PageMapGenerator {
                 ${repoTag}
                 ${spaTag}
                 ${p.authentication?.required ? '<span class="tag tag-auth">AUTH</span>' : ''}
-                ${queries > 0 ? `<span class="tag tag-query">Q:${queries}</span>` : ''}
-                ${mutations > 0 ? `<span class="tag tag-mutation">M:${mutations}</span>` : ''}
+                <span class="tag tag-query gql-count" data-page-path="${p.path}" style="display:none">Q:0</span>
+                <span class="tag tag-mutation gql-count-m" data-page-path="${p.path}" style="display:none">M:0</span>
               </div>
             </div>`;
           })
