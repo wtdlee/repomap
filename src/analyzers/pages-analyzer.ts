@@ -558,9 +558,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
       });
     }
 
-    // Track component imports from relative paths (generic approach)
-    // This captures any non-package imports that could contain data-fetching components
+    // Track component imports from relative paths and analyze their GraphQL usage
     const imports = sourceFile.getImportDeclarations();
+    const sourceFilePath = sourceFile.getFilePath();
+    const sourceFileDir = path.dirname(sourceFilePath);
+
     for (const imp of imports) {
       const moduleSpec = imp.getModuleSpecifierValue();
 
@@ -572,17 +574,15 @@ export class PagesAnalyzer extends BaseAnalyzer {
         moduleSpec.startsWith('@') === false; // Skip scoped packages
 
       if (isRelativeImport || isInternalAlias) {
+        // Collect component names from this import
+        const componentNames: string[] = [];
+
         // Check named imports for component-like names (PascalCase)
         const namedImports = imp.getNamedImports();
         for (const named of namedImports) {
           const name = named.getName();
-          // Detect PascalCase component names that might contain data fetching
           if (this.isComponentName(name)) {
-            dataFetching.push({
-              type: 'component',
-              operationName: name,
-              variables: [],
-            });
+            componentNames.push(name);
           }
         }
 
@@ -591,9 +591,29 @@ export class PagesAnalyzer extends BaseAnalyzer {
         if (defaultImport) {
           const name = defaultImport.getText();
           if (this.isComponentName(name)) {
+            componentNames.push(name);
+          }
+        }
+
+        // For each component, try to analyze the imported file for GraphQL
+        for (const componentName of componentNames) {
+          // Try to resolve and analyze the imported component file
+          const importedQueries = this.analyzeImportedComponent(sourceFileDir, moduleSpec, componentName);
+
+          if (importedQueries.length > 0) {
+            // Add the queries found in the component with a reference marker
+            for (const query of importedQueries) {
+              dataFetching.push({
+                type: query.type,
+                operationName: `→ ${query.operationName} (${componentName})`,
+                variables: query.variables,
+              });
+            }
+          } else {
+            // No queries found, just mark as component reference
             dataFetching.push({
               type: 'component',
-              operationName: name,
+              operationName: componentName,
               variables: [],
             });
           }
@@ -602,6 +622,110 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     return dataFetching;
+  }
+
+  /**
+   * Analyze an imported component file for GraphQL queries
+   */
+  private analyzeImportedComponent(
+    sourceFileDir: string,
+    moduleSpec: string,
+    componentName: string
+  ): DataFetchingInfo[] {
+    const queries: DataFetchingInfo[] = [];
+
+    try {
+      // Resolve the import path
+      let resolvedPath = path.resolve(sourceFileDir, moduleSpec);
+
+      // Try different file extensions and index files
+      const possiblePaths = [
+        `${resolvedPath}.tsx`,
+        `${resolvedPath}.ts`,
+        `${resolvedPath}/index.tsx`,
+        `${resolvedPath}/index.ts`,
+        `${resolvedPath}/${componentName}.tsx`,
+        `${resolvedPath}/${componentName}.ts`,
+      ];
+
+      let componentFile: SourceFile | undefined;
+
+      for (const tryPath of possiblePaths) {
+        try {
+          componentFile = this.project.addSourceFileAtPath(tryPath);
+          if (componentFile) break;
+        } catch {
+          // File doesn't exist, try next
+        }
+      }
+
+      if (!componentFile) return queries;
+
+      // Check for Apollo Client imports
+      const hasApolloImport = componentFile.getImportDeclarations().some((imp) => {
+        const spec = imp.getModuleSpecifierValue();
+        return spec.includes('@apollo/client') || spec.includes('apollo');
+      });
+
+      if (!hasApolloImport) return queries;
+
+      // Find GraphQL hook calls in the component
+      const hookCalls = componentFile
+        .getDescendantsOfKind(SyntaxKind.CallExpression)
+        .filter((call) => {
+          const expression = call.getExpression().getText();
+          return ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'].includes(expression);
+        });
+
+      for (const call of hookCalls) {
+        const hookName = call.getExpression().getText();
+        const args = call.getArguments();
+
+        if (args.length === 0) continue;
+
+        const firstArg = args[0];
+        const firstArgText = firstArg.getText();
+
+        // Extract operation name from the first argument
+        let operationName = firstArgText;
+
+        // If it's a variable reference, try to find the actual query name
+        if (/^[A-Z]/.test(firstArgText) || /^[a-z]/.test(firstArgText)) {
+          // Look for gql template literals assigned to this variable
+          const varDecl = componentFile.getVariableDeclaration(firstArgText);
+          if (varDecl) {
+            const initializer = varDecl.getInitializer();
+            if (initializer) {
+              const text = initializer.getText();
+              // Extract query name from gql`query QueryName { ... }`
+              const match = text.match(/(?:query|mutation|subscription)\s+(\w+)/);
+              if (match) {
+                operationName = match[1];
+              }
+            }
+          }
+        }
+
+        // Clean up operation name
+        operationName = operationName.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
+
+        const type = hookName.includes('Mutation')
+          ? 'useMutation'
+          : hookName.includes('Lazy')
+            ? 'useLazyQuery'
+            : 'useQuery';
+
+        queries.push({
+          type: type as DataFetchingInfo['type'],
+          operationName,
+          variables: [],
+        });
+      }
+    } catch {
+      // Failed to analyze imported component, skip
+    }
+
+    return queries;
   }
 
   /**
