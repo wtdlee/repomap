@@ -258,14 +258,27 @@ header h1 {
 }
 
 /* Routes Table */
-.routes-table { width: 100%; border-collapse: collapse; }
+.routes-table { 
+  width: 100%; 
+  border-collapse: collapse;
+  table-layout: fixed;
+}
 
 .routes-table th,
 .routes-table td {
   padding: 10px 12px;
   text-align: left;
   border-bottom: 1px solid var(--border-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+.routes-table th:nth-child(1),
+.routes-table td:nth-child(1) { width: 80px; }
+.routes-table th:nth-child(2),
+.routes-table td:nth-child(2) { width: 45%; }
+.routes-table th:nth-child(3),
+.routes-table td:nth-child(3) { width: auto; }
 
 .routes-table th {
   background: var(--bg-secondary);
@@ -343,6 +356,14 @@ header h1 {
   border-radius: 4px;
   margin-bottom: 6px;
   font-size: 13px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  word-break: break-word;
+}
+
+.detail-item .tag {
+  flex-shrink: 0;
 }
 
 /* Tags */

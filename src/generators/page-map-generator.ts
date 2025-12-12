@@ -186,6 +186,7 @@ export class PageMapGenerator {
     const railsReactJson = railsAnalysis
       ? JSON.stringify(railsAnalysis.react)
       : '{ "components": [], "entryPoints": [], "summary": {} }';
+    const railsGrpcJson = railsAnalysis ? JSON.stringify(railsAnalysis.grpc) : '{ "services": [] }';
     const railsSummaryJson = railsAnalysis ? JSON.stringify(railsAnalysis.summary) : 'null';
 
     // Environment info
@@ -372,6 +373,7 @@ export class PageMapGenerator {
     const railsModels = ${railsModelsJson};
     const railsViews = ${railsViewsJson};
     const railsReact = ${railsReactJson};
+    const railsGrpc = ${railsGrpcJson};
     const railsSummary = ${railsSummaryJson};
     
     // Current active tab state
@@ -678,12 +680,31 @@ export class PageMapGenerator {
     }
     
     function showRailsGrpc() {
-      if (!railsSummary || railsSummary.totalGrpcServices === 0) {
+      if (!railsGrpc || !railsGrpc.services || railsGrpc.services.length === 0) {
         showModal('gRPC Services', '<div style="color:var(--text2)">No gRPC services found</div>');
         return;
       }
       
-      showModal('🔌 gRPC Services', '<div style="color:var(--text2)">Total ' + railsSummary.totalGrpcServices + ' services with ' + railsSummary.totalRpcs + ' RPCs</div><div style="margin-top:8px;font-size:12px">View full details in Rails Map tab</div>');
+      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      railsGrpc.services.forEach(svc => {
+        html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-bottom:8px">';
+        html += '<div style="font-weight:600;margin-bottom:4px">🔌 ' + svc.className + '</div>';
+        if (svc.namespace) {
+          html += '<div style="font-size:11px;color:var(--text2);margin-bottom:8px">namespace: ' + svc.namespace + '</div>';
+        }
+        if (svc.rpcs && svc.rpcs.length > 0) {
+          html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+          svc.rpcs.slice(0, 15).forEach(rpc => {
+            html += '<span class="tag" style="background:var(--accent);font-size:10px">' + rpc.name + '</span>';
+          });
+          if (svc.rpcs.length > 15) html += '<span style="color:var(--text2);font-size:11px">+' + (svc.rpcs.length - 15) + ' more</span>';
+          html += '</div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+      
+      showModal('🔌 gRPC Services (' + railsGrpc.services.length + ')', html);
     }
     
     // Render Rails routes in tree view
