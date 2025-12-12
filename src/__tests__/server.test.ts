@@ -10,8 +10,9 @@ describe('DocServer', () => {
 
   afterEach(async () => {
     if (serverInstance?.server) {
+      const instance = serverInstance;
       await new Promise<void>((resolve) => {
-        serverInstance!.server.close(() => resolve());
+        instance.server.close(() => resolve());
       });
       serverInstance = null;
     }

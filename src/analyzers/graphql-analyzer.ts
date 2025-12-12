@@ -70,10 +70,12 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         seen.set(op.name, op);
       } else {
         // Merge usedIn arrays
-        const existing = seen.get(op.name)!;
-        for (const usedIn of op.usedIn) {
-          if (!existing.usedIn.includes(usedIn)) {
-            existing.usedIn.push(usedIn);
+        const existing = seen.get(op.name);
+        if (existing) {
+          for (const usedIn of op.usedIn) {
+            if (!existing.usedIn.includes(usedIn)) {
+              existing.usedIn.push(usedIn);
+            }
           }
         }
       }
