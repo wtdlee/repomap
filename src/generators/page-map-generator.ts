@@ -1036,8 +1036,24 @@ export class PageMapGenerator {
         .replace(/^[→\\->\\s]+/, '')
         .replace(/\\s*\\([^)]+\\)\\s*$/, '');
       
+      // Convert SCREAMING_CASE to PascalCase (e.g., COMPANY_QUERY → CompanyQuery)
+      const toPascalCase = (str) => {
+        if (!/^[A-Z][A-Z0-9_]*$/.test(str)) return str;
+        return str.toLowerCase().split('_').map(word => 
+          word.charAt(0).toUpperCase() + word.slice(1)
+        ).join('');
+      };
+      
       // Try to find GraphQL operation with various name patterns
       let op = gqlMap.get(name);
+      
+      // Try PascalCase conversion for SCREAMING_CASE constants
+      if (!op) {
+        const pascalName = toPascalCase(name);
+        if (pascalName !== name) {
+          op = gqlMap.get(pascalName);
+        }
+      }
       
       // If not found, try removing common suffixes (Query, Mutation, Document)
       if (!op) {
@@ -1048,6 +1064,14 @@ export class PageMapGenerator {
       // Also try with suffix if original didn't have one
       if (!op && !name.match(/Query$|Mutation$/)) {
         op = gqlMap.get(name + 'Query') || gqlMap.get(name + 'Mutation');
+      }
+      
+      // Try PascalCase with suffix
+      if (!op) {
+        const pascalBase = toPascalCase(name.replace(/_QUERY$|_MUTATION$|_DOCUMENT$/i, ''));
+        if (pascalBase !== name) {
+          op = gqlMap.get(pascalBase + 'Query') || gqlMap.get(pascalBase + 'Mutation') || gqlMap.get(pascalBase);
+        }
       }
       
       let html = '';
