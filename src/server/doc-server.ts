@@ -319,6 +319,12 @@ export class DocServer {
 
     .nav-group-title {
       font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      letter-spacing: 0.5px;
+      display: block;
+      padding: 8px 12px 4px;
     }
 
     .nav-subitems {
@@ -846,7 +852,7 @@ export class DocServer {
 <body>
   <header class="top-header">
     <div class="top-header-left">
-      <h1 onclick="location.href='/'">📊 ${this.config.site.title}</h1>
+      <h1 onclick="location.href='/'">📊 ${this.config.repositories[0]?.displayName || this.config.repositories[0]?.name || 'Repository'}</h1>
       <nav class="top-nav">
         <a href="/page-map" class="top-nav-link">Page Map</a>
         <a href="/docs" class="top-nav-link active">Docs</a>
@@ -857,25 +863,28 @@ export class DocServer {
   <div class="container">
     <aside class="sidebar">
       <nav>
-        <a href="/">Home</a>
-        ${this.config.repositories
-          .map(
-            (repo) => `
-          <div class="nav-group">
-            <a href="/docs/repos/${repo.name}/index" class="nav-group-title">${repo.displayName}</a>
-            <div class="nav-subitems">
+        <div class="nav-group">
+          <span class="nav-group-title">Documentation</span>
+          <div class="nav-subitems">
+            ${this.config.repositories
+              .map(
+                (repo) => `
               <a href="/docs/repos/${repo.name}/pages">Pages</a>
               <a href="/docs/repos/${repo.name}/components">Components</a>
               <a href="/docs/repos/${repo.name}/graphql">GraphQL</a>
               <a href="/docs/repos/${repo.name}/dataflow">Data Flow</a>
-            </div>
+            `
+              )
+              .join('')}
           </div>
-        `
-          )
-          .join('')}
-        <a href="/docs/cross-repo">Cross Repository</a>
-        <a href="/docs/diagrams">Diagrams</a>
-        <a href="/page-map" class="highlight">Page Map</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group-title">Analysis</span>
+          <div class="nav-subitems">
+            <a href="/docs/cross-repo">Cross Repository</a>
+            <a href="/docs/diagrams">Diagrams</a>
+          </div>
+        </div>
       </nav>
       <button class="regenerate-btn" onclick="regenerate()">Regenerate</button>
     </aside>
