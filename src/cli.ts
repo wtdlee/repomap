@@ -19,6 +19,36 @@ program
  * Auto-detect project type and settings
  */
 async function detectProject(dir: string): Promise<RepositoryConfig | null> {
+  const dirName = path.basename(dir);
+  
+  // Check for Rails project first
+  const gemfilePath = path.join(dir, 'Gemfile');
+  const routesPath = path.join(dir, 'config', 'routes.rb');
+  
+  try {
+    await fs.access(gemfilePath);
+    await fs.access(routesPath);
+    
+    // This is a Rails project
+    const gemfile = await fs.readFile(gemfilePath, 'utf-8');
+    const isRails = gemfile.includes("gem 'rails'") || gemfile.includes('gem "rails"');
+    
+    if (isRails) {
+      return {
+        name: dirName,
+        displayName: dirName,
+        description: 'Rails application',
+        path: dir,
+        branch: 'main',
+        type: 'rails',
+        analyzers: ['routes', 'controllers', 'models', 'grpc'],
+        settings: {},
+      };
+    }
+  } catch {
+    // Not a Rails project, continue checking
+  }
+
   const packageJsonPath = path.join(dir, 'package.json');
 
   try {
@@ -66,7 +96,6 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
     }
 
     // Use directory name as the repository name (not package.json name)
-    const dirName = path.basename(dir);
     return {
       name: dirName,
       displayName: dirName,
@@ -321,6 +350,52 @@ export default config;
       console.log(chalk.gray("\nRun 'npx repomap serve' to start the documentation server."));
     } catch (error) {
       console.error(chalk.red('Failed to create config:'), (error as Error).message);
+    }
+  });
+
+/**
+ * Rails command - analyze Rails application
+ */
+program
+  .command('rails')
+  .description('Analyze a Rails application and generate interactive map')
+  .option('--path <path>', 'Path to Rails application')
+  .option('-o, --output <path>', 'Output HTML file path')
+  .action(async (options) => {
+    console.log(chalk.blue.bold('\n🛤️ Repomap - Rails Analyzer\n'));
+
+    try {
+      const targetPath = options.path || process.cwd();
+      
+      // Verify it's a Rails project
+      try {
+        await fs.access(path.join(targetPath, 'config', 'routes.rb'));
+      } catch {
+        console.error(chalk.red('Not a Rails project (config/routes.rb not found)'));
+        process.exit(1);
+      }
+
+      // Dynamically import Rails analyzer
+      const { analyzeRailsApp } = await import('./analyzers/rails/index.js');
+      const { RailsMapGenerator } = await import('./generators/rails-map-generator.js');
+      
+      // Generate map
+      const outputPath = options.output || path.join(targetPath, 'rails-map.html');
+      const generator = new RailsMapGenerator(targetPath);
+      await generator.generate({
+        title: `${path.basename(targetPath)} - Rails Map`,
+        outputPath,
+      });
+      
+      console.log(chalk.green(`\n✅ Rails map generated: ${outputPath}`));
+      
+      // Open in browser
+      const { exec } = await import('child_process');
+      exec(`open "${outputPath}"`);
+      
+    } catch (error) {
+      console.error(chalk.red('\n❌ Error:'), (error as Error).message);
+      process.exit(1);
     }
   });
 
