@@ -188,6 +188,7 @@ export class PageMapGenerator {
       position: sticky;
       top: 0;
       z-index: 100;
+      line-height: 1;
     }
     .header h1 { font-size: 18px; height: 28px; display: flex; align-items: center; }
     
