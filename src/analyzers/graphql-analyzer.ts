@@ -134,10 +134,10 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               } else if (templateLiteral.isKind(SyntaxKind.TemplateExpression)) {
                 // Handle template with substitutions - extract text safely
                 const fullText = templateLiteral.getText();
-                // Remove template literal backticks and interpolations
+                // Remove template literal backticks and fragment interpolations
                 content = fullText
                   .slice(1, -1) // Remove outer backticks
-                  .replace(/\$\{[^}]*\}/g, 'PLACEHOLDER'); // Replace ${...} with placeholder
+                  .replace(/\$\{[^}]*\}/g, ''); // Remove ${...} entirely (usually fragment refs)
               }
 
               if (content && content.trim()) {
@@ -176,7 +176,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
                   content = firstArg.getLiteralValue();
                 } else if (firstArg.isKind(SyntaxKind.TemplateExpression)) {
                   const fullText = firstArg.getText();
-                  content = fullText.slice(1, -1).replace(/\$\{[^}]*\}/g, 'PLACEHOLDER');
+                  content = fullText.slice(1, -1).replace(/\$\{[^}]*\}/g, ''); // Remove fragment refs
                 } else {
                   // Try to get text content (might be a variable or other expression)
                   const argText = firstArg.getText();
