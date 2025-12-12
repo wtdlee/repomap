@@ -914,13 +914,21 @@ export class PageMapGenerator {
           html += '</div>';
         }
       } else if (comp) {
-        // Found component - find GraphQL operations used in this component's file/feature
-        const featureDir = comp.filePath.split('/').slice(0, -1).join('/');
+        // Found component - find GraphQL operations DIRECTLY used in this component's file
+        const compFile = comp.filePath;
         
-        // Find all GraphQL operations used in this feature directory
-        const featureOps = graphqlOps.filter(op => 
-          op.usedIn?.some(f => f.startsWith(featureDir) || f.includes(featureDir))
+        // Priority 1: Operations directly used in this file
+        const directOps = graphqlOps.filter(op => 
+          op.usedIn?.some(f => f === compFile || f.endsWith('/' + compFile))
         );
+        
+        // Priority 2: Operations with name matching component name pattern
+        const compNameBase = comp.name.replace(/Container$|Page$|Component$|View$/, '');
+        const matchingOps = directOps.length === 0 ? graphqlOps.filter(op => 
+          op.name.includes(compNameBase) || compNameBase.includes(op.name.replace(/Query$|Mutation$/, ''))
+        ) : [];
+        
+        const featureOps = directOps.length > 0 ? directOps : matchingOps;
         
         html = '<div class="detail-section"><h4>Component</h4>' +
           '<div class="detail-item"><div class="detail-label">NAME</div><strong>'+comp.name+'</strong></div>' +
@@ -991,50 +999,58 @@ export class PageMapGenerator {
           html += '</div>';
         }
       } else {
-        // Extract keywords from component name for better search
-        // e.g., "Pulse1on1Page" -> ["Pulse", "1on1", "Page"]
-        // Split on: uppercase followed by lowercase, or before digits
-        const rawKeywords = name
+        // Extract the core component name without common suffixes
+        const coreNameMatch = name.match(/^(.+?)(Container|Page|Wrapper|Form|Component|View|Modal|Dialog)?$/);
+        const coreName = coreNameMatch ? coreNameMatch[1] : name;
+        
+        // Split core name into keywords
+        const rawKeywords = coreName
           .replace(/([a-z])([A-Z])/g, '$1 $2')  // camelCase split
           .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')  // consecutive caps
-          .replace(/([a-zA-Z])(\d)/g, '$1 $2')  // letter to digit
-          .replace(/(\d)([a-zA-Z])/g, '$1 $2')  // digit to letter
           .split(/\s+/)
-          .filter(k => k.length > 0);
+          .filter(k => k.length > 1);  // Minimum 2 chars
         
-        const searchTerms = rawKeywords.filter(k => !['Page', 'Container', 'Wrapper', 'Form', 'Component'].includes(k));
+        // Build a strict search pattern from keywords
+        // e.g., UserSpamReportCompleted -> "userspamreportcompleted" or "user-spam-report-completed"
+        const strictPattern = coreName.toLowerCase();
+        const kebabPattern = rawKeywords.join('-').toLowerCase();
 
-        // Find operations matching any keyword (case-insensitive)
-        let relatedOps = [];
-        if (searchTerms.length > 0) {
-          relatedOps = graphqlOps.filter(op => {
-            const opLower = op.name.toLowerCase();
-            // Check if op name contains any search term
-            const matchesKeyword = searchTerms.some(term => {
-              const termLower = term.toLowerCase();
-              return opLower.includes(termLower) || termLower.includes(opLower.replace(/query|mutation|fragment/gi,''));
-            });
-            // Check if any usedIn path contains the search term
-            const matchesInUsedIn = op.usedIn?.some(f => {
+        // Priority 1: Exact match in operation name
+        let relatedOps = graphqlOps.filter(op => {
+          const opNameLower = op.name.toLowerCase().replace(/query$|mutation$|fragment$/i, '');
+          return opNameLower === strictPattern || 
+                 opNameLower === kebabPattern ||
+                 opNameLower.includes(strictPattern) ||
+                 strictPattern.includes(opNameLower);
+        });
+
+        // Priority 2: Match in usedIn file path (strict - must contain core name)
+        if (relatedOps.length === 0) {
+          relatedOps = graphqlOps.filter(op => 
+            op.usedIn?.some(f => {
               const fLower = f.toLowerCase();
-              return searchTerms.some(term => fLower.includes(term.toLowerCase()));
-            });
-            return matchesKeyword || matchesInUsedIn;
-          });
+              // File path should contain the kebab-case or camelCase version
+              return fLower.includes(kebabPattern) || fLower.includes(strictPattern);
+            })
+          );
         }
 
-        // Also try searching by the full component name or partial matches
-        if (relatedOps.length === 0) {
-          const nameLower = name.toLowerCase();
-          relatedOps = graphqlOps.filter(op => {
-            const opLower = op.name.toLowerCase();
-            return opLower.includes(nameLower) || nameLower.includes(opLower.replace(/query|mutation|fragment/gi,'')) ||
-              op.usedIn?.some(f => f.toLowerCase().includes(nameLower));
-          });
+        // Priority 3: Multiple keyword match (at least 2 significant keywords must match)
+        if (relatedOps.length === 0 && rawKeywords.length >= 2) {
+          const significantKeywords = rawKeywords.filter(k => k.length >= 3);
+          if (significantKeywords.length >= 2) {
+            relatedOps = graphqlOps.filter(op => {
+              const opLower = op.name.toLowerCase();
+              // At least 2 keywords must match
+              const matchCount = significantKeywords.filter(k => opLower.includes(k.toLowerCase())).length;
+              return matchCount >= 2;
+            });
+          }
         }
         
         // Deduplicate and limit
         const uniqueOps = [...new Map(relatedOps.map(op => [op.name, op])).values()].slice(0, 15);
+        const searchTerms = rawKeywords;
         
         html = '<div class="detail-section"><h4>Component</h4>' +
           '<div class="detail-item"><strong>'+name+'</strong></div>' +
