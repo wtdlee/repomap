@@ -237,3 +237,25 @@ body { background: var(--bg); color: var(--text); }
   text-align: center;
 }
 .load-more-btn:hover { background: var(--bg2); color: var(--text); }
+
+/* Route Indicator Tags */
+.route-tag {
+  margin-left: 4px;
+  font-size: 9px;
+  color: white;
+  padding: 1px 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.route-tag-json { background: #3b82f6; }
+.route-tag-html { background: #22c55e; }
+.route-tag-redirect { background: #f59e0b; }
+.route-tag-view { background: #10b981; }
+.route-tag-svc { background: #8b5cf6; }
+.route-tag-grpc { background: #06b6d4; }
+.route-tag-db { background: #f59e0b; }
+.route-tag-template { background: #6b7280; }
+.route-tag-react { background: #61dafb; color: #222; font-weight: 600; }
+.route-tag-warn { background: #ef4444; }
+.route-tag-partials { background: #6366f1; }
+.route-tag-vars { background: #ec4899; }
