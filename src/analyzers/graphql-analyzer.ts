@@ -64,10 +64,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     const results = await parallelMapSafe(graphqlFiles, async (filePath) => {
       const content = await fs.readFile(filePath, 'utf-8');
       const document = parseGraphQL(content);
-      return this.extractOperationsFromDocument(
-        document,
-        path.relative(this.basePath, filePath)
-      );
+      return this.extractOperationsFromDocument(document, path.relative(this.basePath, filePath));
     });
 
     return results.flat();

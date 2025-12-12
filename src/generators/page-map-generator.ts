@@ -733,6 +733,32 @@ export class PageMapGenerator {
         }
       }
       
+      // REST API calls for this page
+      let restApiHtml = '';
+      const pageFileName = page.filePath?.split('/').pop() || '';
+      const pageBaseName = pageFileName.replace(/\\.(tsx?|jsx?)$/, '');
+      const pageApis = apiCallsData.filter(api => {
+        if (!api.filePath || !page.filePath) return false;
+        // Match by exact file path or by containing the page file name
+        return api.filePath.includes(page.filePath) || 
+               page.filePath.includes(api.filePath) ||
+               api.filePath.endsWith(pageFileName) ||
+               api.filePath.includes('/' + pageBaseName + '/');
+      });
+      
+      if (pageApis.length > 0) {
+        restApiHtml = '<div class="detail-section"><h4>REST API Calls ('+pageApis.length+')</h4>';
+        pageApis.forEach(api => {
+          const methodColors = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',DELETE:'#ef4444',PATCH:'#8b5cf6'};
+          const color = methodColors[api.method] || '#6b7280';
+          restApiHtml += '<div class="detail-item" style="cursor:pointer" onclick="event.stopPropagation(); showApiDetail(\\''+api.id.replace(/'/g, "\\\\'")+'\\')">' +
+            '<span class="tag" style="background:'+color+';color:white">'+api.method+'</span> ' +
+            '<span style="font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+api.url+'</span>' +
+            '</div>';
+        });
+        restApiHtml += '</div>';
+      }
+      
       const totalRels = (parent ? 1 : 0) + children.length + navLinks.length + sameLayout.length;
       
       document.getElementById('detail-title').textContent = path;
@@ -742,7 +768,7 @@ export class PageMapGenerator {
         '<div class="detail-item"><div class="detail-label">AUTH</div>'+(page.authentication?.required?'<span class="tag tag-auth">LOGIN REQUIRED</span>':'No auth required')+'</div>' +
         (page.layout?'<div class="detail-item"><div class="detail-label">LAYOUT</div>'+page.layout+'</div>':'') +
         (page.params?.length?'<div class="detail-item"><div class="detail-label">PARAMS</div>'+page.params.map(p=>':'+p).join(', ')+'</div>':'') +
-        '</div>' + stepsHtml + dataHtml +
+        '</div>' + stepsHtml + dataHtml + restApiHtml +
         '<div class="detail-section"><h4>Related Pages ('+totalRels+')</h4>' +
         (relsHtml || '<div style="color:var(--text2);font-size:12px">No related pages</div>') +
         '</div>';
@@ -766,8 +792,17 @@ export class PageMapGenerator {
     ).map(p => p.path));
     
     const pagesWithRestApi = new Set(pages.filter(p => {
-      // Check if any API call is in this page's file
-      return apiCalls.some(api => api.filePath && api.filePath.includes(p.filePath?.replace(/\\/[^/]+$/, '')));
+      // Check if any API call is in this page's file or related feature directory
+      if (!p.filePath) return false;
+      const pageFileName = p.filePath.split('/').pop() || '';
+      const pageBaseName = pageFileName.replace(/\\.(tsx?|jsx?)$/, '');
+      return apiCallsData.some(api => {
+        if (!api.filePath) return false;
+        return api.filePath.includes(p.filePath) || 
+               p.filePath.includes(api.filePath) ||
+               api.filePath.endsWith(pageFileName) ||
+               api.filePath.includes('/' + pageBaseName + '/');
+      });
     }).map(p => p.path));
     
     const pagesWithHierarchy = new Set(pages.filter(p => p.parent || (p.children && p.children.length > 0)).map(p => p.path));
@@ -1056,20 +1091,31 @@ export class PageMapGenerator {
       const methodColors = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',DELETE:'#ef4444',PATCH:'#8b5cf6'};
       const color = methodColors[api.method] || '#6b7280';
       
-      let html = '<div class="detail-section"><h4>API Call Details</h4>' +
-        '<div class="detail-item"><div class="detail-label">METHOD</div>' +
-        '<span class="tag" style="background:'+color+';color:white">'+api.method+'</span></div>' +
-        '<div class="detail-item"><div class="detail-label">URL</div>' +
-        '<span style="font-family:monospace;word-break:break-all">'+api.url+'</span></div>' +
+      let html = '<div class="detail-section"><h4>Method</h4>' +
+        '<span class="tag" style="background:'+color+';color:white;font-size:14px;padding:4px 12px">'+api.method+'</span></div>';
+      
+      html += '<div class="detail-section"><h4>URL</h4>' +
+        '<code style="background:#0f172a;color:#93c5fd;padding:8px 12px;border-radius:4px;font-family:monospace;display:block;word-break:break-all">'+api.url+'</code></div>';
+      
+      html += '<div class="detail-section"><h4>Details</h4>' +
         '<div class="detail-item"><div class="detail-label">TYPE</div>'+api.callType+'</div>' +
-        '<div class="detail-item"><div class="detail-label">FILE</div>'+api.filePath+'</div>' +
+        '<div class="detail-item"><div class="detail-label">FILE</div><code style="background:#0f172a;color:#93c5fd;padding:2px 6px;border-radius:3px;font-family:monospace;font-size:11px">'+api.filePath+'</code></div>' +
         (api.line ? '<div class="detail-item"><div class="detail-label">LINE</div>'+api.line+'</div>' : '') +
-        (api.containingFunction ? '<div class="detail-item"><div class="detail-label">FUNCTION</div>'+api.containingFunction+'</div>' : '') +
+        (api.containingFunction ? '<div class="detail-item"><div class="detail-label">FUNCTION</div><code style="background:#0f172a;color:#93c5fd;padding:2px 6px;border-radius:3px;font-family:monospace">'+api.containingFunction+'</code></div>' : '') +
         '</div>';
       
-      document.getElementById('detail-title').textContent = api.method + ' ' + api.url;
-      document.getElementById('detail-body').innerHTML = html;
-      document.getElementById('detail').classList.add('open');
+      if (api.category && api.category !== 'internal') {
+        html += '<div class="detail-section"><h4>Category</h4>' +
+          '<span class="tag" style="background:var(--accent);color:white">'+api.category.toUpperCase()+'</span></div>';
+      }
+      
+      // Show in modal
+      modalHistory.push({ type: 'api', data: api });
+      updateBackButton();
+      
+      document.getElementById('modal-title').textContent = api.method + ' ' + (api.url.length > 40 ? api.url.substring(0, 40) + '...' : api.url);
+      document.getElementById('modal-body').innerHTML = html;
+      document.getElementById('modal').classList.add('open');
     }
     
     // Close detail when clicking outside
