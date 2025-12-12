@@ -6,16 +6,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { glob } from 'glob';
-import { 
-  parseRubyFile, 
-  findNodes, 
+import {
+  parseRubyFile,
+  findNodes,
   getClassName,
   getSuperclass,
   getMethodName,
   getMethodParameters,
   getChildByType,
   getChildrenByType,
-  type SyntaxNode 
+  type SyntaxNode,
 } from './ruby-parser.js';
 
 export interface ControllerInfo {
@@ -36,6 +36,13 @@ export interface ControllerInfo {
   line: number;
 }
 
+export interface InstanceVarAssignment {
+  name: string; // variable name without @
+  assignedType?: string; // Model name if detected (e.g., "Company", "User")
+  assignedValue?: string; // simplified value (e.g., "Company.find(...)", "params[:id]")
+  line?: number;
+}
+
 export interface ActionInfo {
   name: string;
   line: number;
@@ -48,6 +55,7 @@ export interface ActionInfo {
   servicesCalled: string[];
   modelsCalled: string[];
   methodCalls: string[];
+  instanceVarAssignments?: InstanceVarAssignment[];
 }
 
 export interface FilterInfo {
@@ -115,20 +123,13 @@ export class RailsControllerAnalyzer {
       }
     }
 
-    const namespaces = [...new Set(
-      this.controllers
-        .filter(c => c.namespace)
-        .map(c => c.namespace!)
-    )];
+    const namespaces = [
+      ...new Set(this.controllers.filter((c) => c.namespace).map((c) => c.namespace!)),
+    ];
 
-    const concerns = [...new Set(
-      this.controllers.flatMap(c => c.concerns)
-    )];
+    const concerns = [...new Set(this.controllers.flatMap((c) => c.concerns))];
 
-    const totalActions = this.controllers.reduce(
-      (sum, c) => sum + c.actions.length, 
-      0
-    );
+    const totalActions = this.controllers.reduce((sum, c) => sum + c.actions.length, 0);
 
     return {
       controllers: this.controllers,
@@ -139,7 +140,10 @@ export class RailsControllerAnalyzer {
     };
   }
 
-  private async parseControllerFile(filePath: string, relativePath: string): Promise<ControllerInfo | null> {
+  private async parseControllerFile(
+    filePath: string,
+    relativePath: string
+  ): Promise<ControllerInfo | null> {
     const tree = await parseRubyFile(filePath);
     const rootNode = tree.rootNode;
 
@@ -177,11 +181,11 @@ export class RailsControllerAnalyzer {
 
     // Find all method calls for filters, concerns, etc.
     const calls = findNodes(classNode, 'call');
-    
+
     for (const call of calls) {
       const methodNode = call.childForFieldName('method');
       if (!methodNode) continue;
-      
+
       const methodName = methodNode.text;
       const line = call.startPosition.row + 1;
 
@@ -190,34 +194,34 @@ export class RailsControllerAnalyzer {
         case 'before_filter': // Legacy
           this.parseFilter(call, controller.beforeActions, line);
           break;
-        
+
         case 'after_action':
         case 'after_filter':
           this.parseFilter(call, controller.afterActions, line);
           break;
-        
+
         case 'around_action':
         case 'around_filter':
           this.parseFilter(call, controller.aroundActions, line);
           break;
-        
+
         case 'skip_before_action':
         case 'skip_before_filter':
           this.parseFilter(call, controller.skipBeforeActions, line);
           break;
-        
+
         case 'include':
           this.parseInclude(call, controller.concerns);
           break;
-        
+
         case 'helper':
           this.parseHelper(call, controller.helpers);
           break;
-        
+
         case 'layout':
           controller.layoutInfo = this.parseLayout(call);
           break;
-        
+
         case 'rescue_from':
           this.parseRescueFrom(call, controller.rescueFrom, line);
           break;
@@ -227,7 +231,7 @@ export class RailsControllerAnalyzer {
     // Find all method definitions
     const methods = findNodes(classNode, 'method');
     let currentVisibility: ActionInfo['visibility'] = 'public';
-    
+
     // Track visibility changes through identifiers
     const bodyStatement = classNode.childForFieldName('body');
     if (bodyStatement) {
@@ -272,7 +276,7 @@ export class RailsControllerAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (!key || !value) continue;
 
           switch (key) {
@@ -319,7 +323,7 @@ export class RailsControllerAnalyzer {
 
     const nameArg = args[0];
     let layoutName = nameArg.text.replace(/^["']|["']$/g, '');
-    
+
     // Handle symbol
     if (layoutName.startsWith(':')) {
       layoutName = layoutName.substring(1);
@@ -356,7 +360,7 @@ export class RailsControllerAnalyzer {
         for (const pair of pairs) {
           const key = pair.child(0)?.text?.replace(/^:/, '');
           const value = pair.child(2);
-          
+
           if (key === 'with' && value) {
             handler = value.text.replace(/^:/, '');
           }
@@ -367,7 +371,10 @@ export class RailsControllerAnalyzer {
     rescues.push({ exception, handler, line });
   }
 
-  private parseMethod(methodNode: SyntaxNode, visibility: ActionInfo['visibility']): ActionInfo | null {
+  private parseMethod(
+    methodNode: SyntaxNode,
+    visibility: ActionInfo['visibility']
+  ): ActionInfo | null {
     const name = getMethodName(methodNode);
     if (!name) return null;
 
@@ -382,11 +389,56 @@ export class RailsControllerAnalyzer {
       servicesCalled: [],
       modelsCalled: [],
       methodCalls: [],
+      instanceVarAssignments: [],
     };
 
     // Analyze method body
     const bodyContent = methodNode.text;
-    
+
+    // Extract instance variable assignments: @var = value
+    const ivarRegex = /@([a-z_][a-z0-9_]*)\s*=\s*([^\n]+)/gi;
+    let ivarMatch;
+    while ((ivarMatch = ivarRegex.exec(bodyContent)) !== null) {
+      const varName = ivarMatch[1];
+      const assignedValue = ivarMatch[2].trim().slice(0, 100); // Truncate long values
+
+      // Try to detect model type from assignment
+      let assignedType: string | undefined;
+
+      // Pattern: Model.find/where/new/create/etc
+      const modelMatch = assignedValue.match(
+        /^([A-Z][a-zA-Z0-9]+)\.(find|find_by|find_by!|where|all|first|last|new|create|create!|build)/
+      );
+      if (modelMatch) {
+        assignedType = modelMatch[1];
+      }
+
+      // Pattern: @parent.association (e.g., @company.users)
+      const assocMatch = assignedValue.match(/^@([a-z_]+)\.([a-z_]+)/);
+      if (assocMatch && !assignedType) {
+        assignedType = `${assocMatch[1]}.${assocMatch[2]}`;
+      }
+
+      // Pattern: current_user, current_company, etc.
+      const currentMatch = assignedValue.match(/^current_([a-z_]+)/);
+      if (currentMatch && !assignedType) {
+        assignedType = currentMatch[1].charAt(0).toUpperCase() + currentMatch[1].slice(1);
+      }
+
+      // Pattern: SomeService.call (service result)
+      const serviceMatch = assignedValue.match(/^([A-Z][a-zA-Z0-9]+Service)\.(call|new|perform)/);
+      if (serviceMatch && !assignedType) {
+        assignedType = `Service:${serviceMatch[1]}`;
+      }
+
+      action.instanceVarAssignments!.push({
+        name: varName,
+        assignedType,
+        assignedValue:
+          assignedValue.length > 60 ? assignedValue.slice(0, 57) + '...' : assignedValue,
+      });
+    }
+
     // Check render types
     if (bodyContent.includes('render json:') || bodyContent.includes('render :json')) {
       action.rendersJson = true;
@@ -420,23 +472,44 @@ export class RailsControllerAnalyzer {
     for (const call of serviceCalls) {
       const receiver = call.childForFieldName('receiver');
       const method = call.childForFieldName('method');
-      
+
       if (receiver && method) {
         const receiverText = receiver.text;
         const methodText = method.text;
-        
+
         // Service pattern: SomeService.call/new/perform
-        if (receiverText.endsWith('Service') && ['call', 'new', 'perform', 'execute'].includes(methodText)) {
+        if (
+          receiverText.endsWith('Service') &&
+          ['call', 'new', 'perform', 'execute'].includes(methodText)
+        ) {
           if (!action.servicesCalled.includes(receiverText)) {
             action.servicesCalled.push(receiverText);
           }
         }
-        
+
         // Model pattern: User.find/where/create etc.
-        const arMethods = ['find', 'find_by', 'find_by!', 'where', 'all', 'first', 'last', 
-                          'create', 'create!', 'new', 'update', 'update!', 'destroy', 'delete'];
+        const arMethods = [
+          'find',
+          'find_by',
+          'find_by!',
+          'where',
+          'all',
+          'first',
+          'last',
+          'create',
+          'create!',
+          'new',
+          'update',
+          'update!',
+          'destroy',
+          'delete',
+        ];
         if (/^[A-Z][a-zA-Z]+$/.test(receiverText) && arMethods.includes(methodText)) {
-          if (!['Rails', 'ActiveRecord', 'ActionController', 'ApplicationRecord'].includes(receiverText)) {
+          if (
+            !['Rails', 'ActiveRecord', 'ActionController', 'ApplicationRecord'].includes(
+              receiverText
+            )
+          ) {
             if (!action.modelsCalled.includes(receiverText)) {
               action.modelsCalled.push(receiverText);
             }
@@ -463,15 +536,17 @@ export class RailsControllerAnalyzer {
         const child = call.child(i);
         if (child && !['identifier', '(', ')', ',', 'call'].includes(child.type)) {
           // Skip the method name and receiver
-          if (child !== call.childForFieldName('method') && 
-              child !== call.childForFieldName('receiver')) {
+          if (
+            child !== call.childForFieldName('method') &&
+            child !== call.childForFieldName('receiver')
+          ) {
             results.push(child);
           }
         }
       }
       return results;
     }
-    
+
     const results: SyntaxNode[] = [];
     for (let i = 0; i < args.childCount; i++) {
       const child = args.child(i);
@@ -484,7 +559,7 @@ export class RailsControllerAnalyzer {
 
   private extractArrayValues(node: SyntaxNode): string[] {
     const values: string[] = [];
-    
+
     if (node.type === 'array') {
       for (let i = 0; i < node.childCount; i++) {
         const child = node.child(i);
@@ -495,7 +570,7 @@ export class RailsControllerAnalyzer {
     } else {
       values.push(node.text.replace(/^:/, ''));
     }
-    
+
     return values;
   }
 }
@@ -504,16 +579,16 @@ export class RailsControllerAnalyzer {
 async function main() {
   const targetPath = process.argv[2] || process.cwd();
   console.log(`Analyzing controllers in: ${targetPath}`);
-  
+
   const analyzer = new RailsControllerAnalyzer(targetPath);
   const result = await analyzer.analyze();
-  
+
   console.log('\n=== Rails Controllers Analysis ===\n');
   console.log(`Total controllers: ${result.controllers.length}`);
   console.log(`Total actions: ${result.totalActions}`);
   console.log(`Namespaces: ${result.namespaces.join(', ') || '(none)'}`);
   console.log(`Shared concerns: ${result.concerns.length}`);
-  
+
   if (result.errors.length > 0) {
     console.log(`\n--- Errors (${result.errors.length}) ---`);
     for (const error of result.errors.slice(0, 5)) {
@@ -523,14 +598,19 @@ async function main() {
       console.log(`  ... and ${result.errors.length - 5} more`);
     }
   }
-  
+
   console.log('\n--- Sample Controllers (first 10) ---');
   for (const controller of result.controllers.slice(0, 10)) {
     console.log(`\n  📁 ${controller.className} (${controller.filePath})`);
     console.log(`     Parent: ${controller.parentClass}`);
-    console.log(`     Actions (${controller.actions.length}): ${controller.actions.map(a => a.name).slice(0, 5).join(', ')}${controller.actions.length > 5 ? '...' : ''}`);
+    console.log(
+      `     Actions (${controller.actions.length}): ${controller.actions
+        .map((a) => a.name)
+        .slice(0, 5)
+        .join(', ')}${controller.actions.length > 5 ? '...' : ''}`
+    );
     if (controller.beforeActions.length > 0) {
-      console.log(`     Before: ${controller.beforeActions.map(f => f.name).join(', ')}`);
+      console.log(`     Before: ${controller.beforeActions.map((f) => f.name).join(', ')}`);
     }
     if (controller.concerns.length > 0) {
       console.log(`     Concerns: ${controller.concerns.join(', ')}`);
@@ -538,9 +618,13 @@ async function main() {
   }
 
   // Summary of actions by visibility
-  const publicActions = result.controllers.flatMap(c => c.actions.filter(a => a.visibility === 'public'));
-  const privateActions = result.controllers.flatMap(c => c.actions.filter(a => a.visibility === 'private'));
-  
+  const publicActions = result.controllers.flatMap((c) =>
+    c.actions.filter((a) => a.visibility === 'public')
+  );
+  const privateActions = result.controllers.flatMap((c) =>
+    c.actions.filter((a) => a.visibility === 'private')
+  );
+
   console.log('\n--- Action Visibility Summary ---');
   console.log(`  Public: ${publicActions.length}`);
   console.log(`  Private: ${privateActions.length}`);

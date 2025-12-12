@@ -168,7 +168,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const pages = await parallelMapSafe(
       pageFiles,
       async (filePath) => {
-        return this.analyzePageFile(filePath, this.basePath);
+        // Determine the correct pagesPath based on the file location
+        const pagesPath = this.detectPagesRoot(filePath);
+        return this.analyzePageFile(filePath, pagesPath);
       },
       4 // Limit concurrency for ts-morph stability
     );
@@ -216,6 +218,34 @@ export class PagesAnalyzer extends BaseAnalyzer {
       linkedPages,
       steps: steps.length > 0 ? steps : undefined,
     };
+  }
+
+  /**
+   * Detect the pages root directory from a file path
+   * e.g., /project/src/pages/users/index.tsx -> /project/src/pages
+   */
+  private detectPagesRoot(filePath: string): string {
+    // Common pages directory patterns to look for
+    const pagesPatterns = [
+      '/src/pages/',
+      '/pages/',
+      '/src/app/',
+      '/app/',
+      '/frontend/src/pages/',
+      '/app/javascript/pages/',
+      '/app/javascript/components/pages/',
+    ];
+
+    for (const pattern of pagesPatterns) {
+      const idx = filePath.indexOf(pattern);
+      if (idx !== -1) {
+        // Return the path up to and including the pages directory
+        return filePath.substring(0, idx + pattern.length - 1);
+      }
+    }
+
+    // Fallback: use basePath
+    return this.basePath;
   }
 
   private filePathToRoutePath(filePath: string): string {
@@ -1202,8 +1232,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const pagesDir = this.getSetting('pagesDir', 'src/pages');
     const allFiles: string[] = [];
 
-    // 1. Check Next.js standard directories
-    const nextjsDirs = [pagesDir, 'pages', 'src/pages', 'app', 'src/app'];
+    // 1. Check Next.js standard directories (deduplicate)
+    const nextjsDirsSet = new Set([pagesDir, 'pages', 'src/pages', 'app', 'src/app']);
+    const nextjsDirs = [...nextjsDirsSet];
 
     for (const dir of nextjsDirs) {
       const dirPath = this.resolvePath(dir);
