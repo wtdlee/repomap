@@ -15,6 +15,7 @@ import { PageMapGenerator } from '../generators/page-map-generator.js';
 import { RailsMapGenerator } from '../generators/rails-map-generator.js';
 import { detectEnvironments, type EnvironmentDetectionResult } from '../utils/env-detector.js';
 import { analyzeRailsApp, type RailsAnalysisResult } from '../analyzers/rails/index.js';
+import { findAvailablePort } from '../utils/port.js';
 
 export interface DocServerOptions {
   noCache?: boolean;
@@ -1220,6 +1221,18 @@ export class DocServer {
       } catch (error) {
         console.error(`   ⚠️ Rails analysis failed:`, (error as Error).message);
       }
+    }
+
+    // Find available port (auto-detect if requested port is in use)
+    try {
+      const availablePort = await findAvailablePort(this.port);
+      if (availablePort !== this.port) {
+        console.log(`\n⚠️  Port ${this.port} is in use, using port ${availablePort} instead`);
+      }
+      this.port = availablePort;
+    } catch (error) {
+      console.error(`\n❌ Failed to find available port: ${(error as Error).message}`);
+      process.exit(1);
     }
 
     // Start server
