@@ -259,3 +259,47 @@ body { background: var(--bg); color: var(--text); }
 .route-tag-warn { background: #ef4444; }
 .route-tag-partials { background: #6366f1; }
 .route-tag-vars { background: #ec4899; }
+
+/* Route Stats Section */
+.route-stats-box {
+  padding: 12px;
+  background: var(--bg3);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.route-stats-row {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.route-stat {
+  text-align: center;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+.route-stat:hover { background: var(--bg2); }
+.route-stat-val { font-size: 20px; font-weight: 600; }
+.route-stat-val.green { color: #22c55e; }
+.route-stat-val.blue { color: #3b82f6; }
+.route-stat-val.purple { color: #8b5cf6; }
+.route-stat-val.cyan { color: #06b6d4; }
+.route-stat-label { font-size: 11px; color: var(--text2); }
+
+/* Coverage Info */
+.coverage-info {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--bg);
+  text-align: center;
+}
+.coverage-text {
+  font-size: 11px;
+  color: var(--text2);
+  cursor: help;
+}
+.coverage-high { color: #22c55e; font-weight: 600; }
+.coverage-mid { color: #f59e0b; font-weight: 600; }
+.coverage-low { color: #ef4444; font-weight: 600; }

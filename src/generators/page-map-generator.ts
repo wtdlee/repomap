@@ -832,21 +832,22 @@ export class PageMapGenerator {
       const totalRedirect = combinedData.filter(r => r.actionDetails?.redirectsTo).length;
       const totalWithActionInfo = combinedData.filter(r => r.actionDetails).length;
 
-      html += '<div style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:12px">';
+      html += '<div class="route-stats-box">';
       // Main stats row - clickable for filtering
-      html += '<div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">';
-      html += '<div class="route-stat" data-filter="all" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600">' + combinedData.length + '</div><div style="font-size:11px;color:var(--text2)">Total Routes</div></div>';
-      html += '<div class="route-stat" data-filter="views" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600;color:#22c55e">' + totalWithView + '</div><div style="font-size:11px;color:var(--text2)">With Views</div></div>';
-      html += '<div class="route-stat" data-filter="json" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600;color:#3b82f6">' + totalJsonApi + '</div><div style="font-size:11px;color:var(--text2)">JSON APIs</div></div>';
-      html += '<div class="route-stat" data-filter="services" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600;color:#8b5cf6">' + totalWithServices + '</div><div style="font-size:11px;color:var(--text2)">With Services</div></div>';
-      html += '<div class="route-stat" data-filter="grpc" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600;color:#06b6d4">' + totalWithGrpc + '</div><div style="font-size:11px;color:var(--text2)">gRPC</div></div>';
+      html += '<div class="route-stats-row">';
+      html += '<div class="route-stat" data-filter="all"><div class="route-stat-val">' + combinedData.length + '</div><div class="route-stat-label">Total Routes</div></div>';
+      html += '<div class="route-stat" data-filter="views"><div class="route-stat-val green">' + totalWithView + '</div><div class="route-stat-label">With Views</div></div>';
+      html += '<div class="route-stat" data-filter="json"><div class="route-stat-val blue">' + totalJsonApi + '</div><div class="route-stat-label">JSON APIs</div></div>';
+      html += '<div class="route-stat" data-filter="services"><div class="route-stat-val purple">' + totalWithServices + '</div><div class="route-stat-label">With Services</div></div>';
+      html += '<div class="route-stat" data-filter="grpc"><div class="route-stat-val cyan">' + totalWithGrpc + '</div><div class="route-stat-label">gRPC</div></div>';
       html += '</div>';
       // Analysis coverage indicator
       if (totalWithActionInfo > 0) {
         const coverage = Math.round((totalWithActionInfo / combinedData.length) * 100);
         const coverageTooltip = 'Percentage of routes successfully matched with controller actions to extract details (JSON/HTML rendering, redirects, etc). This is a tool analysis metric, not a code quality indicator.';
-        html += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bg1);text-align:center">';
-        html += '<div style="font-size:11px;color:var(--text2);cursor:help" title="' + coverageTooltip + '">Action Details Coverage: <span style="color:' + (coverage > 70 ? '#22c55e' : coverage > 40 ? '#f59e0b' : '#ef4444') + ';font-weight:600">' + coverage + '%</span> (' + totalWithActionInfo + '/' + combinedData.length + ' routes analyzed) ℹ️</div>';
+        const coverageClass = coverage > 70 ? 'coverage-high' : coverage > 40 ? 'coverage-mid' : 'coverage-low';
+        html += '<div class="coverage-info">';
+        html += '<div class="coverage-text" title="' + coverageTooltip + '">Action Details Coverage: <span class="' + coverageClass + '">' + coverage + '%</span> (' + totalWithActionInfo + '/' + combinedData.length + ' routes analyzed) ℹ️</div>';
         html += '</div>';
       }
       html += '</div>';
