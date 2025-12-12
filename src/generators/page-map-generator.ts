@@ -676,14 +676,23 @@ export class PageMapGenerator {
       // Filter page items
       document.querySelectorAll('.page-item').forEach(el => {
         const path = el.getAttribute('data-path');
-        el.style.display = visiblePaths.has(path) ? '' : 'none';
+        if (visiblePaths.has(path)) {
+          el.style.removeProperty('display');
+          el.style.display = 'flex';
+        } else {
+          el.style.display = 'none';
+        }
       });
       
       // Hide empty groups
       document.querySelectorAll('.group').forEach(g => {
-        const visibleItems = g.querySelectorAll('.page-item[style=""], .page-item:not([style])');
         const hasVisibleItems = Array.from(g.querySelectorAll('.page-item')).some(item => item.style.display !== 'none');
-        g.style.display = hasVisibleItems ? '' : 'none';
+        if (hasVisibleItems) {
+          g.style.removeProperty('display');
+          g.style.display = 'block';
+        } else {
+          g.style.display = 'none';
+        }
       });
     }
     
@@ -812,8 +821,15 @@ export class PageMapGenerator {
     });
     
     function showAllPages() {
-      document.querySelectorAll('.group').forEach(g => g.style.display = '');
-      document.querySelectorAll('.page-item').forEach(p => p.style.display = '');
+      // Reset all groups and page items to visible
+      document.querySelectorAll('.group').forEach(g => {
+        g.style.removeProperty('display');
+        g.style.display = 'block';
+      });
+      document.querySelectorAll('.page-item').forEach(p => {
+        p.style.removeProperty('display');
+        p.style.display = 'flex';
+      });
     }
     
     function showGraphQLList() {
