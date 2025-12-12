@@ -1,5 +1,14 @@
 # @wtdlee/repomap
 
+## 0.6.0
+
+### Minor Changes
+
+- 73605a0: Add SPA (react-router-dom) support and JavaScript project support
+  - Parse App.tsx/jsx/js for react-router-dom Route components to detect pages in SPA projects
+  - Add fallback for projects without tsconfig.json using default compiler options (allowJs, jsx)
+  - Support PrivateRoute and Route component patterns
+
 ## 0.5.0
 
 ### Minor Changes
