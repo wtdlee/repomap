@@ -1,6 +1,7 @@
 import { Project, SyntaxKind } from 'ts-morph';
 import fg from 'fast-glob';
 import * as fs from 'fs/promises';
+import { existsSync } from 'fs';
 import * as path from 'path';
 import { parse as parseGraphQL, DocumentNode, DefinitionNode, TypeNode } from 'graphql';
 import { BaseAnalyzer } from './base-analyzer.js';
@@ -22,9 +23,18 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
   constructor(config: RepositoryConfig) {
     super(config);
+    const tsConfigPath = this.resolvePath('tsconfig.json');
+    const hasTsConfig = existsSync(tsConfigPath);
+
     this.project = new Project({
-      tsConfigFilePath: this.resolvePath('tsconfig.json'),
+      ...(hasTsConfig ? { tsConfigFilePath: tsConfigPath } : {}),
       skipAddingFilesFromTsConfig: true,
+      compilerOptions: hasTsConfig
+        ? undefined
+        : {
+            allowJs: true,
+            jsx: 2, // React
+          },
     });
   }
 
