@@ -27,6 +27,7 @@ export interface PageMapOptions {
   envResult?: EnvironmentDetectionResult | null;
   railsAnalysis?: RailsAnalysisResult | null;
   activeTab?: 'pages' | 'rails' | 'api';
+  staticMode?: boolean; // For GitHub Pages deployment (inline CSS, no server)
 }
 
 /**

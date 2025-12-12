@@ -219,8 +219,15 @@ program
   .option('--repo <name>', 'Analyze specific repository only')
   .option('--watch', 'Watch for changes and regenerate')
   .option('--no-cache', 'Disable caching (always analyze from scratch)')
+  .option('--format <type>', 'Output format: json, html, markdown (default: all)', 'all')
+  .option('--ci', 'CI mode: minimal output, exit codes for errors')
+  .option('--static', 'Generate standalone HTML files (for GitHub Pages)')
   .action(async (options) => {
-    console.log(chalk.blue.bold('\n📚 Repomap - Documentation Generator\n'));
+    const isCI = options.ci || process.env.CI === 'true';
+
+    if (!isCI) {
+      console.log(chalk.blue.bold('\n📚 Repomap - Documentation Generator\n'));
+    }
 
     try {
       const cwd = process.cwd();
@@ -248,13 +255,104 @@ program
         await watchAndGenerate(engine, config);
       } else {
         const report = await engine.generate();
-        printSummary(report);
+
+        // Handle different output formats
+        if (options.format === 'json' || options.static) {
+          const jsonPath = path.join(config.outputDir, 'report.json');
+          await fs.mkdir(config.outputDir, { recursive: true });
+          await fs.writeFile(jsonPath, JSON.stringify(report, null, 2));
+          if (!isCI) console.log(chalk.green(`📄 JSON report: ${jsonPath}`));
+        }
+
+        // Generate static HTML files for GitHub Pages
+        if (options.static) {
+          await generateStaticSite(config, report, isCI);
+        }
+
+        if (!isCI) {
+          printSummary(report);
+        } else {
+          // CI mode: minimal output
+          const totalPages = report.repositories.reduce(
+            (sum: number, r: { summary: { totalPages: number } }) => sum + r.summary.totalPages,
+            0
+          );
+          console.log(`✅ Generated: ${totalPages} pages, ${report.repositories.length} repos`);
+        }
       }
     } catch (error) {
-      console.error(chalk.red('\n❌ Error:'), (error as Error).message);
+      console.error(
+        isCI ? `Error: ${(error as Error).message}` : chalk.red('\n❌ Error:'),
+        (error as Error).message
+      );
       process.exit(1);
     }
   });
+
+/**
+ * Generate static HTML site for GitHub Pages deployment
+ */
+async function generateStaticSite(
+  config: DocGeneratorConfig,
+  report: DocumentationReport,
+  isCI: boolean
+): Promise<void> {
+  const { PageMapGenerator } = await import('./generators/page-map-generator.js');
+  const { detectEnvironments } = await import('./utils/env-detector.js');
+
+  const outputDir = config.outputDir;
+  await fs.mkdir(outputDir, { recursive: true });
+
+  // Detect environment for Rails support
+  const rootPath = config.repositories[0]?.path || process.cwd();
+  const envResult = await detectEnvironments(rootPath);
+
+  let railsAnalysis = null;
+  if (envResult.hasRails) {
+    const { analyzeRailsApp } = await import('./analyzers/rails/index.js');
+    railsAnalysis = await analyzeRailsApp(rootPath);
+  }
+
+  // Generate page-map.html
+  const pageMapGenerator = new PageMapGenerator();
+  const pageMapHtml = pageMapGenerator.generatePageMapHtml(report, {
+    envResult,
+    railsAnalysis,
+    staticMode: true,
+  });
+  await fs.writeFile(path.join(outputDir, 'index.html'), pageMapHtml);
+  if (!isCI) console.log(chalk.green(`📄 Static page map: ${path.join(outputDir, 'index.html')}`));
+
+  // Generate rails-map.html if Rails detected
+  if (railsAnalysis) {
+    const { RailsMapGenerator } = await import('./generators/rails-map-generator.js');
+    const railsGenerator = new RailsMapGenerator();
+    const railsHtml = railsGenerator.generateFromResult(railsAnalysis);
+    await fs.writeFile(path.join(outputDir, 'rails-map.html'), railsHtml);
+    if (!isCI)
+      console.log(chalk.green(`📄 Static Rails map: ${path.join(outputDir, 'rails-map.html')}`));
+  }
+
+  // Copy CSS assets
+  const cssFiles = ['common.css', 'page-map.css', 'docs.css', 'rails-map.css'];
+  const assetsDir = path.join(outputDir, 'assets');
+  await fs.mkdir(assetsDir, { recursive: true });
+
+  for (const cssFile of cssFiles) {
+    try {
+      const cssPath = new URL(`./generators/assets/${cssFile}`, import.meta.url);
+      const css = await fs.readFile(cssPath, 'utf-8');
+      await fs.writeFile(path.join(assetsDir, cssFile), css);
+    } catch {
+      // CSS file not found, skip
+    }
+  }
+
+  if (!isCI) {
+    console.log(chalk.green(`\n✅ Static site generated in: ${outputDir}`));
+    console.log(chalk.gray('   Deploy to GitHub Pages or any static hosting'));
+  }
+}
 
 /**
  * Serve command - starts documentation server

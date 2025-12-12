@@ -4,7 +4,31 @@
   "description": "Interactive documentation generator for code repositories - visualize pages, components, GraphQL operations, and data flows",
   "type": "module",
   "main": "dist/index.js",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./analyzers": {
+      "types": "./dist/analyzers/index.d.ts",
+      "import": "./dist/analyzers/index.js"
+    },
+    "./generators": {
+      "types": "./dist/generators/index.d.ts",
+      "import": "./dist/generators/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    }
+  },
   "bin": {
     "repomap": "./dist/cli.js"
   },
@@ -13,8 +37,10 @@
     "README.md",
     "LICENSE"
   ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy-assets",
+    "copy-assets": "mkdir -p dist/generators/assets && cp src/generators/assets/*.css dist/generators/assets/",
     "dev": "tsx watch src/cli.ts",
     "dev:serve": "tsx watch --clear-screen=false src/cli.ts serve --no-cache",
     "prepublishOnly": "npm run build",
@@ -26,7 +52,9 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "prepare": "husky"
+    "prepare": "husky",
+    "changeset": "changeset",
+    "release": "changeset publish"
   },
   "lint-staged": {
     "src/**/*.ts": [
@@ -40,21 +68,27 @@
     "graphql",
     "nextjs",
     "react",
+    "rails",
+    "ruby-on-rails",
     "data-flow",
     "visualization",
     "mermaid",
-    "developer-tools"
+    "developer-tools",
+    "static-analysis",
+    "code-visualization",
+    "api-documentation",
+    "component-analysis"
   ],
-  "author": "",
+  "author": "wtdlee <890511lkh@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/user/repomap.git"
+    "url": "git+https://github.com/wtdlee/repomap.git"
   },
   "bugs": {
-    "url": "https://github.com/user/repomap/issues"
+    "url": "https://github.com/wtdlee/repomap/issues"
   },
-  "homepage": "https://github.com/user/repomap#readme",
+  "homepage": "https://github.com/wtdlee/repomap#readme",
   "engines": {
     "node": ">=18.0.0"
   },
@@ -77,6 +111,7 @@
     "yaml": "^2.3.4"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.27.0",
     "@eslint/js": "^9.39.1",
     "@types/babel__traverse": "^7.20.4",
     "@types/express": "^4.17.21",
