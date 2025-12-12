@@ -183,6 +183,9 @@ export class PageMapGenerator {
     const railsViewsJson = railsAnalysis
       ? JSON.stringify(railsAnalysis.views)
       : '{ "views": [], "pages": [], "summary": {} }';
+    const railsReactJson = railsAnalysis
+      ? JSON.stringify(railsAnalysis.react)
+      : '{ "components": [], "entryPoints": [], "summary": {} }';
     const railsSummaryJson = railsAnalysis ? JSON.stringify(railsAnalysis.summary) : 'null';
 
     // Environment info
@@ -329,6 +332,7 @@ export class PageMapGenerator {
     .page-item {
       display: flex;
       align-items: center;
+      justify-content: space-between;
       padding: 8px 14px;
       padding-left: calc(14px + var(--depth, 0) * 16px);
       border-top: 1px solid var(--border);
@@ -437,6 +441,9 @@ export class PageMapGenerator {
     .detail-item > .tag { flex-shrink: 0; }
     .detail-item > span:not(.tag), .detail-item > code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .detail-label { font-size: 9px; color: var(--text2); margin-bottom: 2px; }
+    .code-path { background: var(--bg3); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 12px; word-break: break-all; }
+    .usage-name { font-family: monospace; font-weight: 500; word-break: break-all; min-width: 0; }
+    .line-num { margin-left: auto; font-size: 10px; color: var(--text2); flex-shrink: 0; }
     
     .rel-item {
       background: var(--bg3);
@@ -551,6 +558,7 @@ export class PageMapGenerator {
         <div class="stat" data-filter="rails-controllers" onclick="showRailsControllers()"><div class="stat-val">${railsAnalysis.summary.totalControllers}</div><div class="stat-label">Controllers</div></div>
         <div class="stat" data-filter="rails-models" onclick="showRailsModels()"><div class="stat-val">${railsAnalysis.summary.totalModels}</div><div class="stat-label">Models</div></div>
         <div class="stat" data-filter="rails-grpc" onclick="showRailsGrpc()"><div class="stat-val">${railsAnalysis.summary.totalGrpcServices}</div><div class="stat-label">gRPC</div></div>
+        <div class="stat" data-filter="rails-react" onclick="showReactComponents()"><div class="stat-val">${railsAnalysis.summary.totalReactComponents}</div><div class="stat-label">⚛ React</div></div>
       </div>
       `
           : ''
@@ -561,6 +569,8 @@ export class PageMapGenerator {
       <!-- Pages Tree View (for all screens - Next.js/React/Rails) -->
       <div class="tree-view ${activeTab === 'pages' ? 'active' : ''}" id="tree-view" data-tab="pages">
         ${allPages.length > 0 ? this.buildTreeHtml(groups, allPages) : ''}
+        <div id="page-map-react-components-section" style="${hasRails ? 'margin-top:20px;border-top:1px solid var(--bg3);padding-top:20px' : ''}">
+        </div>
         <div id="page-map-rails-section" style="${allPages.length > 0 && hasRails ? 'margin-top:20px;border-top:1px solid var(--bg3);padding-top:20px' : ''}">
           ${hasRails && allPages.length === 0 ? '<div style="padding:20px;color:var(--text2)">Loading screens...</div>' : ''}
         </div>
@@ -632,6 +642,7 @@ export class PageMapGenerator {
     const railsControllers = ${railsControllersJson};
     const railsModels = ${railsModelsJson};
     const railsViews = ${railsViewsJson};
+    const railsReact = ${railsReactJson};
     const railsSummary = ${railsSummaryJson};
     
     // Current active tab state
@@ -808,6 +819,133 @@ export class PageMapGenerator {
       html += '</div>';
       
       showModal('📦 Rails Models (' + railsModels.length + ')', html);
+    }
+    
+    function showReactComponents() {
+      if (!railsReact || !railsReact.components || railsReact.components.length === 0) {
+        showModal('React Components', '<div style="color:var(--text2)">No React components found</div>');
+        return;
+      }
+      
+      // Sort by usage count
+      const sortedComponents = [...railsReact.components].sort((a, b) => 
+        (b.usedIn?.length || 0) - (a.usedIn?.length || 0)
+      );
+      
+      let html = '<div style="max-height:60vh;overflow-y:auto">';
+      
+      // Stats
+      html += '<div style="display:flex;gap:16px;margin-bottom:16px;padding:12px;background:var(--bg3);border-radius:8px">';
+      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:bold;color:var(--accent)">' + railsReact.summary.totalComponents + '</div><div style="font-size:10px;color:var(--text2)">Components</div></div>';
+      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:bold;color:#22c55e">' + railsReact.summary.ssrComponents + '</div><div style="font-size:10px;color:var(--text2)">SSR</div></div>';
+      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:bold;color:#3b82f6">' + railsReact.summary.clientComponents + '</div><div style="font-size:10px;color:var(--text2)">Client</div></div>';
+      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:bold;color:#f59e0b">' + railsReact.summary.totalEntryPoints + '</div><div style="font-size:10px;color:var(--text2)">Entry Points</div></div>';
+      html += '</div>';
+      
+      sortedComponents.forEach(comp => {
+        const usageCount = comp.usedIn?.length || 0;
+        const ssrBadge = comp.ssr ? '<span style="margin-left:6px;font-size:9px;background:#22c55e;color:white;padding:1px 4px;border-radius:2px">SSR</span>' : '';
+        
+        html += '<div style="background:var(--bg3);padding:12px;border-radius:6px;margin-bottom:8px;cursor:pointer" onclick="showReactComponentDetail(\\'' + encodeURIComponent(JSON.stringify(comp)) + '\\')">';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between">';
+        html += '<div style="font-weight:600;display:flex;align-items:center"><span style="color:#61dafb;margin-right:6px">⚛</span>' + comp.name + ssrBadge + '</div>';
+        html += '<span style="font-size:11px;color:var(--text2)">' + usageCount + ' usage' + (usageCount !== 1 ? 's' : '') + '</span>';
+        html += '</div>';
+        
+        // Entry point info
+        if (comp.entryFile) {
+          html += '<div style="font-size:10px;color:var(--text2);margin-top:4px;font-family:monospace">📥 entries/' + comp.entryFile + '</div>';
+        }
+        
+        // Source file info
+        if (comp.sourceFile) {
+          html += '<div style="font-size:10px;color:var(--accent);margin-top:2px;font-family:monospace">📄 ' + comp.sourceFile + '</div>';
+        }
+        
+        // Usage preview
+        if (comp.usedIn && comp.usedIn.length > 0) {
+          html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">';
+          comp.usedIn.slice(0, 3).forEach(usage => {
+            const patternColor = usage.pattern === 'render_react_component' ? '#22c55e' : '#3b82f6';
+            html += '<span style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:3px;font-size:10px;border-left:2px solid ' + patternColor + '">' + usage.controller + '/' + usage.action + '</span>';
+          });
+          if (comp.usedIn.length > 3) {
+            html += '<span style="font-size:10px;color:var(--text2)">+' + (comp.usedIn.length - 3) + ' more</span>';
+          }
+          html += '</div>';
+        }
+        
+        html += '</div>';
+      });
+      
+      html += '</div>';
+      showModal('⚛ React Components (' + railsReact.components.length + ')', html);
+    }
+    
+    function showReactComponentDetail(encodedData) {
+      const comp = JSON.parse(decodeURIComponent(encodedData));
+      
+      let html = '';
+      
+      // Component Info
+      html += '<div class="detail-section">';
+      html += '<div class="detail-label">⚛ Component Name</div>';
+      html += '<div style="display:flex;align-items:center;gap:8px">';
+      html += '<span style="font-family:monospace;font-size:16px;font-weight:600">' + comp.name + '</span>';
+      if (comp.ssr) {
+        html += '<span style="font-size:10px;background:#22c55e;color:white;padding:2px 6px;border-radius:3px">SSR</span>';
+      } else {
+        html += '<span style="font-size:10px;background:#3b82f6;color:white;padding:2px 6px;border-radius:3px">Client</span>';
+      }
+      html += '</div></div>';
+      
+      // Entry Point
+      if (comp.entryFile) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">📥 Entry Point</div>';
+        html += '<div class="code-path">';
+        html += comp.entryFile;
+        html += '</div></div>';
+      }
+      
+      // Source File
+      if (comp.sourceFile || comp.importPath) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">📄 Source File</div>';
+        html += '<div class="code-path" style="color:var(--accent)">';
+        html += comp.sourceFile || comp.importPath;
+        html += '</div></div>';
+      }
+      
+      // Usage in Views
+      if (comp.usedIn && comp.usedIn.length > 0) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-label">📍 Used in Views (' + comp.usedIn.length + ')</div>';
+        html += '<div class="detail-items">';
+        
+        comp.usedIn.forEach(usage => {
+          const patternColor = usage.pattern === 'render_react_component' ? '#22c55e' : '#3b82f6';
+          const patternLabel = usage.pattern === 'render_react_component' ? 'render' : 'data';
+          
+          html += '<div class="detail-item" style="flex-direction:column;align-items:flex-start;gap:4px">';
+          html += '<div style="display:flex;align-items:center;gap:8px;width:100%">';
+          html += '<span class="tag" style="background:' + patternColor + ';font-size:9px;flex-shrink:0">' + patternLabel + '</span>';
+          html += '<span class="usage-name">' + usage.controller + '#' + usage.action + '</span>';
+          if (usage.line) {
+            html += '<span class="line-num">L' + usage.line + '</span>';
+          }
+          html += '</div>';
+          html += '<div style="font-size:10px;color:var(--text2);font-family:monospace">app/views/' + usage.viewPath + '</div>';
+          if (usage.propsVar) {
+            html += '<div style="font-size:10px;color:var(--accent)">props: ' + usage.propsVar + '</div>';
+          }
+          html += '</div>';
+        });
+        
+        html += '</div></div>';
+      }
+      
+      showModal('⚛ ' + comp.name, html, true);
     }
     
     function showRailsGrpc() {
@@ -1265,6 +1403,136 @@ export class PageMapGenerator {
     // For page-map: show Rails views/pages when no Next.js pages
     if (currentMainTab === 'pages' && envInfo.hasRails) {
       setTimeout(renderRailsPagesInPageMap, 100);
+      setTimeout(renderReactComponentsInPageMap, 150);
+    }
+    
+    // Render React components used in Rails views as a list
+    function renderReactComponentsInPageMap() {
+      const container = document.getElementById('page-map-react-components-section');
+      if (!container) return;
+      
+      const components = (railsReact && railsReact.components) || [];
+      if (components.length === 0) {
+        container.innerHTML = '';
+        return;
+      }
+      
+      // Sort by usage count
+      const sortedComponents = [...components].sort((a, b) => 
+        (b.usedIn?.length || 0) - (a.usedIn?.length || 0)
+      );
+      
+      const ssrCount = components.filter(c => c.ssr).length;
+      const withUsageCount = components.filter(c => c.usedIn && c.usedIn.length > 0).length;
+      
+      let html = '';
+      html += '<div style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:12px">';
+      html += '<div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="color:#61dafb">⚛</span> React Components (from Rails)</div>';
+      html += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2)">';
+      html += '<span>' + components.length + ' components</span>';
+      html += '<span>•</span>';
+      html += '<span style="color:#22c55e">' + ssrCount + ' SSR</span>';
+      html += '<span>•</span>';
+      html += '<span style="color:#3b82f6">' + (components.length - ssrCount) + ' client</span>';
+      html += '<span>•</span>';
+      html += '<span style="color:#8b5cf6">' + withUsageCount + ' with usage</span>';
+      html += '</div></div>';
+      
+      // Group by entry point presence (filter out components without name)
+      const validComponents = sortedComponents.filter(c => c.name && typeof c.name === 'string');
+      const withEntry = validComponents.filter(c => c.entryFile);
+      const withoutEntry = validComponents.filter(c => !c.entryFile);
+      
+      // Render components with entry points
+      if (withEntry.length > 0) {
+        html += '<div class="group" data-group="react-with-entry">';
+        html += '<div class="group-header" onclick="toggleGroup(this)">';
+        html += '<span class="group-toggle">▼</span>';
+        html += '<span style="color:#61dafb;margin-right:4px">📥</span>';
+        html += '<span class="group-name">With Entry Points (' + withEntry.length + ')</span>';
+        html += '</div>';
+        html += '<div class="group-items">';
+        
+        withEntry.forEach(comp => {
+          const usageCount = comp.usedIn?.length || 0;
+          const tags = [];
+          if (comp.ssr) tags.push('<span class="tag" style="background:#166534;color:#86efac" title="Server-Side Rendering">SSR</span>');
+          if (usageCount > 0) tags.push('<span class="tag" style="background:#5b21b6;color:#c4b5fd" title="Used in ' + usageCount + ' view(s)">View:' + usageCount + '</span>');
+          if (comp.sourceFile) tags.push('<span class="tag" style="background:#1e3a5f;color:#93c5fd" title="Has source file">SRC</span>');
+          
+          // Find URL from routes based on controller/action OR infer from entry file
+          let urlInfo = '';
+          if (comp.usedIn && comp.usedIn.length > 0) {
+            const usage = comp.usedIn[0];
+            // Construct proper Rails URL: /controller for index, /controller/action for others
+            if (usage.action === 'index') {
+              urlInfo = '/' + usage.controller.replace(/_/g, '/');
+            } else if (usage.action === 'show') {
+              urlInfo = '/' + usage.controller.replace(/_/g, '/') + '/:id';
+            } else {
+              urlInfo = '/' + usage.controller.replace(/_/g, '/') + '/' + usage.action;
+            }
+          } else if (comp.entryFile) {
+            // Infer URL from entry file name (e.g., tickets.tsx → /tickets)
+            const fileName = comp.entryFile.split('/').pop().replace(/\\.(tsx?|jsx?)$/, '');
+            urlInfo = '/' + fileName.replace(/_/g, '-');
+          }
+          
+          html += '<div class="page-item" data-path="' + comp.name.toLowerCase() + '" onclick="showReactComponentDetail(\\'' + encodeURIComponent(JSON.stringify(comp)) + '\\')">';
+          html += '<div class="page-info">';
+          html += '<span class="page-name" style="display:flex;align-items:center"><span style="color:#61dafb;margin-right:6px">⚛</span>' + comp.name + '</span>';
+          html += '<span class="page-path" style="font-size:10px;color:var(--accent)">' + urlInfo + '</span>';
+          html += '</div>';
+          html += '<div class="page-tags">' + tags.join('') + '</div>';
+          html += '</div>';
+        });
+        
+        html += '</div></div>';
+      }
+      
+      // Render components without entry points (found only in views)
+      if (withoutEntry.length > 0) {
+        html += '<div class="group" data-group="react-view-only">';
+        html += '<div class="group-header" onclick="toggleGroup(this)">';
+        html += '<span class="group-toggle">▼</span>';
+        html += '<span style="color:#f59e0b;margin-right:4px">👁️</span>';
+        html += '<span class="group-name">View-only Components (' + withoutEntry.length + ')</span>';
+        html += '</div>';
+        html += '<div class="group-items">';
+        
+        withoutEntry.forEach(comp => {
+          const usageCount = comp.usedIn?.length || 0;
+          const tags = [];
+          if (comp.ssr) tags.push('<span class="tag" style="background:#166534;color:#86efac" title="Server-Side Rendering">SSR</span>');
+          if (usageCount > 0) tags.push('<span class="tag" style="background:#5b21b6;color:#c4b5fd" title="Used in ' + usageCount + ' view(s)">View:' + usageCount + '</span>');
+          
+          // Find URL from routes based on controller/action
+          let urlInfo = '';
+          if (comp.usedIn && comp.usedIn.length > 0) {
+            const usage = comp.usedIn[0];
+            // Construct proper Rails URL
+            if (usage.action === 'index') {
+              urlInfo = '/' + usage.controller.replace(/_/g, '/');
+            } else if (usage.action === 'show') {
+              urlInfo = '/' + usage.controller.replace(/_/g, '/') + '/:id';
+            } else {
+              urlInfo = '/' + usage.controller.replace(/_/g, '/') + '/' + usage.action;
+            }
+          }
+          
+          html += '<div class="page-item" data-path="' + comp.name.toLowerCase() + '" onclick="showReactComponentDetail(\\'' + encodeURIComponent(JSON.stringify(comp)) + '\\')">';
+          html += '<div class="page-info">';
+          html += '<span class="page-name" style="display:flex;align-items:center"><span style="color:#61dafb;margin-right:6px">⚛</span>' + comp.name + '</span>';
+          html += '<span class="page-path" style="font-size:10px;color:var(--accent)">' + (urlInfo || 'View-only') + '</span>';
+          html += '</div>';
+          html += '<div class="page-tags">' + tags.join('') + '</div>';
+          html += '</div>';
+        });
+        
+        html += '</div></div>';
+      }
+      
+      container.innerHTML = html;
     }
     
     // Render Rails pages in page-map view - based on actual VIEW TEMPLATES (real screens)
@@ -3503,13 +3771,25 @@ export class PageMapGenerator {
                 ? `<span class="tag tag-repo" title="${repoName}">${shortRepoName}</span>`
                 : '';
 
+            // Detect SPA component pages (PascalCase path or in components/pages)
+            const isSpaComponent =
+              /^\/[A-Z]/.test(p.path) || (p.filePath && p.filePath.includes('components/pages'));
+            const displayPath =
+              isSpaComponent && p.filePath
+                ? p.filePath.replace(/\.tsx?$/, '').replace(/^(frontend\/src\/|src\/)/, '')
+                : p.path;
+            const spaTag = isSpaComponent
+              ? '<span class="tag" style="background:#6366f1;color:white" title="SPA Component Page">SPA</span>'
+              : '';
+
             return `<div class="page-item" data-path="${p.path}" data-repo="${repoName}" onclick="selectPage('${
               p.path
             }')" style="--depth:${depth}">
               <span class="page-type" style="--type-color:${type.color}">${type.label}</span>
-              <span class="page-path">${p.path}</span>
+              <span class="page-path">${displayPath}</span>
               <div class="page-tags">
                 ${repoTag}
+                ${spaTag}
                 ${p.authentication?.required ? '<span class="tag tag-auth">AUTH</span>' : ''}
                 ${queries > 0 ? `<span class="tag tag-query">Q:${queries}</span>` : ''}
                 ${mutations > 0 ? `<span class="tag tag-mutation">M:${mutations}</span>` : ''}

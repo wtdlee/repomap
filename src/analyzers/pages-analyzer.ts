@@ -1,6 +1,7 @@
 import { Project, SourceFile, SyntaxKind, Node } from 'ts-morph';
 import fg from 'fast-glob';
 import * as path from 'path';
+import * as fs from 'fs';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
 import type {
@@ -225,7 +226,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
    * e.g., /project/src/pages/users/index.tsx -> /project/src/pages
    */
   private detectPagesRoot(filePath: string): string {
-    // Common pages directory patterns to look for
+    // Common pages directory patterns to look for (exclude components/pages - those are reusable components)
     const pagesPatterns = [
       '/src/pages/',
       '/pages/',
@@ -233,7 +234,6 @@ export class PagesAnalyzer extends BaseAnalyzer {
       '/app/',
       '/frontend/src/pages/',
       '/app/javascript/pages/',
-      '/app/javascript/components/pages/',
     ];
 
     for (const pattern of pagesPatterns) {
@@ -1237,6 +1237,22 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const nextjsDirs = [...nextjsDirsSet];
 
     for (const dir of nextjsDirs) {
+      // Skip Rails 'app' directory (contains controllers, models, views - not React pages)
+      if (dir === 'app' || dir === 'src/app') {
+        const railsIndicators = ['controllers', 'models', 'views', 'helpers'];
+        const dirPath = this.resolvePath(dir);
+        const hasRailsStructure = railsIndicators.some((subdir) => {
+          try {
+            return fs.existsSync(path.join(dirPath, subdir));
+          } catch {
+            return false;
+          }
+        });
+        if (hasRailsStructure) {
+          continue; // Skip Rails app directory
+        }
+      }
+
       const dirPath = this.resolvePath(dir);
       try {
         const files = await fg(['**/*.tsx', '**/*.ts', '**/*.jsx', '**/*.js'], {
@@ -1258,6 +1274,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
             '**/*.test.*',
             '**/*.spec.*',
             '**/node_modules/**',
+            '**/components/pages/**', // Reusable page components, not routes
           ],
           absolute: true,
         });
@@ -1270,13 +1287,8 @@ export class PagesAnalyzer extends BaseAnalyzer {
       }
     }
 
-    // 2. Check Rails + React structures
-    const railsReactDirs = [
-      'frontend/src/**/pages',
-      'frontend/src/**/components/pages',
-      'app/javascript/**/pages',
-      'app/javascript/**/components/pages',
-    ];
+    // 2. Check Rails + React structures (exclude components/pages - those are reusable components, not routes)
+    const railsReactDirs = ['frontend/src/**/pages', 'app/javascript/**/pages'];
 
     for (const pattern of railsReactDirs) {
       try {
@@ -1289,7 +1301,14 @@ export class PagesAnalyzer extends BaseAnalyzer {
           ],
           {
             cwd: this.basePath,
-            ignore: ['**/*.test.*', '**/*.spec.*', '**/node_modules/**', '**/vendor/**'],
+            ignore: [
+              '**/*.test.*',
+              '**/*.spec.*',
+              '**/node_modules/**',
+              '**/vendor/**',
+              '**/components/pages/**', // Exclude reusable page components (not actual routes)
+              '**/stories/**', // Exclude storybook files
+            ],
             absolute: true,
           }
         );

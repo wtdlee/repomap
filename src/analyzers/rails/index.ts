@@ -38,6 +38,13 @@ export {
   type RailsViewAnalysisResult,
 } from './rails-view-analyzer.js';
 export {
+  analyzeReactComponents,
+  type ReactComponentMapping,
+  type ReactComponentUsage,
+  type ReactAnalysisResult,
+  type EntryPointInfo,
+} from './rails-react-analyzer.js';
+export {
   initRubyParser,
   parseRuby,
   parseRubyFile,
@@ -54,6 +61,7 @@ import {
 import { RailsModelAnalyzer, type RailsModelsResult } from './rails-model-analyzer.js';
 import { RailsGrpcAnalyzer, type RailsGrpcResult } from './rails-grpc-analyzer.js';
 import { analyzeRailsViews, type RailsViewAnalysisResult } from './rails-view-analyzer.js';
+import { analyzeReactComponents, type ReactAnalysisResult } from './rails-react-analyzer.js';
 
 export interface RailsAnalysisResult {
   routes: RailsRoutesResult;
@@ -61,6 +69,7 @@ export interface RailsAnalysisResult {
   models: RailsModelsResult;
   grpc: RailsGrpcResult;
   views: RailsViewAnalysisResult;
+  react: ReactAnalysisResult;
   summary: RailsSummary;
 }
 
@@ -75,6 +84,8 @@ export interface RailsSummary {
   totalRpcs: number;
   totalViews: number;
   totalPages: number;
+  totalReactComponents: number;
+  ssrReactComponents: number;
   namespaces: string[];
   concerns: string[];
 }
@@ -120,6 +131,13 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
     `   ✅ Found ${views.summary.totalViews} views and ${views.summary.totalPages} pages`
   );
 
+  // React Components
+  console.log('🔄 Analyzing React components...');
+  const react = await analyzeReactComponents(rootPath);
+  console.log(
+    `   ✅ Found ${react.summary.totalComponents} React components (${react.summary.ssrComponents} SSR, ${react.summary.clientComponents} client)`
+  );
+
   // Combine all namespaces
   const allNamespaces = [
     ...new Set([
@@ -144,6 +162,8 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
     totalRpcs: grpc.totalRpcs,
     totalViews: views.summary.totalViews,
     totalPages: views.summary.totalPages,
+    totalReactComponents: react.summary.totalComponents,
+    ssrReactComponents: react.summary.ssrComponents,
     namespaces: allNamespaces,
     concerns: allConcerns,
   };
@@ -154,6 +174,7 @@ export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisRe
     models,
     grpc,
     views,
+    react,
     summary,
   };
 }
