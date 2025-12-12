@@ -798,14 +798,8 @@ export class DocServer {
       z-index: 200;
     }
     .header h1 { 
-      font-size: 18px; 
+      font-size: 18px;
       color: var(--header-text);
-      cursor: pointer;
-    }
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 24px;
     }
     .nav-link {
       padding: 6px 12px;
@@ -841,8 +835,8 @@ export class DocServer {
 </head>
 <body>
   <header class="header">
-    <div class="header-left">
-      <h1 onclick="location.href='/'">📊 ${this.config.repositories[0]?.displayName || this.config.repositories[0]?.name || 'Repository'}</h1>
+    <div style="display:flex;align-items:center;gap:24px">
+      <h1 style="cursor:pointer" onclick="location.href='/'">📊 ${this.config.repositories[0]?.displayName || this.config.repositories[0]?.name || 'Repository'}</h1>
       <nav style="display:flex;gap:4px">
         <a href="/page-map" class="nav-link">Page Map</a>
         <a href="/docs" class="nav-link active">Docs</a>
