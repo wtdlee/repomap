@@ -802,6 +802,9 @@ export class DocServer {
     }
     .header h1 { 
       font-size: 18px;
+      height: 28px;
+      display: flex;
+      align-items: center;
       color: var(--header-text);
     }
     .nav-link {
