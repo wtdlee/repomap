@@ -50,6 +50,17 @@ export class DocServer {
     // Serve static assets
     this.app.use('/assets', express.static(path.join(this.config.outputDir, 'assets')));
 
+    // Serve page-map CSS from generators/assets
+    this.app.get('/page-map.css', async (req, res) => {
+      try {
+        const cssPath = new URL('../generators/assets/page-map.css', import.meta.url);
+        const css = await fs.readFile(cssPath, 'utf-8');
+        res.type('text/css').send(css);
+      } catch {
+        res.status(404).send('CSS not found');
+      }
+    });
+
     // Main page - redirect to page-map
     this.app.get('/', (req, res) => {
       res.redirect('/page-map');
