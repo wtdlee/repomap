@@ -571,11 +571,20 @@ export class PageMapGenerator {
         stepsHtml += '</div></div>';
       }
       
-      // Data operations - show component name info
+      // Data operations - show component name info (deduplicated)
       let dataHtml = '';
       if (page.dataFetching && page.dataFetching.length > 0) {
+        // Deduplicate by operationName
+        const seenNames = new Set();
+        const uniqueDataFetching = page.dataFetching.filter(df => {
+          const name = (df.operationName || '').replace(/^[→\\->\\s]+/,'').replace(/^\\u2192\\s*/,'');
+          if (seenNames.has(name)) return false;
+          seenNames.add(name);
+          return true;
+        });
+        
         dataHtml = '<div class="detail-section"><h4>Data Operations</h4>';
-        page.dataFetching.forEach(df => {
+        uniqueDataFetching.forEach(df => {
           const rawName = df.operationName || '';
           // Check if it's a component reference (contains → or starts with special marker)
           const isComponent = rawName.includes('→') || rawName.includes('\\u2192') || rawName.startsWith('->');
@@ -1089,7 +1098,7 @@ export class PageMapGenerator {
         }
       } else {
         // Extract the core component name without common suffixes
-        const coreNameMatch = name.match(/^(.+?)(Container|Page|Wrapper|Form|Component|View|Modal|Dialog)?$/);
+        const coreNameMatch = name.match(/^(.+?)(Container|Page|Wrapper|Form|Component|View|Modal|Dialog|Body|Content|Section|Header|Footer|Root)?$/);
         const coreName = coreNameMatch ? coreNameMatch[1] : name;
         
         // Split core name into keywords
@@ -1099,10 +1108,11 @@ export class PageMapGenerator {
           .split(/\s+/)
           .filter(k => k.length > 1);  // Minimum 2 chars
         
-        // Build a strict search pattern from keywords
-        // e.g., UserSpamReportCompleted -> "userspamreportcompleted" or "user-spam-report-completed"
+        // Build search patterns
         const strictPattern = coreName.toLowerCase();
         const kebabPattern = rawKeywords.join('-').toLowerCase();
+        // First significant keyword (for broader matching)
+        const primaryKeyword = rawKeywords.find(k => k.length >= 4)?.toLowerCase() || '';
 
         // Priority 1: Exact match in operation name
         let relatedOps = graphqlOps.filter(op => {
@@ -1113,27 +1123,47 @@ export class PageMapGenerator {
                  strictPattern.includes(opNameLower);
         });
 
-        // Priority 2: Match in usedIn file path (strict - must contain core name)
+        // Priority 2: Match in usedIn file path
         if (relatedOps.length === 0) {
           relatedOps = graphqlOps.filter(op => 
             op.usedIn?.some(f => {
               const fLower = f.toLowerCase();
-              // File path should contain the kebab-case or camelCase version
-              return fLower.includes(kebabPattern) || fLower.includes(strictPattern);
+              return fLower.includes(kebabPattern) || fLower.includes(strictPattern) ||
+                     (primaryKeyword && fLower.includes(primaryKeyword));
             })
           );
         }
 
-        // Priority 3: Multiple keyword match (at least 2 significant keywords must match)
+        // Priority 3: Primary keyword in operation name (longer keywords only)
+        if (relatedOps.length === 0 && primaryKeyword && primaryKeyword.length >= 5) {
+          relatedOps = graphqlOps.filter(op => {
+            const opLower = op.name.toLowerCase();
+            return opLower.includes(primaryKeyword);
+          });
+        }
+
+        // Priority 4: Multiple keyword match (at least 2 significant keywords must match)
         if (relatedOps.length === 0 && rawKeywords.length >= 2) {
           const significantKeywords = rawKeywords.filter(k => k.length >= 3);
           if (significantKeywords.length >= 2) {
             relatedOps = graphqlOps.filter(op => {
               const opLower = op.name.toLowerCase();
-              // At least 2 keywords must match
               const matchCount = significantKeywords.filter(k => opLower.includes(k.toLowerCase())).length;
               return matchCount >= 2;
             });
+          }
+        }
+        
+        // Priority 5: Check usedIn for any keyword match
+        if (relatedOps.length === 0) {
+          const significantKeywords = rawKeywords.filter(k => k.length >= 4);
+          if (significantKeywords.length > 0) {
+            relatedOps = graphqlOps.filter(op => 
+              op.usedIn?.some(f => {
+                const fLower = f.toLowerCase();
+                return significantKeywords.some(k => fLower.includes(k.toLowerCase()));
+              })
+            );
           }
         }
         
