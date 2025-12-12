@@ -147,6 +147,59 @@ export class RailsMapGenerator {
     let routesDisplayCount = 200;
     let controllersDisplayCount = 50;
     let modelsDisplayCount = 50;
+    
+    // Filtered data cache for click handlers
+    let filteredControllers = [];
+    let filteredModels = [];
+
+    // URL State Management
+    function saveStateToUrl() {
+      const params = new URLSearchParams();
+      params.set('view', currentView);
+      if (!selectedNamespaces.has('all')) {
+        params.set('ns', [...selectedNamespaces].join(','));
+      }
+      if (!selectedMethods.has('all')) {
+        params.set('method', [...selectedMethods].join(','));
+      }
+      if (searchQuery) {
+        params.set('q', searchQuery);
+      }
+      const newUrl = window.location.pathname + '?' + params.toString();
+      window.history.replaceState({}, '', newUrl);
+    }
+
+    function loadStateFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      
+      if (params.has('view')) {
+        currentView = params.get('view');
+        document.querySelectorAll('.stat').forEach(s => {
+          s.classList.toggle('active', s.dataset.view === currentView);
+        });
+      }
+      
+      if (params.has('ns')) {
+        const ns = params.get('ns').split(',').filter(Boolean);
+        if (ns.length > 0) {
+          selectedNamespaces = new Set(ns);
+        }
+      }
+      
+      if (params.has('method')) {
+        const methods = params.get('method').split(',').filter(Boolean);
+        if (methods.length > 0) {
+          selectedMethods = new Set(methods);
+        }
+      }
+      
+      if (params.has('q')) {
+        searchQuery = params.get('q');
+        searchBox.value = searchQuery;
+      }
+      
+      updateFilterUI();
+    }
 
     // DOM Elements
     const mainPanel = document.getElementById('mainPanel');
@@ -159,6 +212,7 @@ export class RailsMapGenerator {
         document.querySelectorAll('.stat').forEach(s => s.classList.remove('active'));
         stat.classList.add('active');
         currentView = stat.dataset.view;
+        saveStateToUrl();
         renderMainPanel();
       });
     });
@@ -186,6 +240,7 @@ export class RailsMapGenerator {
         }
         updateFilterUI();
         routesDisplayCount = 200;
+        saveStateToUrl();
         renderMainPanel();
       });
     });
@@ -212,6 +267,7 @@ export class RailsMapGenerator {
         }
         updateFilterUI();
         routesDisplayCount = 200;
+        saveStateToUrl();
         renderMainPanel();
       });
     });
@@ -228,6 +284,7 @@ export class RailsMapGenerator {
 
     searchBox.addEventListener('input', (e) => {
       searchQuery = e.target.value.toLowerCase();
+      saveStateToUrl();
       renderMainPanel();
     });
 
@@ -312,23 +369,26 @@ export class RailsMapGenerator {
     };
 
     function renderControllersView() {
-      let filtered = controllers;
+      filteredControllers = controllers;
       if (searchQuery) {
-        filtered = controllers.filter(c => 
+        filteredControllers = controllers.filter(c => 
           c.className.toLowerCase().includes(searchQuery) ||
           c.actions.some(a => a.name.toLowerCase().includes(searchQuery))
         );
       }
       if (!selectedNamespaces.has('all')) {
-        filtered = filtered.filter(c => selectedNamespaces.has(c.namespace || ''));
+        filteredControllers = filteredControllers.filter(c => selectedNamespaces.has(c.namespace || ''));
       }
+      const displayed = filteredControllers.slice(0, controllersDisplayCount);
+      const hasMore = filteredControllers.length > controllersDisplayCount;
 
       return \`
         <div class="panel-header">
-          <div class="panel-title">Controllers (\${filtered.length})</div>
+          <div class="panel-title">Controllers</div>
+          <div class="panel-count">\${Math.min(controllersDisplayCount, filteredControllers.length)} / \${filteredControllers.length}</div>
         </div>
         <div>
-          \${filtered.slice(0, 50).map((ctrl, idx) => \`
+          \${displayed.map((ctrl, idx) => \`
             <div class="controller-card" data-type="controller" data-index="\${idx}">
               <div class="controller-header">
                 <div>
@@ -350,23 +410,34 @@ export class RailsMapGenerator {
             </div>
           \`).join('')}
         </div>
+        \${hasMore ? \`
+          <div class="show-more-container">
+            <button class="show-more-btn" onclick="loadMoreControllers()">Show More (+50)</button>
+            <span class="show-more-count">\${controllersDisplayCount} / \${filteredControllers.length}</span>
+          </div>
+        \` : ''}
       \`;
     }
 
+    window.loadMoreControllers = function() {
+      controllersDisplayCount += 50;
+      renderMainPanel();
+    };
+
     function renderModelsView() {
-      let filtered = models;
+      filteredModels = models;
       if (searchQuery) {
-        filtered = models.filter(m => 
+        filteredModels = models.filter(m => 
           m.className.toLowerCase().includes(searchQuery)
         );
       }
-      const displayed = filtered.slice(0, modelsDisplayCount);
-      const hasMore = filtered.length > modelsDisplayCount;
+      const displayed = filteredModels.slice(0, modelsDisplayCount);
+      const hasMore = filteredModels.length > modelsDisplayCount;
 
       return \`
         <div class="panel-header">
           <div class="panel-title">Models</div>
-          <div class="panel-count">\${Math.min(modelsDisplayCount, filtered.length)} / \${filtered.length}</div>
+          <div class="panel-count">\${Math.min(modelsDisplayCount, filteredModels.length)} / \${filteredModels.length}</div>
         </div>
         <div>
           \${displayed.map((model, idx) => \`
@@ -386,7 +457,7 @@ export class RailsMapGenerator {
         \${hasMore ? \`
           <div class="show-more-container">
             <button class="show-more-btn" onclick="loadMoreModels()">Show More (+50)</button>
-            <span class="show-more-count">\${modelsDisplayCount} / \${filtered.length}</span>
+            <span class="show-more-count">\${modelsDisplayCount} / \${filteredModels.length}</span>
           </div>
         \` : ''}
       \`;
@@ -503,14 +574,20 @@ export class RailsMapGenerator {
             card.classList.toggle('expanded');
           }
           const idx = parseInt(card.dataset.index);
-          showControllerDetail(controllers[idx]);
+          // Use filtered array to get correct item
+          if (filteredControllers[idx]) {
+            showControllerDetail(filteredControllers[idx]);
+          }
         });
       });
 
       document.querySelectorAll('[data-type="model"]').forEach(card => {
         card.addEventListener('click', () => {
           const idx = parseInt(card.dataset.index);
-          showModelDetail(models[idx]);
+          // Use filtered array to get correct item
+          if (filteredModels[idx]) {
+            showModelDetail(filteredModels[idx]);
+          }
         });
       });
     }
@@ -659,7 +736,8 @@ export class RailsMapGenerator {
     }
 
     // Initialize
-    attachEventListeners();
+    loadStateFromUrl();
+    renderMainPanel();
   </script>
 </body>
 </html>`;
