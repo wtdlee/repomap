@@ -270,12 +270,21 @@ export class DocServer {
   </script>
   <style>
     :root {
-      --bg-primary: #ffffff;
-      --bg-secondary: #f5f5f5;
-      --text-primary: #1a1a1a;
-      --text-secondary: #666666;
-      --accent: #0066cc;
+      /* Header - dark theme matching /page-map */
+      --header-bg: #1e293b;
+      --header-border: #475569;
+      --header-text: #f8fafc;
+      --header-text2: #94a3b8;
+      --header-bg-hover: #334155;
+      
+      /* Content - light theme for readability */
+      --bg: #f5f5f5;
+      --bg2: #ffffff;
+      --bg3: #f1f5f9;
+      --text: #1a1a1a;
+      --text2: #666666;
       --border: #e0e0e0;
+      --accent: #3b82f6;
     }
 
     * {
@@ -285,18 +294,16 @@ export class DocServer {
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg-secondary);
-      color: var(--text-primary);
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
       line-height: 1.6;
     }
-
-    /* Container and sidebar styles moved to top-header section */
 
     .sidebar nav a {
       display: block;
       padding: 8px 12px;
-      color: var(--text-secondary);
+      color: var(--text2);
       text-decoration: none;
       border-radius: 6px;
       margin-bottom: 4px;
@@ -304,7 +311,7 @@ export class DocServer {
     }
 
     .sidebar nav a:hover {
-      background: var(--bg-secondary);
+      background: var(--bg3);
       color: var(--accent);
     }
 
@@ -314,49 +321,32 @@ export class DocServer {
     }
 
     .nav-group {
-      margin-bottom: 8px;
+      margin-bottom: 16px;
     }
 
     .nav-group-title {
       font-weight: 600;
-      font-size: 11px;
+      font-size: 10px;
       text-transform: uppercase;
-      color: var(--text-secondary);
-      letter-spacing: 0.5px;
+      color: var(--text2);
+      letter-spacing: 1px;
       display: block;
-      padding: 8px 12px 4px;
+      padding: 8px 0 4px;
+      margin-bottom: 4px;
     }
 
     .nav-subitems {
-      margin-left: 16px;
-      border-left: 2px solid var(--border);
-      padding-left: 8px;
+      margin-left: 0;
+      border-left: none;
+      padding-left: 0;
     }
 
     .nav-subitems a {
-      font-size: 13px;
-    }
-
-    .sidebar nav a.highlight {
-      background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-      color: white;
-      font-weight: 600;
-      margin-top: 16px;
-    }
-
-    .sidebar nav a.highlight:hover {
-      opacity: 0.9;
-    }
-
-    .main {
-      flex: 1;
-      padding: 32px;
-      min-width: 0; /* Allow flex shrinking */
-      max-width: calc(100vw - 280px);
+      font-size: 12px;
     }
 
     .content {
-      background: var(--bg-primary);
+      background: var(--bg2);
       padding: 32px;
       border-radius: 12px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.05);
@@ -378,7 +368,7 @@ export class DocServer {
       font-weight: 600;
       margin-top: 32px;
       margin-bottom: 14px;
-      color: var(--text-primary);
+      color: var(--text);
       padding-bottom: 8px;
       border-bottom: 1px solid var(--border);
     }
@@ -388,7 +378,7 @@ export class DocServer {
       font-weight: 600;
       margin-top: 20px;
       margin-bottom: 10px;
-      color: var(--text-primary);
+      color: var(--text);
     }
 
     .content h4 {
@@ -396,7 +386,7 @@ export class DocServer {
       font-weight: 600;
       margin-top: 16px;
       margin-bottom: 8px;
-      color: var(--text-secondary);
+      color: var(--text2);
     }
 
     .content p {
@@ -471,7 +461,7 @@ export class DocServer {
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      color: var(--text-secondary);
+      color: var(--text2);
     }
 
     .content tr:hover td {
@@ -484,7 +474,7 @@ export class DocServer {
       margin: 12px 0;
       background: #f8fafc;
       border-radius: 0 6px 6px 0;
-      color: var(--text-secondary);
+      color: var(--text2);
       font-size: 14px;
     }
 
@@ -795,11 +785,11 @@ export class DocServer {
       background: #0052a3;
     }
     
-    /* Top header - exactly matching page-map style */
+    /* Header - matching /page-map exactly */
     .header {
-      background: #1e293b;
+      background: var(--header-bg);
       padding: 12px 20px;
-      border-bottom: 1px solid #475569;
+      border-bottom: 1px solid var(--header-border);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -809,7 +799,7 @@ export class DocServer {
     }
     .header h1 { 
       font-size: 18px; 
-      color: #f8fafc;
+      color: var(--header-text);
       cursor: pointer;
     }
     .header-left {
@@ -819,28 +809,32 @@ export class DocServer {
     }
     .nav-link {
       padding: 6px 12px;
-      color: #94a3b8;
+      color: var(--header-text2);
       text-decoration: none;
       font-size: 13px;
       border-radius: 4px;
       transition: all 0.15s;
     }
-    .nav-link:hover { background: #334155; color: #f8fafc; }
-    .nav-link.active { background: #3b82f6; color: white; }
+    .nav-link:hover { background: var(--header-bg-hover); color: var(--header-text); }
+    .nav-link.active { background: var(--accent); color: white; }
     
-    .container {
+    /* Layout - matching /page-map exactly */
+    .main {
       display: flex;
-      min-height: calc(100vh - 54px);
+      height: calc(100vh - 54px);
     }
     
     .sidebar {
       width: 280px;
-      background: var(--bg-primary);
+      background: var(--bg2);
       border-right: 1px solid var(--border);
-      padding: 24px;
-      position: sticky;
-      top: 54px;
-      height: calc(100vh - 54px);
+      padding: 16px;
+      overflow-y: auto;
+    }
+    
+    .content-area {
+      flex: 1;
+      padding: 32px;
       overflow-y: auto;
     }
   </style>
@@ -856,7 +850,7 @@ export class DocServer {
       </nav>
     </div>
   </header>
-  <div class="container">
+  <div class="main">
     <aside class="sidebar">
       <nav>
         <div class="nav-group">
@@ -884,11 +878,11 @@ export class DocServer {
       </nav>
       <button class="regenerate-btn" onclick="regenerate()">Regenerate</button>
     </aside>
-    <main class="main">
+    <div class="content-area">
       <div class="content">
         ${content}
       </div>
-    </main>
+    </div>
   </div>
   <div class="live-indicator">Live</div>
   
