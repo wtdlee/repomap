@@ -147,7 +147,9 @@ export class DocServer {
 
     // Markdown pages - specific path (Express 5 compatible)
     this.app.get('/docs/*path', async (req, res) => {
-      const pagePath = (req.params as { path?: string }).path || 'index';
+      const pathParam = (req.params as { path?: string | string[] }).path;
+      // Express 5 can return array for wildcard params
+      const pagePath = Array.isArray(pathParam) ? pathParam.join('/') : pathParam || 'index';
       res.send(await this.renderPage(pagePath));
     });
 
