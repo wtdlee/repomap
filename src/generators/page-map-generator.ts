@@ -1001,12 +1001,17 @@ export class PageMapGenerator {
       container.innerHTML = html;
     };
     
-    function showDataDetail(name) {
+    function showDataDetail(rawName) {
+      // Clean up name: remove "→ " prefix and " (ComponentName)" suffix
+      const name = rawName
+        .replace(/^[→\\->\\s]+/, '')
+        .replace(/\\s*\\([^)]+\\)\\s*$/, '');
+      
       const op = gqlMap.get(name);
       let html = '';
       
       // Check if this is a known component
-      const comp = compMap.get(name);
+      const comp = compMap.get(rawName) || compMap.get(name);
       
       if (op) {
         // Found GraphQL operation
@@ -1134,9 +1139,14 @@ export class PageMapGenerator {
           html += '</div>';
         }
       } else {
+        // Clean up the name: remove "→ " prefix and " (ComponentName)" suffix
+        let cleanName = name
+          .replace(/^[→\\->\\s]+/, '')  // Remove arrow prefix
+          .replace(/\\s*\\([^)]+\\)\\s*$/, '');  // Remove parenthetical component reference
+        
         // Extract the core component name - remove ALL common suffixes iteratively
         const suffixes = ['Container', 'Page', 'Wrapper', 'Form', 'Component', 'View', 'Modal', 'Dialog', 'Body', 'Content', 'Section', 'Header', 'Footer', 'Root', 'Screen', 'Panel'];
-        let coreName = name;
+        let coreName = cleanName;
         let changed = true;
         while (changed) {
           changed = false;
@@ -1153,7 +1163,7 @@ export class PageMapGenerator {
         const rawKeywords = coreName
           .replace(/([a-z])([A-Z])/g, '$1 $2')  // camelCase split
           .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')  // consecutive caps
-          .split(/\s+/)
+          .split(/\\s+/)
           .filter(k => k.length > 1);  // Minimum 2 chars
         
         // Build search patterns

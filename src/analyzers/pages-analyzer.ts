@@ -671,7 +671,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
       // If this is an index file, follow re-exports to find the actual component file
       if (componentFilePath.endsWith('index.tsx') || componentFilePath.endsWith('index.ts')) {
-        const actualFile = this.followReExport(componentFile, componentName, path.dirname(componentFilePath));
+        const actualFile = this.followReExport(
+          componentFile,
+          componentName,
+          path.dirname(componentFilePath)
+        );
         if (actualFile) {
           componentFile = actualFile;
         }
@@ -765,7 +769,10 @@ export class PagesAnalyzer extends BaseAnalyzer {
       for (const exportDecl of indexFile.getExportDeclarations()) {
         const namedExports = exportDecl.getNamedExports();
         for (const named of namedExports) {
-          if (named.getName() === componentName || named.getAliasNode()?.getText() === componentName) {
+          if (
+            named.getName() === componentName ||
+            named.getAliasNode()?.getText() === componentName
+          ) {
             // Found the re-export, get the module specifier
             const moduleSpec = exportDecl.getModuleSpecifierValue();
             if (moduleSpec) {
@@ -798,10 +805,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
           const moduleSpec = exportDecl.getModuleSpecifierValue();
           if (moduleSpec) {
             const resolvedPath = path.resolve(indexDir, moduleSpec);
-            const possiblePaths = [
-              `${resolvedPath}.tsx`,
-              `${resolvedPath}.ts`,
-            ];
+            const possiblePaths = [`${resolvedPath}.tsx`, `${resolvedPath}.ts`];
 
             for (const tryPath of possiblePaths) {
               try {
