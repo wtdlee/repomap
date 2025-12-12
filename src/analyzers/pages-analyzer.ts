@@ -814,8 +814,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
       visited.add(cacheKey);
 
       // Check cache
-      if (this.symbolTraceCache.has(cacheKey)) {
-        return this.symbolTraceCache.get(cacheKey)!;
+      const cachedResult = this.symbolTraceCache.get(cacheKey);
+      if (cachedResult !== undefined) {
+        return cachedResult;
       }
 
       // Try different file extensions and index files
@@ -1063,8 +1064,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
       visited.add(cacheKey);
 
       // Check cache
-      if (this.symbolTraceCache.has(cacheKey)) {
-        return this.symbolTraceCache.get(cacheKey)!;
+      const cachedHookResult = this.symbolTraceCache.get(cacheKey);
+      if (cachedHookResult !== undefined) {
+        return cachedHookResult;
       }
 
       const possiblePaths = [
@@ -1522,14 +1524,16 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     // Direct lookup
-    if (this.codegenMap.has(documentName)) {
-      return this.codegenMap.get(documentName)!;
+    const directResult = this.codegenMap.get(documentName);
+    if (directResult !== undefined) {
+      return directResult;
     }
 
     // Try with Document suffix
     const withSuffix = documentName.endsWith('Document') ? documentName : documentName + 'Document';
-    if (this.codegenMap.has(withSuffix)) {
-      return this.codegenMap.get(withSuffix)!;
+    const suffixResult = this.codegenMap.get(withSuffix);
+    if (suffixResult !== undefined) {
+      return suffixResult;
     }
 
     return null;

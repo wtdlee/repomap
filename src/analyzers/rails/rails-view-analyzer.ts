@@ -213,7 +213,7 @@ function extractPartials(content: string, template: 'haml' | 'erb' | 'other'): s
   return [...new Set(partials)];
 }
 
-function extractHelpers(content: string, template: 'haml' | 'erb' | 'other'): string[] {
+function extractHelpers(content: string, _template: 'haml' | 'erb' | 'other'): string[] {
   const helpers: string[] = [];
 
   // Common helpers: link_to, form_for, image_tag, etc.
@@ -230,7 +230,7 @@ function extractHelpers(content: string, template: 'haml' | 'erb' | 'other'): st
 
 function extractReactComponents(
   content: string,
-  template: 'haml' | 'erb' | 'other'
+  _template: 'haml' | 'erb' | 'other'
 ): ReactComponentRef[] {
   const components: ReactComponentRef[] = [];
 

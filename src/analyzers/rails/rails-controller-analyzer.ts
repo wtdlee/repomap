@@ -13,7 +13,6 @@ import {
   getSuperclass,
   getMethodName,
   getMethodParameters,
-  getChildByType,
   getChildrenByType,
   type SyntaxNode,
 } from './ruby-parser.js';
@@ -124,7 +123,7 @@ export class RailsControllerAnalyzer {
     }
 
     const namespaces = [
-      ...new Set(this.controllers.filter((c) => c.namespace).map((c) => c.namespace!)),
+      ...new Set(this.controllers.filter((c) => c.namespace).map((c) => c.namespace as string)),
     ];
 
     const concerns = [...new Set(this.controllers.flatMap((c) => c.concerns))];
@@ -229,7 +228,7 @@ export class RailsControllerAnalyzer {
     }
 
     // Find all method definitions
-    const methods = findNodes(classNode, 'method');
+    const _methods = findNodes(classNode, 'method');
     let currentVisibility: ActionInfo['visibility'] = 'public';
 
     // Track visibility changes through identifiers
@@ -431,12 +430,14 @@ export class RailsControllerAnalyzer {
         assignedType = `Service:${serviceMatch[1]}`;
       }
 
-      action.instanceVarAssignments!.push({
-        name: varName,
-        assignedType,
-        assignedValue:
-          assignedValue.length > 60 ? assignedValue.slice(0, 57) + '...' : assignedValue,
-      });
+      if (action.instanceVarAssignments) {
+        action.instanceVarAssignments.push({
+          name: varName,
+          assignedType,
+          assignedValue:
+            assignedValue.length > 60 ? assignedValue.slice(0, 57) + '...' : assignedValue,
+        });
+      }
     }
 
     // Check render types

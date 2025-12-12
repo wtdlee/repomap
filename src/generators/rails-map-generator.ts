@@ -9,9 +9,6 @@ import {
   analyzeRailsApp,
   type RailsAnalysisResult,
   type RailsRoute,
-  type ControllerInfo,
-  type ModelInfo,
-  type AssociationInfo,
 } from '../analyzers/rails/index.js';
 
 export interface RailsMapOptions {

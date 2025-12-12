@@ -401,7 +401,6 @@ program
       }
 
       // Dynamically import Rails analyzer
-      const { analyzeRailsApp } = await import('./analyzers/rails/index.js');
       const { RailsMapGenerator } = await import('./generators/rails-map-generator.js');
 
       // Generate map

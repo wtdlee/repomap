@@ -81,27 +81,27 @@ export class AnalysisCache {
   async computeFilesHash(filePaths: string[]): Promise<string> {
     // Sort files for consistent ordering
     const sortedFiles = [...filePaths].sort();
-    
+
     // Use a deterministic sample: first 50 + last 50 files
     // This ensures consistent hash while keeping it fast
     const sampleSize = 50;
     let sampleFiles: string[];
-    
+
     if (sortedFiles.length <= sampleSize * 2) {
       sampleFiles = sortedFiles;
     } else {
-      sampleFiles = [
-        ...sortedFiles.slice(0, sampleSize),
-        ...sortedFiles.slice(-sampleSize),
-      ];
+      sampleFiles = [...sortedFiles.slice(0, sampleSize), ...sortedFiles.slice(-sampleSize)];
     }
-    
+
     const hashes = await Promise.all(sampleFiles.map((f) => this.computeFileHash(f)));
-    
+
     // Include total file count in hash to detect added/removed files
     const countHash = crypto.createHash('md5').update(String(sortedFiles.length)).digest('hex');
-    
-    return crypto.createHash('md5').update(hashes.join('') + countHash).digest('hex');
+
+    return crypto
+      .createHash('md5')
+      .update(hashes.join('') + countHash)
+      .digest('hex');
   }
 
   /**

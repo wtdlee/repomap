@@ -13,7 +13,6 @@ import {
   getSuperclass,
   getMethodName,
   getMethodParameters,
-  getChildrenByType,
   type SyntaxNode,
 } from './ruby-parser.js';
 
@@ -85,7 +84,7 @@ export class RailsGrpcAnalyzer {
     }
 
     const namespaces = [
-      ...new Set(this.services.filter((s) => s.namespace).map((s) => s.namespace!)),
+      ...new Set(this.services.filter((s) => s.namespace).map((s) => s.namespace as string)),
     ];
 
     const totalRpcs = this.services.reduce((sum, s) => sum + s.rpcs.length, 0);
@@ -157,7 +156,7 @@ export class RailsGrpcAnalyzer {
     }
 
     // Find method definitions (RPC methods)
-    const methods = findNodes(classNode, 'method');
+    const _methods = findNodes(classNode, 'method');
     let currentVisibility: 'public' | 'private' | 'protected' = 'public';
 
     const bodyStatement = classNode.childForFieldName('body');
@@ -212,17 +211,10 @@ export class RailsGrpcAnalyzer {
     if (!name) return null;
 
     // Skip common non-RPC methods
-    const skipMethods = [
-      'initialize',
-      'to_s',
-      'inspect',
-      'call',
-      'perform',
-      'execute',
-    ];
+    const skipMethods = ['initialize', 'to_s', 'inspect', 'call', 'perform', 'execute'];
     if (skipMethods.includes(name)) return null;
 
-    const params = getMethodParameters(methodNode);
+    const _params = getMethodParameters(methodNode);
     const methodBody = methodNode.text;
 
     const rpc: RpcMethodInfo = {
@@ -325,7 +317,9 @@ async function main() {
   for (const service of result.services.slice(0, 15)) {
     console.log(`\n  📡 ${service.className} (${service.filePath})`);
     console.log(`     Proto: ${service.protoService || 'unknown'}`);
-    console.log(`     RPCs (${service.rpcs.length}): ${service.rpcs.map((r) => r.name).join(', ')}`);
+    console.log(
+      `     RPCs (${service.rpcs.length}): ${service.rpcs.map((r) => r.name).join(', ')}`
+    );
     if (service.policies.length > 0) {
       console.log(`     Policies: ${service.policies.join(', ')}`);
     }
@@ -348,4 +342,3 @@ const isMainModule = import.meta.url === `file://${process.argv[1]}`;
 if (isMainModule) {
   main().catch(console.error);
 }
-
