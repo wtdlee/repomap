@@ -179,7 +179,8 @@ export class PageMapGenerator {
     
     .header {
       background: var(--bg2);
-      padding: 12px 20px;
+      padding: 0 20px;
+      height: 54px;
       border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
@@ -192,6 +193,9 @@ export class PageMapGenerator {
     
     .nav-link {
       padding: 6px 12px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
       color: var(--text2);
       text-decoration: none;
       font-size: 13px;

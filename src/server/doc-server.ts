@@ -613,13 +613,14 @@ export class DocServer {
     }
 
     .mermaid-controls button {
-      background: var(--bg-primary);
+      background: #ffffff;
       border: 1px solid var(--border);
       border-radius: 4px;
       padding: 6px 10px;
       cursor: pointer;
       font-size: 14px;
       transition: all 0.2s;
+      color: #1a1a1a;
     }
 
     .mermaid-controls button:hover {
@@ -679,7 +680,7 @@ export class DocServer {
     }
 
     .detail-modal-content {
-      background: var(--bg-primary);
+      background: #ffffff;
       border-radius: 12px;
       padding: 24px;
       max-width: 600px;
@@ -687,6 +688,7 @@ export class DocServer {
       max-height: 80vh;
       overflow-y: auto;
       box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      color: #1a1a1a;
     }
 
     .detail-modal-header {
@@ -788,7 +790,8 @@ export class DocServer {
     /* Header - matching /page-map exactly */
     .header {
       background: var(--header-bg);
-      padding: 12px 20px;
+      padding: 0 20px;
+      height: 54px;
       border-bottom: 1px solid var(--header-border);
       display: flex;
       justify-content: space-between;
@@ -803,6 +806,9 @@ export class DocServer {
     }
     .nav-link {
       padding: 6px 12px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
       color: var(--header-text2);
       text-decoration: none;
       font-size: 13px;
