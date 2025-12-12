@@ -1,5 +1,20 @@
 # @wtdlee/repomap
 
+## 0.3.2
+
+### Patch Changes
+
+- 87d03ab: Fix Express 5 route pattern compatibility
+  - Update wildcard route `/docs/*` to Express 5 syntax `/docs/*path`
+  - Fixes "Missing parameter name" error when starting server
+
+- 87d03ab: Refactor inline styles to CSS utility classes for better maintainability
+  - Add 50+ reusable CSS utility classes to common.css
+  - Convert inline styles to class-based styling in page-map-generator
+  - Improve tag color contrast for better readability
+  - Add semantic class names: `.tag-*`, `.text-*`, `.hint`, `.code-block`, `.detail-item`, etc.
+  - Reduce code duplication and improve style consistency
+
 ## 0.3.1
 
 ### Patch Changes
