@@ -1,6 +1,6 @@
-# repomap
+# @wtdlee/repomap
 
-[![npm version](https://badge.fury.io/js/repomap.svg)](https://badge.fury.io/js/repomap)
+[![npm version](https://badge.fury.io/js/@wtdlee%2Frepomap.svg)](https://www.npmjs.com/package/@wtdlee/repomap)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Interactive documentation generator for code repositories. Visualize pages, components, routes, and data flows with an intuitive web interface.
@@ -36,13 +36,13 @@ Interactive documentation generator for code repositories. Visualize pages, comp
 
 ```bash
 # Global installation
-npm install -g repomap
+npm install -g @wtdlee/repomap
 
 # Or use directly with npx
-npx repomap serve
+npx @wtdlee/repomap serve
 
 # Or install as project dependency
-npm install repomap
+npm install @wtdlee/repomap
 ```
 
 ## Quick Start
@@ -54,7 +54,7 @@ npm install repomap
 cd my-project
 
 # Start the documentation server (auto-detects project type)
-npx repomap serve
+npx @wtdlee/repomap serve
 
 # Open http://localhost:3030
 ```
@@ -105,10 +105,10 @@ Generate static documentation and deploy to GitHub Pages:
 
 ```bash
 # Generate static HTML files
-npx repomap generate --static --output ./docs
+npx @wtdlee/repomap generate --static --output ./docs
 
 # In CI mode (minimal output)
-npx repomap generate --static --ci --output ./docs
+npx @wtdlee/repomap generate --static --ci --output ./docs
 ```
 
 Example GitHub Actions workflow (`.github/workflows/docs.yml`):
@@ -133,7 +133,7 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
-      - run: npx repomap generate --static --ci --output ./docs
+      - run: npx @wtdlee/repomap generate --static --ci --output ./docs
       - uses: actions/upload-pages-artifact@v3
         with:
           path: './docs'
@@ -170,7 +170,7 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
-      - run: npx repomap generate --static --ci --format json --output ./docs
+      - run: npx @wtdlee/repomap generate --static --ci --format json --output ./docs
       - name: Post Comment
         uses: actions/github-script@v7
         with:
@@ -202,8 +202,8 @@ See more examples in [`examples/ci/`](./examples/ci/)
 ### Basic Usage
 
 ```typescript
-import { DocGeneratorEngine, DocServer } from "repomap";
-import type { DocGeneratorConfig, DocumentationReport } from "repomap";
+import { DocGeneratorEngine, DocServer } from "@wtdlee/repomap";
+import type { DocGeneratorConfig, DocumentationReport } from "@wtdlee/repomap";
 
 const config: DocGeneratorConfig = {
   outputDir: "./.repomap",
@@ -259,7 +259,7 @@ console.log(`Total pages: ${report.repositories[0].summary.totalPages}`);
 ### Start Documentation Server
 
 ```typescript
-import { DocServer } from "repomap";
+import { DocServer } from "@wtdlee/repomap";
 
 const server = new DocServer(config, 3030, { noCache: false });
 await server.start(true); // true = open browser automatically
@@ -269,16 +269,16 @@ await server.start(true); // true = open browser automatically
 
 ```typescript
 // Import specific modules
-import { PagesAnalyzer, GraphQLAnalyzer } from "repomap/analyzers";
-import { PageMapGenerator, MermaidGenerator } from "repomap/generators";
-import { DocServer } from "repomap/server";
-import type { PageInfo, GraphQLOperation } from "repomap/types";
+import { PagesAnalyzer, GraphQLAnalyzer } from "@wtdlee/repomap/analyzers";
+import { PageMapGenerator, MermaidGenerator } from "@wtdlee/repomap/generators";
+import { DocServer } from "@wtdlee/repomap/server";
+import type { PageInfo, GraphQLOperation } from "@wtdlee/repomap/types";
 ```
 
 ### Analyzing Rails Applications
 
 ```typescript
-import { RailsMapGenerator } from "repomap";
+import { RailsMapGenerator } from "@wtdlee/repomap";
 
 const generator = new RailsMapGenerator("/path/to/rails-app");
 await generator.generate({
@@ -292,7 +292,7 @@ await generator.generate({
 Create `repomap.config.ts` in your project root:
 
 ```typescript
-import type { DocGeneratorConfig } from "repomap";
+import type { DocGeneratorConfig } from "@wtdlee/repomap";
 
 export const config: DocGeneratorConfig = {
   outputDir: "./.repomap",
