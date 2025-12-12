@@ -161,7 +161,17 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       type = 'page';
     } else if (name.includes('Container') || name.includes('Provider')) {
       type = 'container';
-    } else if (name.includes('Layout')) {
+    } else if (
+      // Layout detection - various naming patterns
+      name.includes('Layout') ||
+      name.includes('Shell') ||
+      name.includes('Wrapper') ||
+      name.includes('Frame') ||
+      name.includes('Scaffold') ||
+      // Path-based layout detection
+      filePath.includes('/layouts/') ||
+      filePath.includes('/layout/')
+    ) {
       type = 'layout';
     }
 
