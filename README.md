@@ -517,11 +517,4 @@ MIT
 
 ## Changelog
 
-### 0.1.0
-- Initial release
-- Page map visualization for Next.js/React
-- Rails application analysis (routes, controllers, models, views)
-- GraphQL operations detection and visualization
-- Data flow analysis
-- Interactive web interface with live reload
-- Multi-repository support
+See [GitHub Releases](https://github.com/wtdlee/repomap/releases) for a detailed changelog.

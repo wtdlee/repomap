@@ -1,6 +1,10 @@
 # Source (we publish dist)
 src/
 
+# Source maps (not needed for production)
+**/*.js.map
+**/*.d.ts.map
+
 # Config files
 tsconfig.json
 eslint.config.js
