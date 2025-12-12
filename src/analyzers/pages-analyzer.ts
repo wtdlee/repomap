@@ -515,11 +515,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
         const namedImports = imp.getNamedImports();
         for (const named of namedImports) {
           const name = named.getName();
-          // Detect PascalCase component names that likely contain data fetching
+          // Detect PascalCase component names that might contain data fetching
           if (this.isComponentName(name)) {
             dataFetching.push({
-              type: 'useQuery',
-              operationName: `→ ${name}`,
+              type: 'component',
+              operationName: name,
               variables: [],
             });
           }
@@ -531,8 +531,8 @@ export class PagesAnalyzer extends BaseAnalyzer {
           const name = defaultImport.getText();
           if (this.isComponentName(name)) {
             dataFetching.push({
-              type: 'useQuery',
-              operationName: `→ ${name}`,
+              type: 'component',
+              operationName: name,
               variables: [],
             });
           }

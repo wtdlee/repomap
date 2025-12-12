@@ -586,19 +586,35 @@ export class PageMapGenerator {
           return true;
         });
         
-        dataHtml = '<div class="detail-section"><h4>Data Operations</h4>';
-        uniqueDataFetching.forEach(df => {
-          const rawName = df.operationName || '';
-          // Check if it's a component reference (contains → or starts with special marker)
-          const isComponent = rawName.includes('→') || rawName.includes('\\u2192') || rawName.startsWith('->');
-          const cleanName = rawName.replace(/^[→\\->\\s]+/,'').replace(/^\\u2192\\s*/,'');
-          const isQ = !df.type?.includes('Mutation');
-          const displayName = isComponent ? cleanName + ' (Component)' : cleanName;
-          
-          dataHtml += '<div class="detail-item data-op" onclick="showDataDetail(\\''+cleanName.replace(/'/g, "\\\\'")+'\\')">' +
-            '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'">'+(isQ?'QUERY':'MUTATION')+'</span> '+displayName+'</div>';
-        });
-        dataHtml += '</div>';
+        // Separate actual GraphQL operations from component references
+        const graphqlOps = uniqueDataFetching.filter(df => df.type !== 'component');
+        const componentRefs = uniqueDataFetching.filter(df => df.type === 'component');
+        
+        dataHtml = '';
+        
+        // Show actual GraphQL operations
+        if (graphqlOps.length > 0) {
+          dataHtml += '<div class="detail-section"><h4>Data Operations</h4>';
+          graphqlOps.forEach(df => {
+            const rawName = df.operationName || '';
+            const cleanName = rawName.replace(/^[→\\->\\s]+/,'').replace(/^\\u2192\\s*/,'');
+            const isQ = !df.type?.includes('Mutation');
+            
+            dataHtml += '<div class="detail-item data-op" onclick="showDataDetail(\\''+cleanName.replace(/'/g, "\\\\'")+'\\')">' +
+              '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'">'+(isQ?'QUERY':'MUTATION')+'</span> '+cleanName+'</div>';
+          });
+          dataHtml += '</div>';
+        }
+        
+        // Show component references separately
+        if (componentRefs.length > 0) {
+          dataHtml += '<div class="detail-section"><h4>Used Components</h4>';
+          componentRefs.forEach(df => {
+            const name = df.operationName || '';
+            dataHtml += '<div class="detail-item" style="cursor:default"><span class="tag" style="background:var(--text2);color:var(--bg)">COMPONENT</span> '+name+'</div>';
+          });
+          dataHtml += '</div>';
+        }
       }
       
       const totalRels = (parent ? 1 : 0) + children.length + navLinks.length + sameLayout.length;

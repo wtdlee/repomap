@@ -152,7 +152,7 @@ export interface AuthRequirement {
 }
 
 export interface DataFetchingInfo {
-  type: 'useQuery' | 'useMutation' | 'useLazyQuery' | 'getServerSideProps' | 'getStaticProps';
+  type: 'useQuery' | 'useMutation' | 'useLazyQuery' | 'getServerSideProps' | 'getStaticProps' | 'component';
   operationName: string;
   variables?: string[];
 }
