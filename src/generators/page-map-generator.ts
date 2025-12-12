@@ -31,9 +31,10 @@ export class PageMapGenerator {
 
   generatePageMapHtml(report: DocumentationReport): string {
     const allPages: PageNode[] = [];
-    
+
     // Get repository name for display
-    const repoName = report.repositories[0]?.displayName || report.repositories[0]?.name || 'Repository';
+    const repoName =
+      report.repositories[0]?.displayName || report.repositories[0]?.name || 'Repository';
 
     for (const repoResult of report.repositories) {
       this.graphqlOps.push(...(repoResult.analysis?.graphqlOperations || []));

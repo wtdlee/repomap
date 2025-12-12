@@ -61,7 +61,12 @@ export class DocServer {
       res.send(generator.generatePageMapHtml(this.currentReport));
     });
 
-    // Markdown pages
+    // Markdown pages - index
+    this.app.get('/docs', async (req, res) => {
+      res.send(await this.renderPage('index'));
+    });
+
+    // Markdown pages - specific path
     this.app.get('/docs/*', async (req, res) => {
       const pagePath = (req.params as Record<string, string>)[0] || 'index';
       res.send(await this.renderPage(pagePath));
