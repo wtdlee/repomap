@@ -660,15 +660,41 @@ export class PageMapGenerator {
       
       html += '<div class="detail-section"><h4>By Route Group</h4>';
       Object.keys(groups).sort().forEach(g => {
-        const count = groups[g].length;
-        html += '<div class="detail-item" style="cursor:pointer" onclick="filterByGroup(\\''+g+'\\')"><div class="detail-label">/'+g+'</div>'+count+' pages</div>';
+        const groupPages = groups[g];
+        html += '<div style="margin-bottom:12px">';
+        html += '<div class="detail-item" style="cursor:pointer;background:var(--bg3);border-radius:4px" onclick="toggleGroupList(this)">';
+        html += '<div class="detail-label" style="display:flex;align-items:center;gap:6px"><span class="group-toggle">▸</span>/'+g+'</div>';
+        html += '<span style="color:var(--accent)">'+groupPages.length+' pages</span></div>';
+        html += '<div class="group-page-list" style="display:none;margin-left:16px;margin-top:4px">';
+        groupPages.sort((a,b) => a.path.localeCompare(b.path)).forEach(p => {
+          const isAuth = p.authentication?.required;
+          const isDynamic = p.path.includes('[');
+          html += '<div class="detail-item rel-item" style="cursor:pointer;padding:6px 8px" onclick="event.stopPropagation(); selectPage(\\''+p.path+'\\')">'+
+            '<span style="font-family:monospace;font-size:11px;color:var(--text)">'+p.path+'</span>'+
+            (isAuth ? '<span class="tag tag-auth" style="margin-left:6px;font-size:9px">AUTH</span>' : '')+
+            (isDynamic ? '<span class="tag" style="margin-left:6px;font-size:9px;background:#6366f1">DYNAMIC</span>' : '')+
+            '</div>';
+        });
+        html += '</div></div>';
       });
       html += '</div>';
       
       document.getElementById('detail-title').textContent = 'Pages Overview';
       document.getElementById('detail-body').innerHTML = html;
-      document.getElementById('detail').style.right = '0';
+      document.getElementById('detail').classList.add('open');
     }
+    
+    window.toggleGroupList = function(el) {
+      const list = el.nextElementSibling;
+      const toggle = el.querySelector('.group-toggle');
+      if (list.style.display === 'none') {
+        list.style.display = 'block';
+        toggle.textContent = '▾';
+      } else {
+        list.style.display = 'none';
+        toggle.textContent = '▸';
+      }
+    };
     
     window.filterByGroup = function(group) {
       document.querySelectorAll('.group').forEach(g => {
