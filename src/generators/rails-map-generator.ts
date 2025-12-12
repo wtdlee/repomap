@@ -62,6 +62,11 @@ export class RailsMapGenerator {
 <body>
   <header>
     <h1>🛤️ ${title}</h1>
+    <nav class="header-nav">
+      <a href="/page-map" class="nav-link">Page Map</a>
+      <a href="/rails-map" class="nav-link active">Rails Map</a>
+      <a href="/docs" class="nav-link">Docs</a>
+    </nav>
     <div class="stats-bar">
       <div class="stat active" data-view="routes">
         <div>
@@ -136,9 +141,12 @@ export class RailsMapGenerator {
 
     // State
     let currentView = 'routes';
-    let selectedNamespace = 'all';
-    let selectedMethod = 'all';
+    let selectedNamespaces = new Set(['all']);
+    let selectedMethods = new Set(['all']);
     let searchQuery = '';
+    let routesDisplayCount = 200;
+    let controllersDisplayCount = 50;
+    let modelsDisplayCount = 50;
 
     // DOM Elements
     const mainPanel = document.getElementById('mainPanel');
@@ -155,14 +163,67 @@ export class RailsMapGenerator {
       });
     });
 
-    document.querySelectorAll('.namespace-item').forEach(item => {
-      item.addEventListener('click', () => {
-        document.querySelectorAll('.namespace-item').forEach(i => i.classList.remove('active'));
-        item.classList.add('active');
-        selectedNamespace = item.dataset.namespace;
+    // Namespace filter (multi-select with Ctrl/Cmd)
+    document.querySelectorAll('.namespace-item[data-namespace]').forEach(item => {
+      item.addEventListener('click', (e) => {
+        const ns = item.dataset.namespace;
+        if (e.ctrlKey || e.metaKey) {
+          // Multi-select
+          if (ns === 'all') {
+            selectedNamespaces = new Set(['all']);
+          } else {
+            selectedNamespaces.delete('all');
+            if (selectedNamespaces.has(ns)) {
+              selectedNamespaces.delete(ns);
+              if (selectedNamespaces.size === 0) selectedNamespaces.add('all');
+            } else {
+              selectedNamespaces.add(ns);
+            }
+          }
+        } else {
+          // Single select
+          selectedNamespaces = new Set([ns]);
+        }
+        updateFilterUI();
+        routesDisplayCount = 200;
         renderMainPanel();
       });
     });
+
+    // Method filter (multi-select with Ctrl/Cmd)
+    document.querySelectorAll('.namespace-item[data-method]').forEach(item => {
+      item.addEventListener('click', (e) => {
+        const method = item.dataset.method;
+        if (e.ctrlKey || e.metaKey) {
+          if (selectedMethods.has('all')) {
+            selectedMethods = new Set([method]);
+          } else if (selectedMethods.has(method)) {
+            selectedMethods.delete(method);
+            if (selectedMethods.size === 0) selectedMethods.add('all');
+          } else {
+            selectedMethods.add(method);
+          }
+        } else {
+          if (selectedMethods.has(method) && selectedMethods.size === 1) {
+            selectedMethods = new Set(['all']);
+          } else {
+            selectedMethods = new Set([method]);
+          }
+        }
+        updateFilterUI();
+        routesDisplayCount = 200;
+        renderMainPanel();
+      });
+    });
+
+    function updateFilterUI() {
+      document.querySelectorAll('.namespace-item[data-namespace]').forEach(item => {
+        item.classList.toggle('active', selectedNamespaces.has(item.dataset.namespace));
+      });
+      document.querySelectorAll('.namespace-item[data-method]').forEach(item => {
+        item.classList.toggle('active', selectedMethods.has('all') || selectedMethods.has(item.dataset.method));
+      });
+    }
 
     searchBox.addEventListener('input', (e) => {
       searchQuery = e.target.value.toLowerCase();
@@ -183,6 +244,7 @@ export class RailsMapGenerator {
           break;
         case 'diagram':
           mainPanel.innerHTML = renderDiagramView();
+          setTimeout(loadMermaid, 100);
           break;
       }
       attachEventListeners();
@@ -190,10 +252,16 @@ export class RailsMapGenerator {
 
     function filterRoutes() {
       return routes.filter(route => {
-        if (selectedNamespace !== 'all' && route.namespace !== selectedNamespace) return false;
-        if (selectedMethod !== 'all' && route.method !== selectedMethod) return false;
+        // Namespace filter (multi-select)
+        if (!selectedNamespaces.has('all')) {
+          const routeNs = route.namespace || '';
+          if (!selectedNamespaces.has(routeNs)) return false;
+        }
+        // Method filter (multi-select)
+        if (!selectedMethods.has('all') && !selectedMethods.has(route.method)) return false;
+        // Search filter
         if (searchQuery) {
-          const searchStr = (route.path + route.controller + route.action).toLowerCase();
+          const searchStr = (route.path + route.controller + route.action + (route.namespace || '')).toLowerCase();
           if (!searchStr.includes(searchQuery)) return false;
         }
         return true;
@@ -202,9 +270,13 @@ export class RailsMapGenerator {
 
     function renderRoutesView() {
       const filtered = filterRoutes();
+      const displayed = filtered.slice(0, routesDisplayCount);
+      const hasMore = filtered.length > routesDisplayCount;
+      
       return \`
         <div class="panel-header">
-          <div class="panel-title">Routes (\${filtered.length})</div>
+          <div class="panel-title">Routes</div>
+          <div class="panel-count">\${Math.min(routesDisplayCount, filtered.length)} / \${filtered.length}</div>
         </div>
         <table class="routes-table">
           <thead>
@@ -215,7 +287,7 @@ export class RailsMapGenerator {
             </tr>
           </thead>
           <tbody>
-            \${filtered.slice(0, 200).map((route, idx) => \`
+            \${displayed.map((route, idx) => \`
               <tr data-type="route" data-index="\${idx}">
                 <td><span class="method-badge method-\${route.method}">\${route.method}</span></td>
                 <td class="path-text">\${highlightParams(route.path)}</td>
@@ -224,9 +296,19 @@ export class RailsMapGenerator {
             \`).join('')}
           </tbody>
         </table>
-        \${filtered.length > 200 ? '<p style="padding: 20px; color: var(--text-secondary);">Showing first 200 routes...</p>' : ''}
+        \${hasMore ? \`
+          <div class="show-more-container">
+            <button class="show-more-btn" onclick="loadMoreRoutes()">Show More (+200)</button>
+            <span class="show-more-count">\${routesDisplayCount} / \${filtered.length}</span>
+          </div>
+        \` : ''}
       \`;
     }
+
+    window.loadMoreRoutes = function() {
+      routesDisplayCount += 200;
+      renderMainPanel();
+    };
 
     function renderControllersView() {
       let filtered = controllers;
@@ -277,58 +359,102 @@ export class RailsMapGenerator {
           m.className.toLowerCase().includes(searchQuery)
         );
       }
+      const displayed = filtered.slice(0, modelsDisplayCount);
+      const hasMore = filtered.length > modelsDisplayCount;
 
       return \`
         <div class="panel-header">
-          <div class="panel-title">Models (\${filtered.length})</div>
+          <div class="panel-title">Models</div>
+          <div class="panel-count">\${Math.min(modelsDisplayCount, filtered.length)} / \${filtered.length}</div>
         </div>
         <div>
-          \${filtered.slice(0, 50).map((model, idx) => \`
+          \${displayed.map((model, idx) => \`
             <div class="model-card" data-type="model" data-index="\${idx}">
               <div class="model-name">
-                📦 \${model.className}
+                \${model.className}
                 \${model.concerns.length > 0 ? \`<span class="tag tag-purple">\${model.concerns.length} concerns</span>\` : ''}
               </div>
               <div class="model-stats">
-                <span>📎 \${model.associations.length} associations</span>
-                <span>✓ \${model.validations.length} validations</span>
-                <span>🔄 \${model.callbacks.length} callbacks</span>
+                <span>\${model.associations.length} assoc</span>
+                <span>\${model.validations.length} valid</span>
+                <span>\${model.callbacks.length} callbacks</span>
               </div>
             </div>
           \`).join('')}
         </div>
+        \${hasMore ? \`
+          <div class="show-more-container">
+            <button class="show-more-btn" onclick="loadMoreModels()">Show More (+50)</button>
+            <span class="show-more-count">\${modelsDisplayCount} / \${filtered.length}</span>
+          </div>
+        \` : ''}
       \`;
     }
 
+    window.loadMoreModels = function() {
+      modelsDisplayCount += 50;
+      renderMainPanel();
+    };
+
     function renderDiagramView() {
-      const topModels = models
+      const topModels = [...models]
         .sort((a, b) => b.associations.length - a.associations.length)
         .slice(0, 15);
 
+      const modelNames = new Set(topModels.map(m => m.name || m.className));
       let mermaidCode = 'erDiagram\\n';
+      const addedRelations = new Set();
       
       topModels.forEach(model => {
+        const modelName = (model.name || model.className).replace(/[^a-zA-Z0-9]/g, '_');
         model.associations.forEach(assoc => {
-          const targetModel = assoc.className || capitalize(singularize(assoc.name));
-          if (topModels.some(m => m.name === targetModel || m.className === targetModel)) {
-            const rel = assoc.type === 'belongs_to' ? '||--o{' : 
-                       assoc.type === 'has_one' ? '||--||' : 
-                       '||--o{';
-            mermaidCode += \`  \${model.name} \${rel} \${targetModel} : "\${assoc.type}"\\n\`;
+          let targetModel = assoc.className || capitalize(singularize(assoc.name));
+          targetModel = targetModel.replace(/[^a-zA-Z0-9]/g, '_');
+          
+          if (modelNames.has(assoc.className) || modelNames.has(capitalize(singularize(assoc.name)))) {
+            const relKey = [modelName, targetModel].sort().join('-') + assoc.type;
+            if (!addedRelations.has(relKey)) {
+              addedRelations.add(relKey);
+              const rel = assoc.type === 'belongs_to' ? '||--o{' : 
+                         assoc.type === 'has_one' ? '||--||' : 
+                         '||--o{';
+              mermaidCode += \`  \${modelName} \${rel} \${targetModel} : "\${assoc.type}"\\n\`;
+            }
           }
         });
       });
+
+      // Ensure there's content even if no relations found
+      if (mermaidCode === 'erDiagram\\n') {
+        topModels.slice(0, 5).forEach(model => {
+          const modelName = (model.name || model.className).replace(/[^a-zA-Z0-9]/g, '_');
+          mermaidCode += \`  \${modelName} {\\n    string id\\n  }\\n\`;
+        });
+      }
 
       return \`
         <div class="panel-header">
           <div class="panel-title">Model Relationships (Top 15 by associations)</div>
         </div>
-        <div class="mermaid-container">
-          <pre class="mermaid">\${mermaidCode}</pre>
+        <div class="mermaid-container" id="mermaid-container">
+          <pre class="mermaid" id="mermaid-diagram">\${mermaidCode}</pre>
         </div>
-        <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"><\\/script>
-        <script>mermaid.initialize({startOnLoad: true, theme: 'dark'});<\\/script>
       \`;
+    }
+
+    // Load mermaid dynamically
+    function loadMermaid() {
+      if (window.mermaid) {
+        window.mermaid.contentLoaded();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js';
+      script.onload = () => {
+        window.mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+        window.mermaid.contentLoaded();
+      };
+      document.head.appendChild(script);
     }
 
     function highlightParams(path) {
@@ -533,11 +659,10 @@ export class RailsMapGenerator {
     const sorted = [...namespaces.entries()].sort((a, b) => b[1] - a[1]);
 
     return sorted
-      .slice(0, 20)
       .map(
         ([ns, count]) => `
       <div class="namespace-item" data-namespace="${ns === 'root' ? '' : ns}">
-        <span>📂 ${ns}</span>
+        <span>${ns}</span>
         <span class="namespace-count">${count}</span>
       </div>
     `
