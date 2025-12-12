@@ -888,6 +888,7 @@ export class DocServer {
       <h1 style="cursor:pointer" onclick="location.href='/'">📊 ${this.config.repositories[0]?.displayName || this.config.repositories[0]?.name || 'Repository'}</h1>
       <nav style="display:flex;gap:4px">
         <a href="/page-map" class="nav-link">Page Map</a>
+        ${this.railsAnalysis ? '<a href="/rails-map" class="nav-link">🛤️ Rails Map</a>' : ''}
         <a href="/docs" class="nav-link active">Docs</a>
         <a href="/api/report" class="nav-link" target="_blank">API</a>
       </nav>

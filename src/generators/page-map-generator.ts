@@ -445,6 +445,12 @@ export class PageMapGenerator {
     .usage-name { font-family: monospace; font-weight: 500; word-break: break-all; min-width: 0; }
     .line-num { margin-left: auto; font-size: 10px; color: var(--text2); flex-shrink: 0; }
     
+    .api-item { cursor: pointer; flex-direction: column; align-items: stretch; gap: 2px; }
+    .api-item:hover { background: var(--bg2); }
+    .api-row { display: flex; align-items: center; gap: 8px; }
+    .api-url { font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .api-route { font-size: 9px; color: var(--text2); font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    
     .rel-item {
       background: var(--bg3);
       padding: 8px 10px;
@@ -2482,9 +2488,9 @@ export class PageMapGenerator {
         pageApis.forEach(api => {
           const methodColors = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',DELETE:'#ef4444',PATCH:'#8b5cf6'};
           const color = methodColors[api.method] || '#6b7280';
-          restApiHtml += '<div class="detail-item" style="cursor:pointer" onclick="event.stopPropagation(); showApiDetail(\\''+api.id.replace(/'/g, "\\\\'")+'\\')">' +
-            '<span class="tag" style="background:'+color+';color:white">'+api.method+'</span> ' +
-            '<span style="font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+api.url+'</span>' +
+          restApiHtml += '<div class="detail-item api-item" onclick="event.stopPropagation(); showApiDetail(\\''+api.id.replace(/'/g, "\\\\'")+'\\')">' +
+            '<div class="api-row"><span class="tag" style="background:'+color+'">'+api.method+'</span><span class="api-url">'+api.url+'</span></div>' +
+            (api.filePath ? '<div class="api-route">'+api.callType+' in '+api.filePath+'</div>' : '') +
             '</div>';
         });
         restApiHtml += '</div>';
@@ -2800,10 +2806,9 @@ export class PageMapGenerator {
         apis.forEach(api => {
           const methodColors = {GET:'#22c55e',POST:'#3b82f6',PUT:'#f59e0b',DELETE:'#ef4444',PATCH:'#8b5cf6'};
           const color = methodColors[api.method] || '#6b7280';
-          html += '<div class="detail-item" style="cursor:pointer" onclick="event.stopPropagation(); showApiDetail(\\''+api.id.replace(/'/g, "\\\\'")+'\\')">' +
-            '<span class="tag" style="background:'+color+';color:white">'+api.method+'</span> ' +
-            '<span style="font-family:monospace;font-size:11px">'+api.url+'</span>' +
-            '<div style="font-size:9px;color:var(--text2);margin-top:2px">'+api.callType+' in '+api.filePath+'</div>' +
+          html += '<div class="detail-item api-item" onclick="event.stopPropagation(); showApiDetail(\\''+api.id.replace(/'/g, "\\\\'")+'\\')">' +
+            '<div class="api-row"><span class="tag" style="background:'+color+'">'+api.method+'</span><span class="api-url">'+api.url+'</span></div>' +
+            '<div class="api-route">'+api.callType+' in '+api.filePath+'</div>' +
             '</div>';
         });
       }
@@ -3363,10 +3368,37 @@ export class PageMapGenerator {
       canvas.style.height = rect.height + 'px';
       ctx.scale(2, 2);
       
+      // Combine Frontend pages and Rails routes for graph
+      const allGraphPages = [...pages];
+      
+      // Add Rails routes as graph nodes (limit to GET routes with views for better visualization)
+      if (typeof railsRoutes !== 'undefined' && railsRoutes.length > 0) {
+        const viewRoutes = railsRoutes.filter(r => r.method === 'GET' && !r.route.includes('.:format'));
+        const uniqueRoutes = new Map();
+        viewRoutes.forEach(r => {
+          const key = r.route.replace(/:[^/]+/g, ':param');
+          if (!uniqueRoutes.has(key)) {
+            uniqueRoutes.set(key, r);
+          }
+        });
+        Array.from(uniqueRoutes.values()).slice(0, 200).forEach(r => {
+          allGraphPages.push({
+            path: 'rails:' + r.route,
+            isRails: true,
+            controller: r.controller,
+            action: r.action,
+            authentication: { required: false }
+          });
+        });
+      }
+      
       // Build nodes - initial placement by category
       const groups = new Map();
-      pages.forEach(p => {
-        const cat = p.path.split('/').filter(Boolean)[0] || 'root';
+      allGraphPages.forEach(p => {
+        const pathStr = p.path || '';
+        const cat = pathStr.startsWith('rails:') 
+          ? 'rails/' + (p.controller?.split('/')[0] || 'other')
+          : pathStr.split('/').filter(Boolean)[0] || 'root';
         if (!groups.has(cat)) groups.set(cat, []);
         groups.get(cat).push(p);
       });
@@ -3390,17 +3422,21 @@ export class PageMapGenerator {
           const spread = 50 + catPages.length * 5;
           const x = catX + Math.cos(pageAngle) * spread + (Math.random() - 0.5) * 30;
           const y = catY + Math.sin(pageAngle) * spread + (Math.random() - 0.5) * 30;
-          const label = p.path.split('/').filter(Boolean).pop() || '/';
+          const pathStr = p.path || '';
+          const isRails = p.isRails || pathStr.startsWith('rails:');
+          const displayPath = isRails ? pathStr.replace('rails:', '') : pathStr;
+          const label = displayPath.split('/').filter(Boolean).pop() || '/';
           
           graphState.nodes.push({
             path: p.path,
             x, y,
             vx: 0, vy: 0, // velocity for force simulation
-            radius: 8,
-            color: p.authentication?.required ? '#dc2626' : '#22c55e',
+            radius: isRails ? 6 : 8,
+            color: isRails ? '#f59e0b' : (p.authentication?.required ? '#dc2626' : '#22c55e'),
             label: label.length > 12 ? label.substring(0,10)+'...' : label,
             category: cat,
-            catColor: color
+            catColor: color,
+            isRails: isRails
           });
         });
       });
