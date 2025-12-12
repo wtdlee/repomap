@@ -53,16 +53,60 @@ export class DocServer {
     this.app.use('/assets', express.static(path.join(this.config.outputDir, 'assets')));
 
     // Serve CSS files from generators/assets
+    // Find the package root by looking for generators/assets relative to dist
+    const findCssPath = (file: string): string => {
+      const possiblePaths = [
+        // When running from dist (production)
+        path.join(path.dirname(new URL(import.meta.url).pathname), 'generators', 'assets', file),
+        path.join(
+          path.dirname(new URL(import.meta.url).pathname),
+          '..',
+          'generators',
+          'assets',
+          file
+        ),
+        path.join(
+          path.dirname(new URL(import.meta.url).pathname),
+          '..',
+          'dist',
+          'generators',
+          'assets',
+          file
+        ),
+        // When running from source (development with tsx)
+        path.join(process.cwd(), 'dist', 'generators', 'assets', file),
+        path.join(process.cwd(), 'src', 'generators', 'assets', file),
+      ];
+      return possiblePaths[0]; // Will be validated at runtime
+    };
+
     const cssFiles = ['common.css', 'page-map.css', 'docs.css', 'rails-map.css'];
     cssFiles.forEach((file) => {
       this.app.get(`/${file}`, async (req, res) => {
-        try {
-          const cssPath = new URL(`../generators/assets/${file}`, import.meta.url);
-          const css = await fs.readFile(cssPath, 'utf-8');
-          res.type('text/css').send(css);
-        } catch {
-          res.status(404).send('CSS not found');
+        // Try multiple possible paths
+        const possiblePaths = [
+          path.join(path.dirname(new URL(import.meta.url).pathname), 'generators', 'assets', file),
+          path.join(
+            path.dirname(new URL(import.meta.url).pathname),
+            '..',
+            'generators',
+            'assets',
+            file
+          ),
+          path.join(process.cwd(), 'dist', 'generators', 'assets', file),
+          path.join(process.cwd(), 'src', 'generators', 'assets', file),
+        ];
+
+        for (const cssPath of possiblePaths) {
+          try {
+            const css = await fs.readFile(cssPath, 'utf-8');
+            res.type('text/css').send(css);
+            return;
+          } catch {
+            // Try next path
+          }
         }
+        res.status(404).send('CSS not found');
       });
     });
 
@@ -101,9 +145,9 @@ export class DocServer {
       res.send(await this.renderPage('index'));
     });
 
-    // Markdown pages - specific path
-    this.app.get('/docs/*', async (req, res) => {
-      const pagePath = (req.params as Record<string, string>)[0] || 'index';
+    // Markdown pages - specific path (Express 5 compatible)
+    this.app.get('/docs/*path', async (req, res) => {
+      const pagePath = (req.params as { path?: string }).path || 'index';
       res.send(await this.renderPage(pagePath));
     });
 
