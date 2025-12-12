@@ -635,6 +635,17 @@ export class PageMapGenerator {
           // Further clean the query name
           queryName = queryName.replace(/^[→\\s]+/, '').trim();
           
+          // If queryName is empty or just a generic name, use the original operationName
+          if (!queryName || queryName === 'Query' || queryName === 'Mutation') {
+            // Try to extract from operationName
+            const opNameMatch = rawName.match(/([A-Z][a-zA-Z0-9]+(?:Query|Mutation)?)/);
+            if (opNameMatch && opNameMatch[1] !== 'Query' && opNameMatch[1] !== 'Mutation') {
+              queryName = opNameMatch[1];
+            } else {
+              queryName = queryName || 'Unknown';
+            }
+          }
+          
           return {
             ...df,
             queryName,
@@ -1129,9 +1140,12 @@ export class PageMapGenerator {
       }
       
       // If not found, try removing common suffixes (Query, Mutation, Document)
+      // But don't remove if it would result in an empty string
       if (!op) {
         const baseName = name.replace(/Query$|Mutation$|Document$/, '');
-        op = gqlMap.get(baseName);
+        if (baseName) {  // Only try if baseName is not empty
+          op = gqlMap.get(baseName);
+        }
       }
       
       // Also try with suffix if original didn't have one
