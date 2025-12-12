@@ -1,22 +1,47 @@
 # repomap
 
-Interactive documentation generator for code repositories. Visualize pages, components, GraphQL operations, and data flows with an intuitive web interface.
+Interactive documentation generator for code repositories. Visualize pages, components, routes, and data flows with an intuitive web interface.
 
 ## Features
 
-- 📄 **Page Analysis** - Automatically detect and document all pages with their routes, authentication requirements, and data dependencies
-- 🔗 **GraphQL Mapping** - Extract and visualize all GraphQL queries, mutations, and fragments with field details
-- 🧩 **Component Hierarchy** - Map component relationships and dependencies
-- 🔄 **Data Flow Visualization** - Track how data flows through your application
-- 🗺️ **Interactive Page Map** - Visual representation of your application structure
-- 📊 **Mermaid Diagrams** - Auto-generated flowcharts and sequence diagrams
-- 🔀 **Cross-Repository Analysis** - Analyze multiple repositories together to understand full-stack data flows
+### 🗺️ Page Map
+- **Multi-framework support** - Next.js (Pages/App Router), React, Rails
+- **Interactive graph view** - Visual representation of page relationships
+- **Route analysis** - Automatic detection of routes, authentication, and data dependencies
+- **React component tracking** - Detect React components used in Rails views
+
+### 🛤️ Rails Map
+- **Routes explorer** - Browse all routes with method, path, controller info
+- **Controllers view** - List controllers with actions, filters, and inheritance
+- **Models view** - View models with associations, validations, and scopes
+- **gRPC services** - Browse gRPC services with RPC methods
+- **Model Relationships diagram** - Auto-generated ER diagram using Mermaid
+- **Advanced filtering** - Filter by namespace, HTTP methods (multi-select with Ctrl/Cmd)
+- **Search** - Full-text search across routes, controllers, models
+
+### 🔗 GraphQL Analysis
+- **Operations mapping** - Extract queries, mutations, and fragments
+- **Field details** - View all fields with types and arguments
+- **Usage tracking** - See where operations are used
+
+### 📊 Data Flow
+- **Visual diagrams** - Mermaid-generated flowcharts
+- **Cross-component tracking** - Follow data through your application
+- **REST API detection** - Automatic API endpoint discovery
+
+## Screenshots
+
+| Page Map | Rails Map |
+|----------|-----------|
+| Interactive page visualization | Routes, Controllers, Models, gRPC |
 
 ## Installation
 
 ```bash
 npm install -g repomap
 # or
+pnpm add -g repomap
+# or use directly
 npx repomap serve
 ```
 
@@ -24,7 +49,7 @@ npx repomap serve
 
 ```bash
 # Navigate to your project
-cd my-nextjs-app
+cd my-project
 
 # Start the documentation server (no config needed!)
 npx repomap serve
@@ -32,87 +57,97 @@ npx repomap serve
 # Open http://localhost:3030
 ```
 
-## Usage
-
-### Basic Usage (No Config Required)
+### Options
 
 ```bash
-# Auto-detect project structure and start server
-npx repomap serve
-
-# Generate static documentation
-npx repomap generate
-```
-
-### With Configuration
-
-```bash
-# Create a config file
-npx repomap init
-
-# Edit repomap.config.ts as needed
-
-# Start server with config
-npx repomap serve
-```
-
-### Multi-Repository Analysis
-
-```typescript
-// repomap.config.ts
-export const config = {
-  repositories: [
-    {
-      name: "frontend",
-      path: "./frontend",
-      type: "nextjs",
-      // ...
-    },
-    {
-      name: "backend",
-      path: "./backend",
-      type: "rails",
-      // ...
-    },
-  ],
-};
-```
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `repomap serve` | Start interactive documentation server |
-| `repomap generate` | Generate static documentation files |
-| `repomap init` | Create configuration file |
-| `repomap diff` | Show changes since last generation |
-
-## Options
-
-### serve
-
-```bash
-repomap serve [options]
+npx repomap serve [options]
 
 Options:
-  -c, --config <path>  Path to config file
   -p, --port <number>  Server port (default: 3030)
+  -c, --config <path>  Path to config file
+  --no-cache           Disable caching
   --no-open            Don't open browser automatically
 ```
 
-### generate
+## Web Interface
 
-```bash
-repomap generate [options]
+### `/page-map` - Page Map
+- **Tree View**: Hierarchical list of all pages grouped by framework/directory
+- **Graph View**: Interactive force-directed graph visualization
+- **Rails Routes**: Browse routes with response type indicators (JSON, HTML, Redirect)
+- **Rails Screens**: View-based screen listing with template info
+- **React Components**: React components used in Rails views with usage locations
 
-Options:
-  -c, --config <path>  Path to config file
-  -o, --output <path>  Output directory
-  --repo <name>        Analyze specific repository only
-  --watch              Watch for changes and regenerate
-```
+#### Route Indicators
+| Tag | Meaning |
+|-----|---------|
+| `JSON` | Returns JSON response |
+| `HTML` | Returns HTML response |
+| `→` | Redirects to another path |
+| `View` | Has associated view template |
+| `Svc` | Uses service objects |
+| `gRPC` | Makes gRPC calls |
+| `DB` | Accesses database models |
 
-## Configuration
+### `/rails-map` - Rails Map
+- **Routes Tab**: All routes with filtering and search
+- **Controllers Tab**: Controllers with actions and filters
+- **Models Tab**: Models with associations and validations
+- **gRPC Tab**: gRPC services with RPC methods
+- **Diagram Tab**: Model relationships ER diagram
+
+#### Features
+- Multi-select filters (Ctrl/Cmd + click)
+- URL state persistence (refresh preserves filters)
+- Show more pagination (200 items at a time)
+- Search includes hidden items
+
+### `/docs` - Documentation
+- Auto-generated markdown documentation
+- Navigation sidebar
+- Syntax-highlighted code blocks
+
+## Supported Frameworks
+
+| Framework | Features |
+|-----------|----------|
+| **Next.js** | Pages Router, App Router, API routes, data fetching |
+| **React** | Components, GraphQL operations, hooks |
+| **Rails** | Routes, Controllers, Models, Views, gRPC, React integration |
+
+## Rails Analysis Details
+
+### Routes Analysis
+- Parse `config/routes.rb` with nested resources
+- Extract HTTP method, path, controller, action
+- Detect namespaces and constraints
+
+### Controller Analysis
+- Actions with visibility (public/private/protected)
+- Before/after filters
+- Response types (JSON, HTML, redirect)
+- Service and model calls
+- Instance variable assignments
+
+### View Analysis
+- HAML, ERB, YML templates
+- Partial usage
+- Helper calls
+- Instance variables
+- React component detection (`render_react_component`, `data-react-component`)
+
+### Model Analysis
+- Associations (belongs_to, has_many, has_one)
+- Validations
+- Scopes
+- Callbacks
+
+### gRPC Analysis
+- Service definitions
+- RPC methods with request/response types
+- Namespace organization
+
+## Configuration (Optional)
 
 ```typescript
 // repomap.config.ts
@@ -128,53 +163,29 @@ export const config: DocGeneratorConfig = {
   repositories: [
     {
       name: "my-project",
-      displayName: "My Project",
-      description: "Main application",
       path: ".",
-      branch: "main",
       type: "nextjs", // "nextjs" | "rails" | "generic"
       analyzers: ["pages", "graphql", "components", "dataflow"],
-      settings: {
-        pagesDir: "src/pages",
-        featuresDir: "src/features",
-        componentsDir: "src/components",
-      },
     },
   ],
   analysis: {
-    include: ["**/*.tsx", "**/*.ts"],
-    exclude: ["**/node_modules/**", "**/__tests__/**"],
-    maxDepth: 5,
-  },
-  diagrams: {
-    enabled: true,
-    types: ["flowchart", "sequence"],
-    theme: "default",
+    include: ["**/*.tsx", "**/*.ts", "**/*.rb"],
+    exclude: ["**/node_modules/**", "**/vendor/**"],
   },
 };
 
 export default config;
 ```
 
-## Supported Frameworks
+## CLI Commands
 
-- **Next.js** (Pages Router & App Router)
-- **React** (with GraphQL)
-- **Rails** (API analysis)
-- **Generic** (TypeScript/JavaScript projects)
+| Command | Description |
+|---------|-------------|
+| `repomap serve` | Start interactive documentation server |
+| `repomap generate` | Generate static documentation files |
+| `repomap init` | Create configuration file |
 
-## Web Interface
-
-The documentation server provides:
-
-- **📋 Pages** - List of all pages with routes, auth requirements, and data operations
-- **🧩 Components** - Component hierarchy and relationships
-- **🔗 GraphQL** - All GraphQL operations with field details
-- **🔄 Data Flow** - Visual data flow diagrams
-- **🗺️ Page Map** - Interactive visual map of your application
-- **📊 Diagrams** - Mermaid-generated architecture diagrams
-
-## API
+## API Usage
 
 ```typescript
 import { DocGeneratorEngine, DocServer } from "repomap";
@@ -186,6 +197,52 @@ const report = await engine.generate();
 // Start server
 const server = new DocServer(config, 3030);
 await server.start();
+```
+
+## Project Structure
+
+```
+src/
+├── analyzers/
+│   ├── pages-analyzer.ts      # Page/route analysis
+│   ├── graphql-analyzer.ts    # GraphQL operations
+│   ├── rest-api-analyzer.ts   # REST API detection
+│   ├── dataflow-analyzer.ts   # Data flow tracking
+│   └── rails/
+│       ├── rails-routes-analyzer.ts
+│       ├── rails-controller-analyzer.ts
+│       ├── rails-model-analyzer.ts
+│       ├── rails-view-analyzer.ts
+│       ├── rails-grpc-analyzer.ts
+│       └── rails-react-analyzer.ts
+├── generators/
+│   ├── page-map-generator.ts  # Page map HTML generation
+│   ├── rails-map-generator.ts # Rails map HTML generation
+│   ├── markdown-generator.ts  # Markdown docs
+│   └── mermaid-generator.ts   # Diagram generation
+├── server/
+│   └── doc-server.ts          # Express server
+└── core/
+    └── engine.ts              # Main engine
+```
+
+## Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build
+pnpm build
+
+# Run locally
+pnpm dev:serve
+
+# Format code
+pnpm format
+
+# Lint
+pnpm lint
 ```
 
 ## License
