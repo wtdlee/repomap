@@ -352,21 +352,13 @@ export class PagesAnalyzer extends BaseAnalyzer {
   private extractDataFetching(sourceFile: SourceFile): DataFetchingInfo[] {
     const dataFetching: DataFetchingInfo[] = [];
 
-    // Type names that should be filtered out (not GraphQL operations)
-    const invalidOperationNames = new Set([
-      'NextPage',
-      'FC',
-      'VFC',
-      'React',
-      'Component',
-      'unknown',
-      'undefined',
-      'null',
-      'true',
-      'false',
-    ]);
+    // Check if this file uses Apollo Client (imports from @apollo/client)
+    const hasApolloImport = sourceFile.getImportDeclarations().some((imp) => {
+      const moduleSpecifier = imp.getModuleSpecifierValue();
+      return moduleSpecifier.includes('@apollo/client') || moduleSpecifier.includes('apollo');
+    });
 
-    // Find useQuery calls
+    // Find useQuery calls - only process as GraphQL if it's Apollo Client style
     const useQueryCalls = sourceFile
       .getDescendantsOfKind(SyntaxKind.CallExpression)
       .filter((call) => {
@@ -378,20 +370,42 @@ export class PagesAnalyzer extends BaseAnalyzer {
       const type = call.getExpression().getText() as DataFetchingInfo['type'];
       const args = call.getArguments();
 
-      let operationName = 'unknown';
-      const variables: string[] = [];
+      if (args.length === 0) continue;
 
-      if (args.length > 0) {
-        operationName = args[0]
-          .getText()
-          .replace(/Document$/, '')
-          .replace(/Query$|Mutation$/, '');
-      }
+      const firstArg = args[0];
+      const firstArgText = firstArg.getText();
 
-      // Skip invalid operation names (type names, keywords, etc.)
-      if (invalidOperationNames.has(operationName)) {
+      // Skip if first argument is:
+      // - An array literal: ['key', ...]
+      // - An object literal: { queryKey: ... }
+      // - A string literal: 'queryKey'
+      // These are React Query/TanStack Query patterns, not Apollo
+      if (
+        firstArgText.startsWith('[') ||
+        firstArgText.startsWith('{') ||
+        firstArgText.startsWith("'") ||
+        firstArgText.startsWith('"') ||
+        firstArgText.startsWith('`')
+      ) {
         continue;
       }
+
+      // Apollo Client pattern: first arg should be a Document identifier
+      // Valid patterns: GetUserDocument, GET_USER_QUERY, gql`...`
+      const isApolloPattern =
+        hasApolloImport ||
+        firstArgText.endsWith('Document') ||
+        firstArgText.endsWith('Query') ||
+        firstArgText.endsWith('Mutation') ||
+        firstArgText.includes('gql');
+
+      if (!isApolloPattern) {
+        continue;
+      }
+
+      const operationName = firstArgText.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
+
+      const variables: string[] = [];
 
       if (args.length > 1) {
         const optionsArg = args[1];
