@@ -90,7 +90,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     const batchSize = 100;
     for (let i = 0; i < files.length; i += batchSize) {
       const batch = files.slice(i, i + batchSize);
-      
+
       // Read batch files in parallel
       const fileContents = await Promise.all(
         batch.map(async (filePath) => {
@@ -173,8 +173,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
               name &&
               (this.isComponentName(name) || name.startsWith('use')) &&
               d.init &&
-              (d.init.type === 'ArrowFunctionExpression' ||
-                d.init.type === 'FunctionExpression')
+              (d.init.type === 'ArrowFunctionExpression' || d.init.type === 'FunctionExpression')
             ) {
               const info = this.extractComponentInfo(name, filePath, content, imports);
               components.push(info);
@@ -185,10 +184,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       }
 
       // Export variable declaration: export const ComponentName = () => {}
-      if (
-        item.type === 'ExportDeclaration' &&
-        item.declaration?.type === 'VariableDeclaration'
-      ) {
+      if (item.type === 'ExportDeclaration' && item.declaration?.type === 'VariableDeclaration') {
         for (const d of item.declaration.declarations) {
           if (d.id?.type === 'Identifier') {
             const name = d.id.value;
@@ -196,8 +192,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
               name &&
               (this.isComponentName(name) || name.startsWith('use')) &&
               d.init &&
-              (d.init.type === 'ArrowFunctionExpression' ||
-                d.init.type === 'FunctionExpression')
+              (d.init.type === 'ArrowFunctionExpression' || d.init.type === 'FunctionExpression')
             ) {
               const info = this.extractComponentInfo(name, filePath, content, imports);
               components.push(info);
@@ -295,19 +290,20 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
 
     // Match useQuery/useMutation/useLazyQuery with first argument (Document name)
     // Pattern: useQuery(DocumentName or useQuery<Type>(DocumentName
-    const graphqlHookRegex = /\b(useQuery|useMutation|useLazyQuery)(?:<[^>]*>)?\s*\(\s*([A-Z_][A-Za-z0-9_]*)/g;
+    const graphqlHookRegex =
+      /\b(useQuery|useMutation|useLazyQuery)(?:<[^>]*>)?\s*\(\s*([A-Z_][A-Za-z0-9_]*)/g;
     let gqlMatch;
     while ((gqlMatch = graphqlHookRegex.exec(content)) !== null) {
       const hookName = gqlMatch[1];
       const docName = gqlMatch[2];
-      
+
       // Skip generic variable names like Query, Mutation, QUERY, MUTATION
       if (/^(Query|Mutation|QUERY|MUTATION)$/i.test(docName)) {
         continue;
       }
-      
+
       const operationName = this.extractOperationName(docName);
-      
+
       if (hookName === 'useQuery' || hookName === 'useLazyQuery') {
         const hookInfo = operationName ? `Query: ${operationName}` : `Query: ${docName}`;
         if (!hooks.includes(hookInfo)) hooks.push(hookInfo);
@@ -331,7 +327,9 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
 
       if (hookName === 'useContext') {
         // Try to extract context name
-        const contextMatch = content.slice(match.index).match(/useContext\s*\(\s*([A-Z][A-Za-z0-9]*)/);
+        const contextMatch = content
+          .slice(match.index)
+          .match(/useContext\s*\(\s*([A-Z][A-Za-z0-9]*)/);
         if (contextMatch) {
           const contextName = contextMatch[1].replace(/Context$/, '');
           const hookInfo = `🔄 Context: ${contextName}`;
