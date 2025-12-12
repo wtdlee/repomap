@@ -650,7 +650,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     try {
       // Resolve the import path
-      let resolvedPath = path.resolve(sourceFileDir, moduleSpec);
+      const resolvedPath = path.resolve(sourceFileDir, moduleSpec);
 
       // Try different file extensions and index files
       const possiblePaths = [
@@ -692,17 +692,51 @@ export class PagesAnalyzer extends BaseAnalyzer {
       }
 
       // Check for Apollo Client imports (also check for gql imports which indicate GraphQL usage)
+      // Also check for graphql.macro, graphql-tag which are commonly used
       const hasGraphQLImport = componentFile.getImportDeclarations().some((imp) => {
         const spec = imp.getModuleSpecifierValue();
         return (
           spec.includes('@apollo/client') ||
           spec.includes('apollo') ||
           spec.includes('gql') ||
+          spec.includes('graphql') || // graphql.macro, graphql-tag
           spec.includes('__generated__')
         );
       });
 
-      if (!hasGraphQLImport) return queries;
+      if (!hasGraphQLImport) {
+        // No direct GraphQL import, but check imported components (one level deeper)
+        // This handles: Page → WrapperComponent → ContainerWithGraphQL pattern
+        const nestedComponentImports = componentFile.getImportDeclarations().filter((imp) => {
+          const spec = imp.getModuleSpecifierValue();
+          // Look for relative imports that might be Container/Component files
+          return spec.startsWith('./') || spec.startsWith('../');
+        });
+
+        for (const nestedImp of nestedComponentImports) {
+          const nestedSpec = nestedImp.getModuleSpecifierValue();
+          const namedImports = nestedImp.getNamedImports().map((n) => n.getName());
+
+          // Look for Container, Page, or other component-like imports
+          const containerImports = namedImports.filter(
+            (n) => n.includes('Container') || n.includes('Page') || n.includes('Component')
+          );
+
+          for (const containerName of containerImports) {
+            const nestedQueries = this.analyzeImportedComponent(
+              path.dirname(componentFile.getFilePath()),
+              nestedSpec,
+              containerName
+            );
+            queries.push(...nestedQueries);
+          }
+        }
+
+        if (queries.length === 0) {
+          // console.log(`[PagesAnalyzer] ${componentName} → no GraphQL found after nested search`);
+        }
+        return queries;
+      }
 
       // Find GraphQL hook calls in the component
       const hookCalls = componentFile
@@ -776,37 +810,54 @@ export class PagesAnalyzer extends BaseAnalyzer {
     try {
       // Look for export declarations that export the component
       // e.g., export { ProfilePreviewContainer } from "./ProfilePreviewContainer"
-      for (const exportDecl of indexFile.getExportDeclarations()) {
+      const exportDecls = indexFile.getExportDeclarations();
+      let firstExportFile: SourceFile | null = null;
+
+      for (const exportDecl of exportDecls) {
         const namedExports = exportDecl.getNamedExports();
         for (const named of namedExports) {
+          const moduleSpec = exportDecl.getModuleSpecifierValue();
+          if (!moduleSpec) continue;
+
+          const resolvedPath = path.resolve(indexDir, moduleSpec);
+          const possiblePaths = [
+            `${resolvedPath}.tsx`,
+            `${resolvedPath}.ts`,
+            `${resolvedPath}/index.tsx`,
+            `${resolvedPath}/index.ts`,
+          ];
+
+          // Try to load the file
+          let file: SourceFile | undefined;
+          for (const tryPath of possiblePaths) {
+            try {
+              file = this.project.addSourceFileAtPath(tryPath);
+              if (file) break;
+            } catch {
+              // Try next path
+            }
+          }
+
+          if (!file) continue;
+
+          // Store first export as fallback (for default imports with different names)
+          if (!firstExportFile) {
+            firstExportFile = file;
+          }
+
+          // Check if this is the exact component we're looking for
           if (
             named.getName() === componentName ||
             named.getAliasNode()?.getText() === componentName
           ) {
-            // Found the re-export, get the module specifier
-            const moduleSpec = exportDecl.getModuleSpecifierValue();
-            if (moduleSpec) {
-              const resolvedPath = path.resolve(indexDir, moduleSpec);
-              const possiblePaths = [
-                `${resolvedPath}.tsx`,
-                `${resolvedPath}.ts`,
-                `${resolvedPath}/index.tsx`,
-                `${resolvedPath}/index.ts`,
-                `${resolvedPath}/${componentName}.tsx`,
-                `${resolvedPath}/${componentName}.ts`,
-              ];
-
-              for (const tryPath of possiblePaths) {
-                try {
-                  const file = this.project.addSourceFileAtPath(tryPath);
-                  if (file) return file;
-                } catch {
-                  // Try next path
-                }
-              }
-            }
+            return file;
           }
         }
+      }
+
+      // If exact match not found, return first export (handles default imports)
+      if (firstExportFile) {
+        return firstExportFile;
       }
 
       // Also check for: export * from "./SomeModule"
