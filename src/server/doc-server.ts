@@ -46,12 +46,12 @@ export class DocServer {
     // Serve static assets
     this.app.use('/assets', express.static(path.join(this.config.outputDir, 'assets')));
 
-    // Main page
-    this.app.get('/', async (req, res) => {
-      res.send(await this.renderPage('index'));
+    // Main page - redirect to page-map
+    this.app.get('/', (req, res) => {
+      res.redirect('/page-map');
     });
 
-    // Interactive page map
+    // Interactive page map (main view)
     this.app.get('/page-map', (req, res) => {
       if (!this.currentReport) {
         res.status(503).send('Documentation not ready yet');

@@ -31,6 +31,9 @@ export class PageMapGenerator {
 
   generatePageMapHtml(report: DocumentationReport): string {
     const allPages: PageNode[] = [];
+    
+    // Get repository name for display
+    const repoName = report.repositories[0]?.displayName || report.repositories[0]?.name || 'Repository';
 
     for (const repoResult of report.repositories) {
       this.graphqlOps.push(...(repoResult.analysis?.graphqlOperations || []));
@@ -62,7 +65,7 @@ export class PageMapGenerator {
 
     const { rootPages, relations } = this.buildHierarchy(allPages);
 
-    return this.renderPageMapHtml(allPages, rootPages, relations);
+    return this.renderPageMapHtml(allPages, rootPages, relations, repoName);
   }
 
   private buildHierarchy(pages: PageNode[]): { rootPages: PageNode[]; relations: PageRelation[] } {
@@ -130,7 +133,8 @@ export class PageMapGenerator {
   private renderPageMapHtml(
     allPages: PageNode[],
     rootPages: PageNode[],
-    relations: PageRelation[]
+    relations: PageRelation[],
+    repoName: string
   ): string {
     const graphqlOpsJson = JSON.stringify(
       this.graphqlOps.map((op) => ({
@@ -184,6 +188,18 @@ export class PageMapGenerator {
       z-index: 100;
     }
     .header h1 { font-size: 18px; }
+    
+    .nav-link {
+      padding: 6px 12px;
+      color: var(--text2);
+      text-decoration: none;
+      font-size: 13px;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+    .nav-link:hover { background: var(--bg3); color: var(--text); }
+    .nav-link.active { background: var(--accent); color: white; }
+    
     .tabs { display: flex; gap: 4px; }
     .tab {
       padding: 6px 16px;
@@ -397,9 +413,16 @@ export class PageMapGenerator {
 </head>
 <body>
   <header class="header">
-    <h1>Page Map</h1>
+    <div style="display:flex;align-items:center;gap:24px">
+      <h1 style="cursor:pointer" onclick="location.href='/'">📊 ${repoName}</h1>
+      <nav style="display:flex;gap:4px">
+        <a href="/page-map" class="nav-link active">Page Map</a>
+        <a href="/docs" class="nav-link">Docs</a>
+        <a href="/api/report" class="nav-link" target="_blank">API</a>
+      </nav>
+    </div>
     <div style="display:flex;gap:12px;align-items:center">
-      <input class="search" type="text" placeholder="Search..." oninput="filter(this.value)">
+      <input class="search" type="text" placeholder="Search pages, queries..." oninput="filter(this.value)">
       <div class="tabs">
         <button class="tab active" onclick="setView('tree')">List</button>
         <button class="tab" onclick="setView('graph')">Graph</button>
