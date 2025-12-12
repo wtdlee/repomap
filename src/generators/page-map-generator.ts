@@ -833,13 +833,13 @@ export class PageMapGenerator {
       const totalWithActionInfo = combinedData.filter(r => r.actionDetails).length;
       
       html += '<div style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:12px">';
-      // Main stats row
+      // Main stats row - clickable for filtering
       html += '<div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:600">' + combinedData.length + '</div><div style="font-size:11px;color:var(--text2)">Total Routes</div></div>';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:600;color:#22c55e">' + totalWithView + '</div><div style="font-size:11px;color:var(--text2)">With Views</div></div>';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:600;color:#3b82f6">' + totalJsonApi + '</div><div style="font-size:11px;color:var(--text2)">JSON APIs</div></div>';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:600;color:#8b5cf6">' + totalWithServices + '</div><div style="font-size:11px;color:var(--text2)">With Services</div></div>';
-      html += '<div style="text-align:center"><div style="font-size:20px;font-weight:600;color:#06b6d4">' + totalWithGrpc + '</div><div style="font-size:11px;color:var(--text2)">gRPC</div></div>';
+      html += '<div class="route-stat" data-filter="all" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600">' + combinedData.length + '</div><div style="font-size:11px;color:var(--text2)">Total Routes</div></div>';
+      html += '<div class="route-stat" data-filter="views" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600;color:#22c55e">' + totalWithView + '</div><div style="font-size:11px;color:var(--text2)">With Views</div></div>';
+      html += '<div class="route-stat" data-filter="json" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600;color:#3b82f6">' + totalJsonApi + '</div><div style="font-size:11px;color:var(--text2)">JSON APIs</div></div>';
+      html += '<div class="route-stat" data-filter="services" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600;color:#8b5cf6">' + totalWithServices + '</div><div style="font-size:11px;color:var(--text2)">With Services</div></div>';
+      html += '<div class="route-stat" data-filter="grpc" style="text-align:center;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s" onmouseover="this.style.background=\\'var(--bg2)\\'" onmouseout="this.style.background=\\'transparent\\'"><div style="font-size:20px;font-weight:600;color:#06b6d4">' + totalWithGrpc + '</div><div style="font-size:11px;color:var(--text2)">gRPC</div></div>';
       html += '</div>';
       // Analysis coverage indicator
       if (totalWithActionInfo > 0) {
@@ -898,12 +898,19 @@ export class PageMapGenerator {
           if (route.grpcCalls.length > 0) indicators += '<span title="gRPC Calls: ' + route.grpcCalls.join(', ') + '" style="margin-left:4px;font-size:10px">🔌</span>';
           if (route.modelAccess.length > 0) indicators += '<span title="Model Access: ' + route.modelAccess.join(', ') + '" style="margin-left:4px;font-size:10px">💾</span>';
           
-          // Search-friendly data-path
+          // Search-friendly data-path and filter attributes
           const searchPath = [route.path || '', route.controller || '', route.action || '', route.method || ''].join(' ').toLowerCase();
           const hiddenAttr = idx >= routeLimit ? ' data-hidden="true"' : '';
           const hiddenStyle = idx >= routeLimit ? 'display:none;' : '';
           
-          html += '<div class="page-item" data-path="' + searchPath + '"' + hiddenAttr + ' onclick="showRailsRouteDetail(\\''+encodeURIComponent(JSON.stringify(route))+'\\', true)" style="cursor:pointer;' + hiddenStyle + '">';
+          // Filter data attributes
+          const filterAttrs = [];
+          if (route.hasView) filterAttrs.push('data-has-view="true"');
+          if (action && action.rendersJson) filterAttrs.push('data-json="true"');
+          if (route.services.length > 0) filterAttrs.push('data-services="true"');
+          if (route.grpcCalls.length > 0) filterAttrs.push('data-grpc="true"');
+          
+          html += '<div class="page-item rails-route-item" data-path="' + searchPath + '"' + hiddenAttr + ' ' + filterAttrs.join(' ') + ' onclick="showRailsRouteDetail(\\''+encodeURIComponent(JSON.stringify(route))+'\\', true)" style="cursor:pointer;' + hiddenStyle + '">';
           html += '<span class="page-type" style="background:' + methodColor + ';min-width:50px;text-align:center">' + route.method + '</span>';
           html += '<span class="page-path" style="font-family:monospace;font-size:12px;flex:1">' + pathHighlighted + '</span>';
           html += indicators;
@@ -920,6 +927,54 @@ export class PageMapGenerator {
       });
       
       container.innerHTML = html;
+      
+      // Attach route stat filter click handlers
+      container.querySelectorAll('.route-stat').forEach(stat => {
+        stat.addEventListener('click', function() {
+          const filterType = this.dataset.filter;
+          applyRouteFilter(filterType);
+          
+          // Update active state
+          container.querySelectorAll('.route-stat').forEach(s => s.style.background = 'transparent');
+          if (filterType !== 'all') this.style.background = 'var(--bg2)';
+        });
+      });
+    }
+    
+    // Apply route filter
+    let currentRouteFilter = 'all';
+    function applyRouteFilter(filterType) {
+      currentRouteFilter = filterType;
+      const routeItems = document.querySelectorAll('.rails-route-item');
+      
+      routeItems.forEach(item => {
+        let shouldShow = true;
+        
+        if (filterType === 'views') {
+          shouldShow = item.dataset.hasView === 'true';
+        } else if (filterType === 'json') {
+          shouldShow = item.dataset.json === 'true';
+        } else if (filterType === 'services') {
+          shouldShow = item.dataset.services === 'true';
+        } else if (filterType === 'grpc') {
+          shouldShow = item.dataset.grpc === 'true';
+        }
+        // 'all' shows everything
+        
+        if (shouldShow) {
+          item.style.display = '';
+          item.removeAttribute('data-filtered');
+        } else {
+          item.style.display = 'none';
+          item.dataset.filtered = 'true';
+        }
+      });
+      
+      // Update group visibility (hide empty groups)
+      document.querySelectorAll('#rails-routes-container .group').forEach(group => {
+        const visibleItems = group.querySelectorAll('.rails-route-item:not([data-filtered="true"])');
+        group.style.display = visibleItems.length > 0 ? '' : 'none';
+      });
     }
     
     // Show Rails route detail

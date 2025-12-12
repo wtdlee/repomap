@@ -108,7 +108,7 @@ export class RailsMapGenerator {
         <input type="text" class="search-box" id="searchBox" placeholder="Search routes, controllers...">
       </div>
       
-      <div class="sidebar-section namespaces">
+      <div class="sidebar-section namespaces" id="namespaceFilter">
         <div class="sidebar-title">Namespaces (${summary.namespaces.length})</div>
         <div class="namespace-list">
           <div class="namespace-item active" data-namespace="all">
@@ -119,7 +119,7 @@ export class RailsMapGenerator {
         </div>
       </div>
 
-      <div class="sidebar-section">
+      <div class="sidebar-section" id="methodFilter">
         <div class="sidebar-title">HTTP Methods</div>
         <div class="namespace-list methods-list">
           ${this.generateMethodFilters(routes.routes)}
@@ -297,6 +297,20 @@ export class RailsMapGenerator {
 
     // Render Functions
     function renderMainPanel() {
+      // Disable filters for models/diagram tabs
+      const namespaceFilter = document.getElementById('namespaceFilter');
+      const methodFilter = document.getElementById('methodFilter');
+      const filtersDisabled = currentView === 'models' || currentView === 'diagram';
+      
+      if (namespaceFilter) {
+        namespaceFilter.style.opacity = filtersDisabled ? '0.4' : '1';
+        namespaceFilter.style.pointerEvents = filtersDisabled ? 'none' : 'auto';
+      }
+      if (methodFilter) {
+        methodFilter.style.opacity = filtersDisabled ? '0.4' : '1';
+        methodFilter.style.pointerEvents = filtersDisabled ? 'none' : 'auto';
+      }
+      
       switch (currentView) {
         case 'routes':
           mainPanel.innerHTML = renderRoutesView();
