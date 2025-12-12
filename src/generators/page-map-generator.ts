@@ -603,23 +603,83 @@ export class PageMapGenerator {
         stepsHtml += '</div></div>';
       }
       
-      // Data operations - show component name info (deduplicated)
+      // Data operations - show grouped by source path, sorted by depth
       let dataHtml = '';
       if (page.dataFetching && page.dataFetching.length > 0) {
-        // Separate actual GraphQL operations from component references FIRST
+        // Separate actual GraphQL operations from component references
         const graphqlOps = page.dataFetching.filter(df => df.type !== 'component');
         const componentRefs = page.dataFetching.filter(df => df.type === 'component');
         
-        // Deduplicate GraphQL ops by operationName
-        const seenGraphQL = new Set();
-        const uniqueGraphQLOps = graphqlOps.filter(df => {
-          const name = (df.operationName || '').replace(/^[→\\->\\s]+/,'').replace(/^\\u2192\\s*/,'');
-          if (seenGraphQL.has(name)) return false;
-          seenGraphQL.add(name);
+        // Parse operations to extract path info and depth
+        const parsedOps = graphqlOps.map(df => {
+          const rawName = df.operationName || '';
+          // Pattern: "→ QueryName (via HookA)" or "→ → QueryName (via HookA)" etc.
+          const arrowCount = (rawName.match(/→/g) || []).length;
+          
+          // Extract query name and path
+          let queryName = rawName.replace(/^[→\\s]+/, '').replace(/^\\u2192\\s*/g, '');
+          let sourcePath = '';
+          
+          // Extract "(via X)" or "(ComponentName)" suffix
+          const viaMatch = queryName.match(/\\s*\\(via\\s+([^)]+)\\)/);
+          const compMatch = queryName.match(/\\s*\\(([A-Z][a-zA-Z]+)\\)/);
+          
+          if (viaMatch) {
+            sourcePath = viaMatch[1];
+            queryName = queryName.replace(viaMatch[0], '').trim();
+          } else if (compMatch) {
+            sourcePath = compMatch[1];
+            queryName = queryName.replace(compMatch[0], '').trim();
+          }
+          
+          // Further clean the query name
+          queryName = queryName.replace(/^[→\\s]+/, '').trim();
+          
+          return {
+            ...df,
+            queryName,
+            sourcePath: sourcePath || 'Direct',
+            depth: arrowCount
+          };
+        });
+        
+        // Sort by depth (lower first) then by source path
+        parsedOps.sort((a, b) => {
+          if (a.depth !== b.depth) return a.depth - b.depth;
+          if (a.sourcePath === 'Direct') return -1;
+          if (b.sourcePath === 'Direct') return 1;
+          return a.sourcePath.localeCompare(b.sourcePath);
+        });
+        
+        // Deduplicate by queryName + sourcePath
+        const seen = new Set();
+        const uniqueOps = parsedOps.filter(op => {
+          const key = op.queryName + ':' + op.sourcePath;
+          if (seen.has(key)) return false;
+          seen.add(key);
           return true;
         });
         
-        // Deduplicate component refs by operationName
+        // Group by source path
+        const groupedByPath = new Map();
+        uniqueOps.forEach(op => {
+          const path = op.sourcePath;
+          if (!groupedByPath.has(path)) {
+            groupedByPath.set(path, []);
+          }
+          groupedByPath.get(path).push(op);
+        });
+        
+        // Sort groups: Direct first, then by depth
+        const sortedPaths = Array.from(groupedByPath.keys()).sort((a, b) => {
+          if (a === 'Direct') return -1;
+          if (b === 'Direct') return 1;
+          const aDepth = groupedByPath.get(a)[0]?.depth || 0;
+          const bDepth = groupedByPath.get(b)[0]?.depth || 0;
+          return aDepth - bDepth;
+        });
+        
+        // Deduplicate component refs
         const seenComponents = new Set();
         const uniqueComponentRefs = componentRefs.filter(df => {
           const name = df.operationName || '';
@@ -630,17 +690,30 @@ export class PageMapGenerator {
         
         dataHtml = '';
         
-        // Show actual GraphQL operations
-        if (uniqueGraphQLOps.length > 0) {
+        // Show grouped GraphQL operations
+        if (sortedPaths.length > 0) {
           dataHtml += '<div class="detail-section"><h4>Data Operations</h4>';
-          uniqueGraphQLOps.forEach(df => {
-            const rawName = df.operationName || '';
-            const cleanName = rawName.replace(/^[→\\->\\s]+/,'').replace(/^\\u2192\\s*/,'');
-            const isQ = !df.type?.includes('Mutation');
+          
+          sortedPaths.forEach(pathName => {
+            const ops = groupedByPath.get(pathName);
+            const depthIndicator = pathName === 'Direct' ? '' : '↳ ';
+            const pathLabel = pathName === 'Direct' ? 'Direct (this page)' : pathName;
             
-            dataHtml += '<div class="detail-item data-op" onclick="showDataDetail(\\''+cleanName.replace(/'/g, "\\\\'")+'\\')">' +
-              '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'">'+(isQ?'QUERY':'MUTATION')+'</span> '+cleanName+'</div>';
+            // Path header with depth visual
+            dataHtml += '<div class="data-path-group" style="margin:8px 0">' +
+              '<div class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+(ops[0]?.depth * 8)+'px">' +
+              depthIndicator + '<span style="color:var(--accent)">' + pathLabel + '</span> (' + ops.length + ')' +
+              '</div>';
+            
+            ops.forEach(op => {
+              const isQ = !op.type?.includes('Mutation');
+              dataHtml += '<div class="detail-item data-op" style="padding-left:'+(8 + op.depth * 8)+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+'\\')">' +
+                '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'" style="font-size:10px">'+(isQ?'Q':'M')+'</span> '+op.queryName+'</div>';
+            });
+            
+            dataHtml += '</div>';
           });
+          
           dataHtml += '</div>';
         }
         
