@@ -365,7 +365,7 @@ export class DocServer {
     </div>
   </div>
   <div class="live-indicator">Live</div>
-  
+
   <!-- Detail Modal -->
   <div class="detail-modal" id="detailModal">
     <div class="detail-modal-content">
@@ -382,16 +382,16 @@ export class DocServer {
 
   <script>
     // Initialize Mermaid
-    mermaid.initialize({ 
-      startOnLoad: false, 
+    mermaid.initialize({
+      startOnLoad: false,
       theme: 'neutral',
       securityLevel: 'loose',
       flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }
     });
-    
+
     // Diagram state per diagram
     const diagramStates = new Map();
-    
+
     // Render all mermaid diagrams on page load
     document.addEventListener('DOMContentLoaded', async () => {
       // Wrap mermaid divs with container and controls
@@ -413,14 +413,14 @@ export class DocServer {
         container.querySelector('.mermaid-inner').appendChild(el);
         el.dataset.idx = idx;
         diagramStates.set(idx, { zoom: 1, panX: 0, panY: 0 });
-        
+
         // Setup drag handlers
         setupDragHandlers(idx);
       });
 
       try {
         await mermaid.run({ querySelector: '.mermaid' });
-        
+
         // Add click handlers to nodes
         document.querySelectorAll('.mermaid .node').forEach(node => {
           node.addEventListener('click', (e) => {
@@ -488,7 +488,7 @@ export class DocServer {
     function zoomDiagram(idx, factor) {
       const state = diagramStates.get(idx);
       if (!state) return;
-      
+
       if (factor === 'reset') {
         state.zoom = 1;
         state.panX = 0;
@@ -640,7 +640,7 @@ export class DocServer {
       updateBackButton();
       modal.classList.add('open');
     }
-    
+
     function formatGqlFields(fields, indent) {
       if (!fields?.length) return '';
       const lines = [];
@@ -659,7 +659,7 @@ export class DocServer {
 
     function parseNodeInfo(text) {
       const info = { type: 'unknown', name: text };
-      
+
       // Detect type from text patterns
       if (text.includes('Query') || text.includes('QUERY') || text.toLowerCase().includes('usequery')) {
         info.type = 'query';
@@ -673,13 +673,13 @@ export class DocServer {
       } else if (text.includes('Fragment') || text.includes('FRAGMENT')) {
         info.type = 'fragment';
       }
-      
+
       // Extract name from common patterns
       const nameMatch = text.match(/^([A-Z][a-zA-Z]+)/);
       if (nameMatch) {
         info.name = nameMatch[1];
       }
-      
+
       return info;
     }
 
@@ -1170,10 +1170,10 @@ export class DocServer {
         const btn = document.querySelector('.regenerate-btn');
         btn.textContent = '⏳ 生成中...';
         btn.disabled = true;
-        
+
         const res = await fetch('/api/regenerate', { method: 'POST' });
         const data = await res.json();
-        
+
         if (data.success) {
           window.location.reload();
         } else {

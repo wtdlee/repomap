@@ -107,7 +107,7 @@ export class RailsMapGenerator {
         <div class="sidebar-title">Search</div>
         <input type="text" class="search-box" id="searchBox" placeholder="Search routes, controllers...">
       </div>
-      
+
       <div class="sidebar-section namespaces" id="namespaceFilter">
         <div class="sidebar-title">Namespaces (${summary.namespaces.length})</div>
         <div class="namespace-list">
@@ -154,7 +154,7 @@ export class RailsMapGenerator {
     let routesDisplayCount = 200;
     let controllersDisplayCount = 50;
     let modelsDisplayCount = 50;
-    
+
     // Filtered data cache for click handlers
     let filteredControllers = [];
     let filteredModels = [];
@@ -178,33 +178,33 @@ export class RailsMapGenerator {
 
     function loadStateFromUrl() {
       const params = new URLSearchParams(window.location.search);
-      
+
       if (params.has('view')) {
         currentView = params.get('view');
         document.querySelectorAll('.stat').forEach(s => {
           s.classList.toggle('active', s.dataset.view === currentView);
         });
       }
-      
+
       if (params.has('ns')) {
         const ns = params.get('ns').split(',').filter(Boolean);
         if (ns.length > 0) {
           selectedNamespaces = new Set(ns);
         }
       }
-      
+
       if (params.has('method')) {
         const methods = params.get('method').split(',').filter(Boolean);
         if (methods.length > 0) {
           selectedMethods = new Set(methods);
         }
       }
-      
+
       if (params.has('q')) {
         searchQuery = params.get('q');
         searchBox.value = searchQuery;
       }
-      
+
       updateFilterUI();
     }
 
@@ -301,7 +301,7 @@ export class RailsMapGenerator {
       const namespaceFilter = document.getElementById('namespaceFilter');
       const methodFilter = document.getElementById('methodFilter');
       const filtersDisabled = currentView === 'models' || currentView === 'diagram';
-      
+
       if (namespaceFilter) {
         namespaceFilter.style.opacity = filtersDisabled ? '0.4' : '1';
         namespaceFilter.style.pointerEvents = filtersDisabled ? 'none' : 'auto';
@@ -310,7 +310,7 @@ export class RailsMapGenerator {
         methodFilter.style.opacity = filtersDisabled ? '0.4' : '1';
         methodFilter.style.pointerEvents = filtersDisabled ? 'none' : 'auto';
       }
-      
+
       switch (currentView) {
         case 'routes':
           mainPanel.innerHTML = renderRoutesView();
@@ -354,7 +354,7 @@ export class RailsMapGenerator {
       const filtered = filterRoutes();
       const displayed = filtered.slice(0, routesDisplayCount);
       const hasMore = filtered.length > routesDisplayCount;
-      
+
       return \`
         <div class="panel-header">
           <div class="panel-title">Routes <span class="panel-count">(\${Math.min(routesDisplayCount, filtered.length)} / \${filtered.length})</span></div>
@@ -394,7 +394,7 @@ export class RailsMapGenerator {
     function renderControllersView() {
       filteredControllers = controllers;
       if (searchQuery) {
-        filteredControllers = controllers.filter(c => 
+        filteredControllers = controllers.filter(c =>
           c.className.toLowerCase().includes(searchQuery) ||
           c.actions.some(a => a.name.toLowerCase().includes(searchQuery))
         );
@@ -449,7 +449,7 @@ export class RailsMapGenerator {
     function renderModelsView() {
       filteredModels = models;
       if (searchQuery) {
-        filteredModels = models.filter(m => 
+        filteredModels = models.filter(m =>
           m.className.toLowerCase().includes(searchQuery)
         );
       }
@@ -501,9 +501,9 @@ export class RailsMapGenerator {
           (svc.rpcs && svc.rpcs.some(rpc => rpc.name && rpc.name.toLowerCase().includes(searchQuery)))
         );
       }
-      
+
       const displayedGrpc = filteredGrpc.slice(0, grpcDisplayCount);
-      
+
       return \`
         <div class="panel-header">
           <div class="panel-title">gRPC Services <span class="panel-count">(\${Math.min(grpcDisplayCount, filteredGrpc.length)} / \${filteredGrpc.length})</span></div>
@@ -538,7 +538,7 @@ export class RailsMapGenerator {
     window.showGrpcDetail = function(idx) {
       const svc = filteredGrpc[idx];
       if (!svc) return;
-      
+
       let detail = \`
         <div class="detail-header">
           <div class="detail-title">🔌 \${svc.className || 'gRPC Service'}</div>
@@ -551,7 +551,7 @@ export class RailsMapGenerator {
             \${svc.namespace ? \`<div class="detail-item"><span class="tag tag-blue">namespace</span>\${svc.namespace}</div>\` : ''}
             \${svc.filePath ? \`<div class="detail-item"><span class="tag tag-green">file</span><span style="word-break:break-all">\${svc.filePath}</span></div>\` : ''}
           </div>
-          
+
           \${svc.rpcs && svc.rpcs.length > 0 ? \`
             <div class="detail-section">
               <div class="detail-section-title">RPCs (\${svc.rpcs.length})</div>
@@ -566,7 +566,7 @@ export class RailsMapGenerator {
           \` : ''}
         </div>
       \`;
-      
+
       detailPanel.innerHTML = detail;
       detailPanel.classList.add('open');
     };
@@ -579,20 +579,20 @@ export class RailsMapGenerator {
       const modelNames = new Set(topModels.map(m => m.name || m.className));
       let mermaidCode = 'erDiagram\\n';
       const addedRelations = new Set();
-      
+
       topModels.forEach(model => {
         const modelName = (model.name || model.className).replace(/[^a-zA-Z0-9]/g, '_');
         model.associations.forEach(assoc => {
           let targetModel = assoc.className || capitalize(singularize(assoc.name));
           targetModel = targetModel.replace(/[^a-zA-Z0-9]/g, '_');
-          
+
           if (modelNames.has(assoc.className) || modelNames.has(capitalize(singularize(assoc.name)))) {
             const relKey = [modelName, targetModel].sort().join('-') + assoc.type;
             if (!addedRelations.has(relKey)) {
               addedRelations.add(relKey);
-              const rel = assoc.type === 'belongs_to' ? '||--o{' : 
-                         assoc.type === 'has_one' ? '||--||' : 
-                         '||--o{';
+              const rel =
+                assoc.type === 'belongs_to' ? '||--o{' :
+                assoc.type === 'has_one' ? '||--||' : '||--o{';
               mermaidCode += \`  \${modelName} \${rel} \${targetModel} : "\${assoc.type}"\\n\`;
             }
           }
@@ -621,7 +621,7 @@ export class RailsMapGenerator {
     function loadMermaid() {
       const container = document.getElementById('mermaid-diagram');
       if (!container) return;
-      
+
       if (window.mermaid) {
         try {
           // Re-render mermaid diagram
@@ -635,8 +635,8 @@ export class RailsMapGenerator {
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js';
       script.onload = () => {
-        window.mermaid.initialize({ 
-          startOnLoad: false, 
+        window.mermaid.initialize({
+          startOnLoad: false,
           theme: 'dark',
           securityLevel: 'loose'
         });
