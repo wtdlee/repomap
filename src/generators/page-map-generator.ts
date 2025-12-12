@@ -215,7 +215,7 @@ export class PageMapGenerator {
       <h1 style="cursor:pointer" onclick="location.href='/'">📊 ${repoName}</h1>
       <nav style="display:flex;gap:4px">
         <a href="/page-map" class="nav-link ${activeTab === 'pages' ? 'active' : ''}">Page Map</a>
-        ${hasRails ? `<a href="/rails-map" class="nav-link ${activeTab === 'rails' ? 'active' : ''}">🛤️ Rails Map</a>` : ''}
+        ${hasRails ? `<a href="/rails-map" class="nav-link ${activeTab === 'rails' ? 'active' : ''}">Rails Map</a>` : ''}
         <a href="/docs" class="nav-link">Docs</a>
         <a href="/api/report" class="nav-link" target="_blank">API</a>
       </nav>

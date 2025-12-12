@@ -51,7 +51,7 @@ export class DocServer {
     this.app.use('/assets', express.static(path.join(this.config.outputDir, 'assets')));
 
     // Serve CSS files from generators/assets
-    const cssFiles = ['common.css', 'page-map.css', 'docs.css'];
+    const cssFiles = ['common.css', 'page-map.css', 'docs.css', 'rails-map.css'];
     cssFiles.forEach((file) => {
       this.app.get(`/${file}`, async (req, res) => {
         try {
@@ -329,7 +329,7 @@ export class DocServer {
       <h1 style="cursor:pointer" onclick="location.href='/'">📊 ${this.config.repositories[0]?.displayName || this.config.repositories[0]?.name || 'Repository'}</h1>
       <nav style="display:flex;gap:4px">
         <a href="/page-map" class="nav-link">Page Map</a>
-        ${this.railsAnalysis ? '<a href="/rails-map" class="nav-link">🛤️ Rails Map</a>' : ''}
+        ${this.railsAnalysis ? '<a href="/rails-map" class="nav-link">Rails Map</a>' : ''}
         <a href="/docs" class="nav-link active">Docs</a>
         <a href="/api/report" class="nav-link" target="_blank">API</a>
       </nav>
