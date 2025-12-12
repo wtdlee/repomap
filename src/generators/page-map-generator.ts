@@ -844,8 +844,9 @@ export class PageMapGenerator {
       // Analysis coverage indicator
       if (totalWithActionInfo > 0) {
         const coverage = Math.round((totalWithActionInfo / combinedData.length) * 100);
+        const coverageTooltip = 'Percentage of routes successfully matched with controller actions to extract details (JSON/HTML rendering, redirects, etc). This is a tool analysis metric, not a code quality indicator.';
         html += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bg1);text-align:center">';
-        html += '<div style="font-size:11px;color:var(--text2)">Action Details Coverage: <span style="color:' + (coverage > 70 ? '#22c55e' : coverage > 40 ? '#f59e0b' : '#ef4444') + ';font-weight:600">' + coverage + '%</span> (' + totalWithActionInfo + '/' + combinedData.length + ' routes analyzed)</div>';
+        html += '<div style="font-size:11px;color:var(--text2);cursor:help" title="' + coverageTooltip + '">Action Details Coverage: <span style="color:' + (coverage > 70 ? '#22c55e' : coverage > 40 ? '#f59e0b' : '#ef4444') + ';font-weight:600">' + coverage + '%</span> (' + totalWithActionInfo + '/' + combinedData.length + ' routes analyzed) ℹ️</div>';
         html += '</div>';
       }
       html += '</div>';
@@ -893,10 +894,10 @@ export class PageMapGenerator {
             if (action.rendersHtml && !action.rendersJson) indicators += '<span title="Returns HTML" style="margin-left:4px;font-size:9px;background:#22c55e;color:white;padding:1px 4px;border-radius:2px">HTML</span>';
             if (action.redirectsTo) indicators += '<span title="Redirects" style="margin-left:4px;font-size:9px;background:#f59e0b;color:white;padding:1px 4px;border-radius:2px">→</span>';
           }
-          if (route.hasView) indicators += '<span title="Has View Template" style="margin-left:4px;font-size:10px">📄</span>';
-          if (route.services.length > 0) indicators += '<span title="Uses Services: ' + route.services.join(', ') + '" style="margin-left:4px;font-size:10px">⚙️</span>';
-          if (route.grpcCalls.length > 0) indicators += '<span title="gRPC Calls: ' + route.grpcCalls.join(', ') + '" style="margin-left:4px;font-size:10px">🔌</span>';
-          if (route.modelAccess.length > 0) indicators += '<span title="Model Access: ' + route.modelAccess.join(', ') + '" style="margin-left:4px;font-size:10px">💾</span>';
+          if (route.hasView) indicators += '<span title="Has View Template" style="margin-left:4px;font-size:9px;background:#10b981;color:white;padding:1px 4px;border-radius:2px">View</span>';
+          if (route.services.length > 0) indicators += '<span title="Uses Services: ' + route.services.join(', ') + '" style="margin-left:4px;font-size:9px;background:#8b5cf6;color:white;padding:1px 4px;border-radius:2px">Svc</span>';
+          if (route.grpcCalls.length > 0) indicators += '<span title="gRPC Calls: ' + route.grpcCalls.join(', ') + '" style="margin-left:4px;font-size:9px;background:#06b6d4;color:white;padding:1px 4px;border-radius:2px">gRPC</span>';
+          if (route.modelAccess.length > 0) indicators += '<span title="Model Access: ' + route.modelAccess.join(', ') + '" style="margin-left:4px;font-size:9px;background:#f59e0b;color:white;padding:1px 4px;border-radius:2px">DB</span>';
           
           // Search-friendly data-path and filter attributes
           const searchPath = [route.path || '', route.controller || '', route.action || '', route.method || ''].join(' ').toLowerCase();
@@ -1478,9 +1479,9 @@ export class PageMapGenerator {
           }
           if (view.partials.length > 0) indicators += '<span title="Uses partials: ' + view.partials.slice(0,3).join(', ') + (view.partials.length > 3 ? '...' : '') + '" style="margin-left:4px;font-size:10px">🧩 ' + view.partials.length + '</span>';
           if (view.instanceVars.length > 0) indicators += '<span title="Instance vars: @' + view.instanceVars.slice(0,5).join(', @') + '" style="margin-left:4px;font-size:10px">📦 ' + view.instanceVars.length + '</span>';
-          if (view.services.length > 0) indicators += '<span title="Services: ' + view.services.join(', ') + '" style="margin-left:4px;font-size:10px">⚙️</span>';
-          if (view.grpcCalls.length > 0) indicators += '<span title="gRPC: ' + view.grpcCalls.join(', ') + '" style="margin-left:4px;font-size:10px">🔌</span>';
-          if (view.modelAccess.length > 0) indicators += '<span title="Models: ' + view.modelAccess.join(', ') + '" style="margin-left:4px;font-size:10px">💾</span>';
+          if (view.services.length > 0) indicators += '<span title="Services: ' + view.services.join(', ') + '" style="margin-left:4px;font-size:9px;background:#8b5cf6;color:white;padding:1px 4px;border-radius:2px">Svc</span>';
+          if (view.grpcCalls.length > 0) indicators += '<span title="gRPC: ' + view.grpcCalls.join(', ') + '" style="margin-left:4px;font-size:9px;background:#06b6d4;color:white;padding:1px 4px;border-radius:2px">gRPC</span>';
+          if (view.modelAccess.length > 0) indicators += '<span title="Models: ' + view.modelAccess.join(', ') + '" style="margin-left:4px;font-size:9px;background:#f59e0b;color:white;padding:1px 4px;border-radius:2px">DB</span>';
           if (!view.hasRoute) indicators += '<span title="No matching route found" style="margin-left:4px;font-size:9px;background:#ef4444;color:white;padding:1px 4px;border-radius:2px">⚠️</span>';
           
           // Display: URL path (if route exists) or controller/action
