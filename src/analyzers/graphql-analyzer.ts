@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { parse as parseGraphQL, DocumentNode, DefinitionNode, TypeNode } from 'graphql';
 import { BaseAnalyzer } from './base-analyzer.js';
+import { parallelMapSafe } from '../utils/parallel.js';
 import type {
   AnalysisResult,
   GraphQLOperation,
@@ -53,29 +54,23 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   }
 
   private async analyzeGraphQLFiles(): Promise<GraphQLOperation[]> {
-    const operations: GraphQLOperation[] = [];
-
     const graphqlFiles = await fg(['**/*.graphql'], {
       cwd: this.basePath,
       ignore: ['**/node_modules/**', '**/.next/**'],
       absolute: true,
     });
 
-    for (const filePath of graphqlFiles) {
-      try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const document = parseGraphQL(content);
-        const fileOperations = this.extractOperationsFromDocument(
-          document,
-          path.relative(this.basePath, filePath)
-        );
-        operations.push(...fileOperations);
-      } catch (error) {
-        this.warn(`Failed to parse ${filePath}: ${(error as Error).message}`);
-      }
-    }
+    // Process files in parallel
+    const results = await parallelMapSafe(graphqlFiles, async (filePath) => {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const document = parseGraphQL(content);
+      return this.extractOperationsFromDocument(
+        document,
+        path.relative(this.basePath, filePath)
+      );
+    });
 
-    return operations;
+    return results.flat();
   }
 
   private async analyzeInlineGraphQL(): Promise<GraphQLOperation[]> {

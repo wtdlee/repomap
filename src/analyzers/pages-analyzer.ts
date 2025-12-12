@@ -2,6 +2,7 @@ import { Project, SourceFile, SyntaxKind, Node } from 'ts-morph';
 import fg from 'fast-glob';
 import * as path from 'path';
 import { BaseAnalyzer } from './base-analyzer.js';
+import { parallelMapSafe } from '../utils/parallel.js';
 import type {
   AnalysisResult,
   PageInfo,
@@ -171,26 +172,35 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     this.log(`Found ${pageFiles.length} page files`);
 
-    const pages: PageInfo[] = [];
-
+    // Add all files to project first (sequential for ts-morph safety)
     for (const filePath of pageFiles) {
       try {
-        const pageInfo = await this.analyzePageFile(filePath, pagesPath);
-        if (pageInfo) {
-          pages.push(pageInfo);
-        }
-      } catch (error) {
-        this.warn(`Failed to analyze ${filePath}: ${(error as Error).message}`);
+        this.project.addSourceFileAtPath(filePath);
+      } catch {
+        // Ignore files that can't be added
       }
     }
 
-    this.log(`Analyzed ${pages.length} pages successfully`);
+    // Analyze pages in parallel (using already-added source files)
+    const pages = await parallelMapSafe(
+      pageFiles,
+      async (filePath) => {
+        return this.analyzePageFile(filePath, pagesPath);
+      },
+      4 // Limit concurrency for ts-morph stability
+    );
 
-    return { pages };
+    // Filter out null results
+    const validPages = pages.filter((p): p is PageInfo => p !== null);
+
+    this.log(`Analyzed ${validPages.length} pages successfully`);
+
+    return { pages: validPages };
   }
 
   private async analyzePageFile(filePath: string, pagesPath: string): Promise<PageInfo | null> {
-    const sourceFile = this.project.addSourceFileAtPath(filePath);
+    const sourceFile = this.project.getSourceFile(filePath);
+    if (!sourceFile) return null;
     const relativePath = path.relative(pagesPath, filePath);
     const routePath = this.filePathToRoutePath(relativePath);
 

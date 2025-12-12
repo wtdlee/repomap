@@ -2,6 +2,7 @@ import { Project, SyntaxKind, CallExpression, Node } from 'ts-morph';
 import fg from 'fast-glob';
 import * as path from 'path';
 import { BaseAnalyzer } from './base-analyzer.js';
+import { parallelMapSafe } from '../utils/parallel.js';
 import type { AnalysisResult, APICall, RepositoryConfig } from '../types.js';
 
 /**
@@ -27,8 +28,6 @@ export class RestApiAnalyzer extends BaseAnalyzer {
   async analyze(): Promise<Partial<AnalysisResult>> {
     this.log('Starting REST API analysis...');
 
-    const apiCalls: APICall[] = [];
-
     const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
       ignore: [
@@ -45,29 +44,36 @@ export class RestApiAnalyzer extends BaseAnalyzer {
       absolute: true,
     });
 
+    // Add all files to project first
+    const sourceFiles = new Map<string, ReturnType<typeof this.project.addSourceFileAtPath>>();
     for (const filePath of tsFiles) {
       try {
-        const sourceFile = this.project.addSourceFileAtPath(filePath);
-        const relativePath = path.relative(this.basePath, filePath);
-
-        // Find fetch() calls
-        const fetchCalls = this.findFetchCalls(sourceFile, relativePath);
-        apiCalls.push(...fetchCalls);
-
-        // Find axios calls
-        const axiosCalls = this.findAxiosCalls(sourceFile, relativePath);
-        apiCalls.push(...axiosCalls);
-
-        // Find useSWR calls
-        const swrCalls = this.findSwrCalls(sourceFile, relativePath);
-        apiCalls.push(...swrCalls);
-
-        this.project.removeSourceFile(sourceFile);
+        sourceFiles.set(filePath, this.project.addSourceFileAtPath(filePath));
       } catch {
-        // Skip files that can't be parsed
+        // Skip files that can't be added
       }
     }
 
+    // Analyze files in parallel
+    const results = await parallelMapSafe(
+      Array.from(sourceFiles.entries()),
+      async ([filePath, sourceFile]) => {
+        const relativePath = path.relative(this.basePath, filePath);
+        const calls: APICall[] = [];
+
+        // Find fetch() calls
+        calls.push(...this.findFetchCalls(sourceFile, relativePath));
+        // Find axios calls
+        calls.push(...this.findAxiosCalls(sourceFile, relativePath));
+        // Find useSWR calls
+        calls.push(...this.findSwrCalls(sourceFile, relativePath));
+
+        return calls;
+      },
+      8
+    );
+
+    const apiCalls = results.flat();
     this.log(`Found ${apiCalls.length} REST API calls`);
 
     return { apiCalls };
