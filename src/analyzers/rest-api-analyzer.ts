@@ -174,15 +174,12 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     if (args.length === 0) return null;
 
     const urlArg = args[0].getText();
-    let url = this.cleanStringLiteral(urlArg);
+    const urlInfo = this.extractUrlFromArg(urlArg);
 
-    // If not a string literal, use variable/expression as placeholder
-    if (!url) {
-      url = `[${urlArg}]`;
-    }
+    if (!urlInfo.url) return null;
 
-    // Skip non-API URLs only if we have a concrete URL
-    if (!url.startsWith('[') && !this.isApiUrl(url)) return null;
+    // Skip non-API URLs only if we have a concrete URL (not a placeholder)
+    if (!urlInfo.isPlaceholder && !this.isApiUrl(urlInfo.url)) return null;
 
     let method: APICall['method'] = 'GET';
     let requiresAuth = false;
@@ -206,14 +203,14 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     return {
       id: `api-${++this.apiCallCounter}`,
       method,
-      url,
+      url: urlInfo.url,
       callType: 'fetch',
       filePath,
       line,
       containingFunction,
       usedIn: [],
       requiresAuth,
-      category: this.categorizeApi(url),
+      category: this.categorizeApi(urlInfo.url),
     };
   }
 
@@ -225,12 +222,9 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     if (args.length === 0) return null;
 
     const urlArg = args[0].getText();
-    // Try to extract URL from string literal or use variable name as placeholder
-    let url = this.cleanStringLiteral(urlArg);
-    if (!url) {
-      // Use variable/expression name as placeholder
-      url = `[${urlArg}]`;
-    }
+    const urlInfo = this.extractUrlFromArg(urlArg);
+
+    if (!urlInfo.url) return null;
 
     let requiresAuth = false;
     if (args.length > 1) {
@@ -245,14 +239,14 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     return {
       id: `api-${++this.apiCallCounter}`,
       method: this.normalizeMethod(method),
-      url,
+      url: urlInfo.url,
       callType: 'axios',
       filePath,
       line,
       containingFunction,
       usedIn: [],
       requiresAuth,
-      category: this.categorizeApi(url),
+      category: this.categorizeApi(urlInfo.url),
     };
   }
 
@@ -299,32 +293,40 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     if (args.length === 0) return null;
 
     const keyArg = args[0].getText();
-
-    // Handle various key patterns
     let url: string | null = null;
 
     // String literal: useSWR("/api/users", fetcher)
     if (keyArg.startsWith('"') || keyArg.startsWith("'") || keyArg.startsWith('`')) {
       url = this.cleanStringLiteral(keyArg);
     }
-    // Conditional: useSWR(condition ? "/api/users" : null, fetcher) or useSWR(condition ? null : "/api/users", fetcher)
+    // Conditional: useSWR(condition ? "/api/users" : null, fetcher)
     else if (keyArg.includes('?') && keyArg.includes(':')) {
       // Try to find URL in true branch
       let match = keyArg.match(/\?\s*["'`]([^"'`]+)["'`]/);
       if (match) {
         url = match[1];
       } else {
-        // Try to find URL in false branch (after : null :)
+        // Try to find URL in false branch
         match = keyArg.match(/:\s*["'`]([^"'`]+)["'`]/);
         if (match) {
           url = match[1];
         }
       }
+
+      // If still no URL, check for template literals in the condition
+      if (!url) {
+        match = keyArg.match(/\?\s*`([^`]+)`/);
+        if (match) {
+          url = match[1].replace(/\$\{[^}]+\}/g, ':param');
+        }
+      }
     }
-    // Variable reference - try to extract meaningful name
-    else if (!keyArg.includes('null') && !keyArg.includes('undefined')) {
-      // Use the variable name as a placeholder
-      url = `[${keyArg}]`;
+    // Function call pattern
+    else {
+      const urlInfo = this.extractUrlFromArg(keyArg);
+      if (urlInfo.url && !keyArg.includes('null') && !keyArg.includes('undefined')) {
+        url = urlInfo.url;
+      }
     }
 
     if (!url) return null;
@@ -383,6 +385,42 @@ export class RestApiAnalyzer extends BaseAnalyzer {
   }
 
   /**
+   * Extract URL from argument (handles literals, variables, function calls)
+   */
+  private extractUrlFromArg(argText: string): { url: string | null; isPlaceholder: boolean } {
+    // String literal: "url" or 'url' or `url`
+    if (/^["'`]/.test(argText)) {
+      const url = this.cleanStringLiteral(argText);
+      return { url, isPlaceholder: false };
+    }
+
+    // Function call: someUrlBuilder("/path") or buildUrl(`/path`)
+    const funcCallMatch = argText.match(/^(\w+)\s*\(\s*["'`]([^"'`]+)["'`]/);
+    if (funcCallMatch) {
+      return { url: `[${funcCallMatch[1]}] ${funcCallMatch[2]}`, isPlaceholder: true };
+    }
+
+    // Function call with template literal: someFunc(`/path/${var}`)
+    const funcTemplateMatch = argText.match(/^(\w+)\s*\(\s*`([^`]+)`/);
+    if (funcTemplateMatch) {
+      const path = funcTemplateMatch[2].replace(/\$\{[^}]+\}/g, ':param');
+      return { url: `[${funcTemplateMatch[1]}] ${path}`, isPlaceholder: true };
+    }
+
+    // Variable reference: use as placeholder
+    if (/^\w+(\.\w+)*$/.test(argText)) {
+      return { url: `[${argText}]`, isPlaceholder: true };
+    }
+
+    // Property access: obj.url
+    if (argText.includes('.')) {
+      return { url: `[${argText}]`, isPlaceholder: true };
+    }
+
+    return { url: null, isPlaceholder: false };
+  }
+
+  /**
    * Clean string literal (remove quotes)
    */
   private cleanStringLiteral(value: string): string | null {
@@ -391,12 +429,9 @@ export class RestApiAnalyzer extends BaseAnalyzer {
 
     // Skip template literals with expressions
     if (cleaned.includes('${')) {
-      // Try to extract the base path
-      const baseMatch = cleaned.match(/^([^$]+)/);
-      if (baseMatch) {
-        return baseMatch[1] + '...';
-      }
-      return null;
+      // Try to extract the base path and convert expressions to :param
+      const parameterized = cleaned.replace(/\$\{[^}]+\}/g, ':param');
+      return parameterized;
     }
 
     return cleaned || null;
@@ -424,12 +459,26 @@ export class RestApiAnalyzer extends BaseAnalyzer {
       url.includes('.json') ||
       // Common external API patterns
       url.includes('api.') ||
+      url.includes('github.io') || // GitHub Pages hosted APIs
       url.includes('hsforms.com') || // HubSpot
+      url.includes('hubspot') || // HubSpot
       url.includes('amazonaws.com') || // AWS S3
+      url.includes('s3.') || // AWS S3 alternative
       url.includes('googleapis.com') || // Google APIs
       url.includes('stripe.com') || // Stripe
       url.includes('graph.facebook.com') || // Facebook
-      url.includes('api.twitter.com') // Twitter
+      url.includes('api.twitter.com') || // Twitter
+      url.includes('slack.com') || // Slack
+      url.includes('discord.com') || // Discord
+      url.includes('sendgrid.com') || // SendGrid
+      url.includes('twilio.com') || // Twilio
+      url.includes('firebase') || // Firebase
+      url.includes('supabase') || // Supabase
+      url.includes('auth0.com') || // Auth0
+      url.includes('okta.com') || // Okta
+      url.includes('cloudflare.com') || // Cloudflare
+      url.includes('vercel.com') || // Vercel
+      url.includes('netlify.com') // Netlify
     );
   }
 
@@ -437,14 +486,30 @@ export class RestApiAnalyzer extends BaseAnalyzer {
    * Categorize API by URL pattern
    */
   private categorizeApi(url: string): string | undefined {
+    // External services
     if (url.includes('hsforms.com') || url.includes('hubspot')) return 'HubSpot';
     if (url.includes('amazonaws.com') || url.includes('s3.')) return 'AWS S3';
     if (url.includes('googleapis.com')) return 'Google API';
     if (url.includes('stripe.com')) return 'Stripe';
     if (url.includes('graph.facebook.com')) return 'Facebook';
     if (url.includes('api.twitter.com')) return 'Twitter';
+    if (url.includes('slack.com')) return 'Slack';
+    if (url.includes('discord.com')) return 'Discord';
+    if (url.includes('sendgrid.com')) return 'SendGrid';
+    if (url.includes('twilio.com')) return 'Twilio';
+    if (url.includes('firebase')) return 'Firebase';
+    if (url.includes('supabase')) return 'Supabase';
+    if (url.includes('auth0.com')) return 'Auth0';
+    if (url.includes('okta.com')) return 'Okta';
+    if (url.includes('github.io')) return 'GitHub Pages API';
+
+    // Internal patterns
     if (url.startsWith('/api/')) return 'Internal API';
     if (url.startsWith('/')) return 'Internal Route';
+
+    // Dynamic/placeholder URLs
+    if (url.startsWith('[')) return 'Dynamic URL';
+
     return undefined;
   }
 
