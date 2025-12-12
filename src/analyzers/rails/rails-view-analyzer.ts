@@ -19,7 +19,7 @@ export interface RailsViewInfo {
   controller: string; // Controller name (e.g., "users", "projects")
   action: string; // Action name (e.g., "index", "show")
   format: string; // Format (html, json, etc.)
-  template: 'haml' | 'erb' | 'other';
+  template: 'haml' | 'erb' | 'yml' | 'other';
   routePath?: string; // Mapped route path
   partials: string[]; // Used partials
   helpers: string[]; // Used helpers
@@ -74,8 +74,8 @@ export async function analyzeRailsViews(rootPath: string): Promise<RailsViewAnal
     };
   }
 
-  // Find all view files
-  const viewFiles = await glob('**/*.{haml,erb,html.haml,html.erb}', {
+  // Find all view files (including .yml for SSR React pages)
+  const viewFiles = await glob('**/*.{haml,erb,html.haml,html.erb,yml}', {
     cwd: viewsPath,
     nodir: true,
   });
@@ -140,21 +140,41 @@ async function parseViewFile(
     const nameParts = fileName.split('.');
     const action = nameParts[0].replace(/^_/, ''); // Remove leading underscore for partials
     const isPartial = fileName.startsWith('_');
-    const template = fileName.endsWith('.haml')
-      ? 'haml'
-      : fileName.endsWith('.erb')
-        ? 'erb'
-        : 'other';
+
+    // Detect template type
+    let template: 'haml' | 'erb' | 'yml' | 'other';
+    if (fileName.endsWith('.yml')) {
+      template = 'yml';
+    } else if (fileName.endsWith('.haml')) {
+      template = 'haml';
+    } else if (fileName.endsWith('.erb')) {
+      template = 'erb';
+    } else {
+      template = 'other';
+    }
+
     const format = nameParts.length > 2 ? nameParts[1] : 'html';
 
     // Skip partials for main page list
     if (isPartial) return null;
 
     // Extract information from content
-    const partials = extractPartials(content, template);
-    const helpers = extractHelpers(content, template);
-    const instanceVars = extractInstanceVars(content);
-    const reactComponents = extractReactComponents(content, template);
+    let partials: string[] = [];
+    let helpers: string[] = [];
+    let instanceVars: string[] = [];
+    let reactComponents: ReactComponentRef[] = [];
+
+    if (template === 'yml') {
+      // YML files are SSR React pages - extract data fields as "instance vars"
+      instanceVars = extractYmlFields(content);
+      // Mark as SSR React page
+      reactComponents = [{ name: 'App', ssr: true, propsVar: '@yml_data' }];
+    } else {
+      partials = extractPartials(content, template);
+      helpers = extractHelpers(content, template);
+      instanceVars = extractInstanceVars(content);
+      reactComponents = extractReactComponents(content, template);
+    }
 
     return {
       name: action,
@@ -254,6 +274,27 @@ function extractReactComponents(
     seen.add(c.name);
     return true;
   });
+}
+
+function extractYmlFields(content: string): string[] {
+  // Extract top-level keys from YML file as "data fields"
+  const fields: string[] = [];
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    // Top-level keys (not indented)
+    const topMatch = line.match(/^([a-z_]+):/);
+    if (topMatch && !topMatch[1].startsWith('_')) {
+      fields.push(topMatch[1]);
+    }
+    // _fields array items
+    const fieldMatch = line.match(/^\s+-\s+(\w+)/);
+    if (fieldMatch) {
+      fields.push(fieldMatch[1]);
+    }
+  }
+
+  return [...new Set(fields)].slice(0, 50); // Limit to 50 fields
 }
 
 function extractInstanceVars(content: string): string[] {
