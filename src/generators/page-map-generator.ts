@@ -722,7 +722,7 @@ export class PageMapGenerator {
       
       document.getElementById('detail-title').textContent = 'Page Hierarchies';
       document.getElementById('detail-body').innerHTML = html;
-      document.getElementById('detail').style.right = '0';
+      document.getElementById('detail').classList.add('open');
       
       // Highlight hierarchical pages in the list
       document.querySelectorAll('.page-item').forEach(item => {
