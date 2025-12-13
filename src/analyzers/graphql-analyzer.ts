@@ -6,6 +6,7 @@ import { parse as parseGraphQL, DocumentNode, DefinitionNode, TypeNode } from 'g
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
 import { isGraphQLHook, hasGraphQLIndicators } from './graphql-utils.js';
+import { parseCodegenDocumentExports } from './codegen-ts-ast.js';
 import type {
   AnalysisResult,
   GraphQLOperation,
@@ -118,59 +119,42 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         const content = await fs.readFile(filePath, 'utf-8');
         const relativePath = path.relative(this.basePath, filePath);
 
-        // Optimized line-by-line parsing (Document definitions are on single lines)
-        const lines = content.split('\n');
-        for (const line of lines) {
-          // Quick check before regex
-          if (!line.includes('Document =') || !line.includes('DocumentNode')) continue;
+        // Fast pre-filter
+        if (!content.includes('Document') || !content.includes('definitions')) continue;
 
-          // Match: export const XxxDocument = {...} as unknown as DocumentNode
-          const match = line.match(
-            /export\s+const\s+(\w+Document)\s*=\s*(\{"kind":"Document".+\})\s*as\s+unknown\s+as\s+DocumentNode/
+        const exports = parseCodegenDocumentExports(content, relativePath);
+        for (const e of exports) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc = e.document as any;
+          const def = doc?.definitions?.[0];
+          if (!def || def.kind !== 'OperationDefinition') continue;
+
+          // Extract variables (simplified for performance)
+          const variables: VariableInfo[] = (def.variableDefinitions || []).map(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (varDef: any) => ({
+              name: varDef.variable?.name?.value || 'unknown',
+              type: this.extractTypeFromAst(varDef.type),
+              required: varDef.type?.kind === 'NonNullType',
+            })
           );
-          if (!match) continue;
 
-          const documentName = match[1];
-          const documentJson = match[2];
-
-          try {
-            const documentObj = JSON.parse(documentJson);
-
-            if (documentObj.kind === 'Document' && documentObj.definitions) {
-              // Only process first definition (main operation)
-              const def = documentObj.definitions[0];
-              if (def?.kind === 'OperationDefinition') {
-                const operationName = def.name?.value || documentName.replace(/Document$/, '');
-                const operationType = def.operation as 'query' | 'mutation' | 'subscription';
-
-                // Extract variables (simplified for performance)
-                const variables: VariableInfo[] = (def.variableDefinitions || []).map(
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  (varDef: any) => ({
-                    name: varDef.variable?.name?.value || 'unknown',
-                    type: this.extractTypeFromAst(varDef.type),
-                    required: varDef.type?.kind === 'NonNullType',
-                  })
-                );
-
-                operations.push({
-                  name: operationName,
-                  type: operationType,
-                  filePath: relativePath,
-                  usedIn: [],
-                  variables,
-                  returnType: this.inferReturnTypeFromAst(def),
-                  fragments: this.extractFragmentReferencesFromAst(def),
-                  fields: this.extractFieldsFromAst(def.selectionSet),
-                });
-              }
-            }
-          } catch {
-            // Skip unparseable JSON
-          }
+          operations.push({
+            name: e.operationName,
+            type: e.operationType,
+            filePath: relativePath,
+            usedIn: [],
+            variables,
+            returnType: this.inferReturnTypeFromAst(def),
+            fragments: this.extractFragmentReferencesFromAst(def),
+            fields: this.extractFieldsFromAst(def.selectionSet),
+            variableNames: [e.documentName],
+          });
         }
 
-        this.log(`Found ${operations.length} operations in codegen output: ${relativePath}`);
+        if (exports.length > 0) {
+          this.log(`Found ${exports.length} operations in codegen output: ${relativePath}`);
+        }
       } catch (error) {
         this.warn(`Failed to analyze codegen file ${filePath}: ${(error as Error).message}`);
       }

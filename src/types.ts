@@ -165,6 +165,23 @@ export interface DataFetchingInfo {
   operationName: string;
   variables?: string[];
   source?: string; // Source component or hook name
+  /**
+   * Confidence for the mapping between page <-> hook <-> operation.
+   * - 'certain': direct/close evidence
+   * - 'likely': reachable but indirect evidence
+   * - 'unknown': reachable via widely-shared/common modules (UI may display this as "Common" or omit it)
+   */
+  confidence?: 'certain' | 'likely' | 'unknown';
+  /**
+   * Evidence for why this operation is linked.
+   * This is primarily for debugging missing/incorrect links.
+   */
+  evidence?: Array<{
+    kind: 'import-edge' | 'operation-reference';
+    file: string;
+    line?: number;
+    detail?: string;
+  }>;
 }
 
 export interface NavigationInfo {

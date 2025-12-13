@@ -18,6 +18,7 @@ import { PagesAnalyzer } from '../analyzers/pages-analyzer.js';
 import { GraphQLAnalyzer } from '../analyzers/graphql-analyzer.js';
 import { DataFlowAnalyzer } from '../analyzers/dataflow-analyzer.js';
 import { RestApiAnalyzer } from '../analyzers/rest-api-analyzer.js';
+import { TsModuleResolver } from '../utils/ts-module-resolver.js';
 import { MermaidGenerator } from '../generators/mermaid-generator.js';
 import { MarkdownGenerator } from '../generators/markdown-generator.js';
 
@@ -350,6 +351,9 @@ export class DocGeneratorEngine {
       if (!normalizedToFile.has(normalized)) normalizedToFile.set(normalized, f);
     }
 
+    // Use TypeScript Compiler API for accurate tsconfig paths/aliases resolution.
+    const tsResolver = new TsModuleResolver(repoPath, knownFiles);
+
     // Infer alias bases for "@/..." imports from the repo structure.
     // Default is "src/", but many Rails+React repos use "frontend/src/" etc.
     const aliasBases = new Set<string>(['src/']);
@@ -419,6 +423,10 @@ export class DocGeneratorEngine {
     const resolveImport = (fromFile: string, importPath: string): string | null => {
       if (!importPath) return null;
 
+      // 0) Prefer TS compiler resolution (handles tsconfig `extends`, `paths`, workspace aliases, etc.)
+      const tsResolved = tsResolver.resolve(fromFile, importPath);
+      if (tsResolved) return tsResolved.file;
+
       // Relative imports
       if (importPath.startsWith('.')) {
         const fromDir = path.dirname(fromFile);
@@ -479,7 +487,7 @@ export class DocGeneratorEngine {
       }
     };
 
-    type ImportEdge = { spec: string; names: string[] | null };
+    type ImportEdge = { spec: string; names: string[] | null; pos?: number };
 
     const extractImportsFromFile = async (rel: string): Promise<ImportEdge[]> => {
       const key = normalizeRel(rel);
@@ -511,10 +519,10 @@ export class DocGeneratorEngine {
       const found = new Set<string>();
       const edges: ImportEdge[] = [];
 
-      const pushSpec = (spec: unknown, names: string[] | null) => {
+      const pushSpec = (spec: unknown, names: string[] | null, pos?: number) => {
         if (typeof spec !== 'string' || spec.length === 0) return;
         found.add(spec);
-        edges.push({ spec, names });
+        edges.push({ spec, names, pos });
       };
 
       // swc AST typing is large; keep traversal with minimal "unknown" narrowing.
@@ -559,11 +567,15 @@ export class DocGeneratorEngine {
               }
             }
             if (Array.isArray(names) && names.length === 0) names = null;
-            pushSpec(spec, names);
+            pushSpec(spec, names, (nAny as unknown as { span?: { start?: number } }).span?.start);
           }
         } else if (nAny.type === 'ExportAllDeclaration') {
           // Re-export all (treated as unknown runtime dependency if we ever import this module as unknown)
-          pushSpec(nAny.source?.value, null);
+          pushSpec(
+            nAny.source?.value,
+            null,
+            (nAny as unknown as { span?: { start?: number } }).span?.start
+          );
         } else if (nAny.type === 'ExportNamedDeclaration') {
           // Re-export named. Capture exported names when possible.
           const spec = nAny.source?.value;
@@ -583,18 +595,32 @@ export class DocGeneratorEngine {
               if (n) names.push(n);
             }
           }
-          pushSpec(spec, names.length > 0 ? names : null);
+          pushSpec(
+            spec,
+            names.length > 0 ? names : null,
+            (nAny as unknown as { span?: { start?: number } }).span?.start
+          );
         } else if (nAny.type === 'CallExpression') {
           // require('x')
           const callee = nAny.callee || null;
           if (callee?.type === 'Identifier' && callee.value === 'require') {
             const a0 = nAny.arguments?.[0]?.expression;
-            if (a0?.type === 'StringLiteral') pushSpec(a0.value, null);
+            if (a0?.type === 'StringLiteral')
+              pushSpec(
+                a0.value,
+                null,
+                (nAny as unknown as { span?: { start?: number } }).span?.start
+              );
           }
           // import('x')
           if (callee?.type === 'Import') {
             const a0 = nAny.arguments?.[0]?.expression;
-            if (a0?.type === 'StringLiteral') pushSpec(a0.value, null);
+            if (a0?.type === 'StringLiteral')
+              pushSpec(
+                a0.value,
+                null,
+                (nAny as unknown as { span?: { start?: number } }).span?.start
+              );
           }
         }
 
@@ -613,6 +639,24 @@ export class DocGeneratorEngine {
       const list = Array.from(found);
       importCache.set(key, list);
       return edges.filter((e) => typeof e.spec === 'string' && e.spec.length > 0);
+    };
+
+    const lineFromPos = (content: string, pos: number | undefined): number | undefined => {
+      if (pos === undefined || pos < 0) return undefined;
+      let line = 1;
+      for (let i = 0; i < content.length && i < pos; i++) {
+        if (content.charCodeAt(i) === 10) line++;
+      }
+      return line;
+    };
+
+    const lineFromIndex = (content: string, idx: number): number | undefined => {
+      if (idx < 0) return undefined;
+      let line = 1;
+      for (let i = 0; i < content.length && i < idx; i++) {
+        if (content.charCodeAt(i) === 10) line++;
+      }
+      return line;
     };
 
     // Export map cache for barrel resolution: module file -> exportName -> source spec, plus export * sources.
@@ -794,6 +838,7 @@ export class DocGeneratorEngine {
       {
         page: AnalysisResult['pages'][number];
         entryFile: string;
+        parent: Map<string, { from: string; spec: string; line?: number; detail?: string }>;
         bestByOp: Map<
           string,
           {
@@ -826,6 +871,10 @@ export class DocGeneratorEngine {
 
       const visited = new Set<string>();
       const queue: { f: string; depth: number }[] = [{ f: entryFile, depth: 0 }];
+      const parent = new Map<
+        string,
+        { from: string; spec: string; line?: number; detail?: string }
+      >();
       const maxDepth = 30;
       const maxNodes = 20000;
 
@@ -857,7 +906,18 @@ export class DocGeneratorEngine {
         for (const e of importEdges) {
           const to = resolveImport(cur.f, e.spec);
           if (!to) continue;
-          if (!visited.has(to)) queue.push({ f: to, depth: cur.depth + 1 });
+          if (!visited.has(to)) {
+            queue.push({ f: to, depth: cur.depth + 1 });
+            if (!parent.has(to)) {
+              const c = await readRelFile(cur.f);
+              const l = c ? lineFromPos(c, e.pos) : undefined;
+              const detail =
+                Array.isArray(e.names) && e.names.length > 0
+                  ? `names:${e.names.join(',')}`
+                  : undefined;
+              parent.set(to, { from: cur.f, spec: e.spec, line: l, detail });
+            }
+          }
 
           // If importing named exports from a barrel, resolve only those exports instead of expanding the whole barrel.
           if (Array.isArray(e.names) && e.names.length > 0) {
@@ -867,6 +927,14 @@ export class DocGeneratorEngine {
                 const resolved = await resolveExportFromBarrel(to, n, new Set<string>());
                 if (resolved && !visited.has(resolved)) {
                   queue.push({ f: resolved, depth: cur.depth + 2 });
+                  if (!parent.has(resolved)) {
+                    parent.set(resolved, {
+                      from: to,
+                      spec: `re-export:${n}`,
+                      line: undefined,
+                      detail: 'barrel',
+                    });
+                  }
                 }
               }
             }
@@ -887,7 +955,7 @@ export class DocGeneratorEngine {
         }
       }
 
-      perPageBest.set(page.path, { page, entryFile, bestByOp });
+      perPageBest.set(page.path, { page, entryFile, parent, bestByOp });
 
       // Update reachability counts once per page.
       for (const f of visited) {
@@ -913,7 +981,7 @@ export class DocGeneratorEngine {
     // - Close: distance 1-2 (page/component-adjacent)
     // - Indirect: distance >= 3
     // - Common: common ops (distance > 0) collapsed in UI
-    for (const { page, bestByOp } of perPageBest.values()) {
+    for (const { page, entryFile, parent, bestByOp } of perPageBest.values()) {
       const existingOps = new Set(
         (page.dataFetching || []).map((df) => df.operationName?.replace(/^[→\->\s]+/, '') || '')
       );
@@ -937,6 +1005,69 @@ export class DocGeneratorEngine {
           source = `indirect:${sourceFile}`;
         }
 
+        const confidence: 'certain' | 'likely' | 'unknown' =
+          distance === 0 || distance <= 2
+            ? 'certain'
+            : source?.startsWith('common:')
+              ? 'unknown'
+              : 'likely';
+
+        // Evidence: operation reference + (best-effort) import edges.
+        const evidence: Array<{
+          kind: 'import-edge' | 'operation-reference';
+          file: string;
+          line?: number;
+          detail?: string;
+        }> = [];
+
+        // 0) Import path chain (entry -> ... -> sourceFile)
+        if (distance > 0 && sourceFile !== entryFile) {
+          const chain: Array<{
+            from: string;
+            to: string;
+            spec: string;
+            line?: number;
+            detail?: string;
+          }> = [];
+          let cur = sourceFile;
+          const seen = new Set<string>();
+          while (cur !== entryFile) {
+            if (seen.has(cur)) break;
+            seen.add(cur);
+            const p = parent.get(cur);
+            if (!p) break;
+            chain.push({ from: p.from, to: cur, spec: p.spec, line: p.line, detail: p.detail });
+            cur = p.from;
+          }
+          chain.reverse();
+          for (const c of chain) {
+            evidence.push({
+              kind: 'import-edge',
+              file: c.from,
+              line: c.line,
+              detail: `${c.spec} -> ${c.to}${c.detail ? ` (${c.detail})` : ''}`,
+            });
+          }
+        }
+
+        // 1) Operation reference in the source file (best-effort line)
+        const srcContent = await readRelFile(sourceFile);
+        if (srcContent) {
+          const idx =
+            srcContent.indexOf(`${opName}Document`) >= 0
+              ? srcContent.indexOf(`${opName}Document`)
+              : srcContent.indexOf(opName);
+          const line = idx >= 0 ? lineFromIndex(srcContent, idx) : undefined;
+          evidence.push({
+            kind: 'operation-reference',
+            file: sourceFile,
+            line,
+            detail: `ref:${opName}`,
+          });
+        } else {
+          evidence.push({ kind: 'operation-reference', file: sourceFile, detail: `ref:${opName}` });
+        }
+
         page.dataFetching.push({
           type:
             opType === 'mutation'
@@ -946,6 +1077,8 @@ export class DocGeneratorEngine {
                 : 'useQuery',
           operationName: opName,
           source,
+          confidence,
+          evidence: evidence.length > 0 ? evidence : undefined,
         });
       }
     }

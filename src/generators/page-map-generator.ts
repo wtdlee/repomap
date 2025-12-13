@@ -164,7 +164,11 @@ export class PageMapGenerator {
     const railsAnalysis = options?.railsAnalysis;
     const activeTab = options?.activeTab || 'pages';
 
-    const graphqlOpsJson = JSON.stringify(
+    // Safely embed JSON inside <script> without risking early </script> termination.
+    // Replace "<" to prevent any "</script>" sequences from breaking the script tag.
+    const safeJson = (v: unknown): string => JSON.stringify(v).replace(/</g, '\\u003c');
+
+    const graphqlOpsJson = safeJson(
       this.graphqlOps.map((op) => ({
         name: op.name,
         type: op.type,
@@ -175,22 +179,25 @@ export class PageMapGenerator {
       }))
     );
 
-    const componentsJson = JSON.stringify(this.components);
+    const componentsJson = safeJson(this.components);
+    const pagesJson = safeJson(allPages);
+    const relationsJson = safeJson(relations);
+    const apiCallsJson = safeJson(this.apiCalls);
 
     // Rails data for integrated view
-    const railsRoutesJson = railsAnalysis ? JSON.stringify(railsAnalysis.routes.routes) : '[]';
+    const railsRoutesJson = railsAnalysis ? safeJson(railsAnalysis.routes.routes) : '[]';
     const railsControllersJson = railsAnalysis
-      ? JSON.stringify(railsAnalysis.controllers.controllers)
+      ? safeJson(railsAnalysis.controllers.controllers)
       : '[]';
-    const railsModelsJson = railsAnalysis ? JSON.stringify(railsAnalysis.models.models) : '[]';
+    const railsModelsJson = railsAnalysis ? safeJson(railsAnalysis.models.models) : '[]';
     const railsViewsJson = railsAnalysis
-      ? JSON.stringify(railsAnalysis.views)
+      ? safeJson(railsAnalysis.views)
       : '{ "views": [], "pages": [], "summary": {} }';
     const railsReactJson = railsAnalysis
-      ? JSON.stringify(railsAnalysis.react)
+      ? safeJson(railsAnalysis.react)
       : '{ "components": [], "entryPoints": [], "summary": {} }';
-    const railsGrpcJson = railsAnalysis ? JSON.stringify(railsAnalysis.grpc) : '{ "services": [] }';
-    const railsSummaryJson = railsAnalysis ? JSON.stringify(railsAnalysis.summary) : 'null';
+    const railsGrpcJson = railsAnalysis ? safeJson(railsAnalysis.grpc) : '{ "services": [] }';
+    const railsSummaryJson = railsAnalysis ? safeJson(railsAnalysis.summary) : 'null';
 
     // Environment info
     const hasRails = envResult?.hasRails || false;
@@ -365,15 +372,17 @@ export class PageMapGenerator {
     };
 
     // Frontend data
-    const pages = ${JSON.stringify(allPages)};
-    const relations = ${JSON.stringify(relations)};
+    const pages = ${pagesJson};
+    const relations = ${relationsJson};
     const graphqlOps = ${graphqlOpsJson};
     const components = ${componentsJson};
-    const apiCallsData = ${JSON.stringify(this.apiCalls)};
+    const apiCallsData = ${apiCallsJson};
     window.apiCalls = apiCallsData;
     const pageMap = new Map(pages.map(p => [p.path, p]));
     const gqlMap = new Map(graphqlOps.map(op => [op.name, op]));
     const compMap = new Map(components.map(c => [c.name, c]));
+    // Mapping metadata for UI debugging (key -> {confidence, evidence})
+    const opMetaMap = new Map();
 
     // Rails data (if available)
     const railsRoutes = ${railsRoutesJson};
@@ -2361,10 +2370,17 @@ export class PageMapGenerator {
                 const isQ = !op.type?.includes('Mutation');
                 const sourceForModal = op.sourceDetail || op.sourcePath;
                 const srcArg = op.sourcePath !== 'Direct' && sourceForModal
-                  ? ",\\'"+sourceForModal.replace(/'/g, "\\\\'")+"\\'"
-                  : '';
+                  ? "\\'"+sourceForModal.replace(/'/g, "\\\\'")+"\\'"
+                  : 'null';
+
+                // Store mapping metadata in a global map and pass only a key to onclick.
+                const metaKey = op.queryName + '|' + (sourceForModal || '') + '|' + (op.type || '');
+                if (op.confidence || (op.evidence && op.evidence.length)) {
+                  opMetaMap.set(metaKey, { confidence: op.confidence, evidence: op.evidence });
+                }
+                const metaArg = ",\\'"+metaKey.replace(/'/g, "\\\\'")+"\\'";
                 // detail-item keeps base padding, adds indent
-                dataHtml += '<div class="detail-item data-op" style="padding:8px 10px 8px '+totalPadding+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
+                dataHtml += '<div class="detail-item data-op" style="padding:8px 10px 8px '+totalPadding+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\',"+srcArg+metaArg+')">' +
                   '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'" style="font-size:10px">'+(isQ?'Q':'M')+'</span> '+op.queryName+'</div>';
               });
 
@@ -2870,11 +2886,27 @@ export class PageMapGenerator {
       btn.remove();
     };
 
-    function showDataDetail(rawName, sourcePath) {
+    function showDataDetail(rawName, sourcePath, metaKeyOrJson) {
       // Clean up name: remove "→ " prefix and " (ComponentName)" suffix
       const name = rawName
         .replace(/^[→\\->\\s]+/, '')
         .replace(/\\s*\\([^)]+\\)\\s*$/, '');
+
+      let meta = null;
+      try {
+        // New: lookup by meta key
+        if (metaKeyOrJson && typeof metaKeyOrJson === 'string' && opMetaMap.has(metaKeyOrJson)) {
+          meta = opMetaMap.get(metaKeyOrJson);
+        }
+        // Backward compatibility: if someone passes raw JSON string
+        else if (metaKeyOrJson && typeof metaKeyOrJson === 'string' && metaKeyOrJson.trim().startsWith('{')) {
+          meta = JSON.parse(metaKeyOrJson);
+        } else if (metaKeyOrJson && typeof metaKeyOrJson === 'object') {
+          meta = metaKeyOrJson;
+        }
+      } catch {
+        meta = null;
+      }
 
       // Convert SCREAMING_CASE to PascalCase (e.g., COMPANY_QUERY → CompanyQuery)
       const toPascalCase = (str) => {
@@ -2947,7 +2979,90 @@ export class PageMapGenerator {
 
       if (op) {
         // Found GraphQL operation
-        html = '<div class="detail-section"><h4>Type</h4><span class="tag '+(op.type==='mutation'?'tag-mutation':'tag-query')+'">'+op.type.toUpperCase()+'</span></div>';
+        const confidence = meta?.confidence || '';
+        const confidenceTheme = (level) => {
+          if (level === 'certain') {
+            return {
+              label: 'CERTAIN',
+              bg: '#22c55e',
+              title: 'Certain: reached via a very close import path from the page (0–2 steps)',
+            };
+          }
+          if (level === 'likely') {
+            return {
+              label: 'LIKELY',
+              bg: '#f59e0b',
+              title: 'Likely: reachable via the import graph, but indirect (3+ steps)',
+            };
+          }
+          if (level === 'unknown') {
+            return {
+              label: 'COMMON',
+              bg: '#64748b',
+              title: 'Common: reached via widely shared modules across many pages',
+            };
+          }
+          return null;
+        };
+
+        const conf = confidenceTheme(confidence);
+        const confidenceBadge =
+          confidence === 'likely' && conf
+            ? '<span class="tag" title="' +
+              conf.title +
+              '" style="cursor:help;font-size:10px;display:inline-flex;align-items:center;justify-content:center;height:18px;line-height:18px;padding:0 8px;border-radius:999px;background:' +
+              conf.bg +
+              ';color:white;opacity:0.95">' +
+              conf.label +
+              '</span>'
+            : '';
+
+        html =
+          '<div class="detail-section"><h4>Type</h4><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
+          '<span class="tag ' +
+          (op.type === 'mutation' ? 'tag-mutation' : 'tag-query') +
+          '" style="display:inline-flex;align-items:center;justify-content:center;height:18px;line-height:18px;padding:0 8px;border-radius:999px">' +
+          op.type.toUpperCase() +
+          '</span>' +
+          confidenceBadge +
+          '</div></div>';
+
+        const escapeHtml = (s) => String(s ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+
+        // Prepare Evidence section HTML (render later, after GraphQL section)
+        let evidenceSectionHtml = '';
+        if (meta && meta.evidence && Array.isArray(meta.evidence) && meta.evidence.length > 0) {
+          evidenceSectionHtml += '<div class="detail-section"><h4>Evidence</h4>';
+          meta.evidence.slice(0, 12).forEach(ev => {
+            const file = ev.file || '';
+            const line = ev.line ? ':' + ev.line : '';
+            const detailRaw = ev.detail ? String(ev.detail) : '';
+
+            // Escape then enhance arrows for readability
+            const detailEsc = escapeHtml(detailRaw);
+            const detailPretty = detailEsc.replace(/-&gt;|->/g, '<span style="color:#60a5fa;font-weight:700;padding:0 4px">→</span>');
+
+            evidenceSectionHtml += '<div class="detail-item" style="font-size:11px;display:flex;flex-direction:column;gap:6px;align-items:flex-start;max-width:100%;overflow:hidden">' +
+              '<code style="background:#0f172a;color:#93c5fd;padding:2px 6px;border-radius:3px;font-size:10px;display:block;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word">' +
+                escapeHtml(file + line) +
+              '</code>' +
+              (detailRaw
+                ? '<div style="opacity:0.92;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word">' + detailPretty + '</div>'
+                : '') +
+              '</div>';
+          });
+          if (meta.evidence.length > 12) {
+            evidenceSectionHtml += '<div class="detail-item" style="font-size:11px;opacity:0.8">... '+(meta.evidence.length - 12)+' more</div>';
+          }
+          evidenceSectionHtml += '</div>';
+        }
+
+        // Confidence is shown as a small badge next to Type to avoid taking extra vertical space.
 
         // Source info
         if (sourcePath) {
@@ -2959,7 +3074,15 @@ export class PageMapGenerator {
             sourcePath.endsWith('.jsx');
           const isHook = !looksLikeFile && sourcePath.startsWith('use');
           const label = looksLikeFile ? 'File' : isHook ? 'Hook' : 'Component';
-          html += '<div class="detail-section"><h4>Source</h4><div class="detail-item" style="font-size:12px">via '+label+': <span class="text-accent">'+sourcePath+'</span></div></div>';
+          html += '<div class="detail-section">' +
+            '<h4 style="display:flex;justify-content:space-between;align-items:center">' +
+              'Source' +
+              '<span class="tag tag-default" style="font-size:10px">via ' + label + '</span>' +
+            '</h4>' +
+            '<code style="background:#0f172a;color:#93c5fd;padding:8px 10px;border-radius:6px;font-family:monospace;font-size:11px;display:block;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word">' +
+              escapeHtml(sourcePath) +
+            '</code>' +
+          '</div>';
         }
 
         // Operation Name with copy button
@@ -2984,10 +3107,14 @@ export class PageMapGenerator {
 
           html += '<div class="detail-section"><h4 style="display:flex;justify-content:space-between;align-items:center">GraphQL<button class="copy-btn" onclick="copyGqlCode(this)" data-code="'+gqlCodeEscaped+'" title="Copy GraphQL">📋</button></h4>';
           html += '<pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-size:11px;overflow-x:auto;white-space:pre;max-height:300px;overflow-y:auto">' + gqlCode + '</pre></div>';
+          // Evidence should appear right after GraphQL section
+          if (evidenceSectionHtml) html += evidenceSectionHtml;
         } else if (op.variables?.length) {
           html += '<div class="detail-section"><h4>Variables</h4>';
           op.variables.forEach(v => { html += '<div class="detail-item">'+v.name+': <code style="background:#0f172a;color:#93c5fd;padding:2px 6px;border-radius:3px;font-family:monospace">'+v.type+'</code>'+(v.required?' (required)':'')+'</div>'; });
           html += '</div>';
+          // Evidence should appear right after Variables section (when GraphQL block is absent)
+          if (evidenceSectionHtml) html += evidenceSectionHtml;
         }
         if (op.usedIn?.length) {
           html += '<div class="detail-section"><h4>Used In ('+op.usedIn.length+' files)</h4>';

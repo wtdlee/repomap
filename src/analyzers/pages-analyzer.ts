@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
+import { parseCodegenDocumentExports } from './codegen-ts-ast.js';
 import {
   ALL_GRAPHQL_HOOKS,
   isQueryHook,
@@ -134,47 +135,19 @@ export class PagesAnalyzer extends BaseAnalyzer {
         const content = await fsPromises.readFile(fullPath, 'utf-8');
         const relPath = path.relative(this.basePath, fullPath);
 
-        // Skip if file doesn't contain DocumentNode (not a codegen file)
-        if (!content.includes('DocumentNode')) continue;
+        // Fast pre-filter: most codegen outputs contain "Document" + "definitions"
+        if (!content.includes('Document') || !content.includes('definitions')) continue;
 
-        const lines = content.split('\n');
-
-        for (const line of lines) {
-          // Match: export const XxxDocument = {...} as unknown as DocumentNode
-          if (!line.includes('Document') || !line.includes('=')) continue;
-
-          // Multiple patterns for codegen output
-          const patterns = [
-            /export\s+const\s+(\w+Document)\s*=/,
-            /export\s+const\s+(\w+):\s*DocumentNode\s*=/,
-            /const\s+(\w+Document)\s*=.*DocumentNode/,
-          ];
-
-          for (const pattern of patterns) {
-            const match = line.match(pattern);
-            if (!match) continue;
-
-            const documentName = match[1];
-            const operationName = documentName.replace(/Document$/, '');
-
-            // Determine type from content
-            let operationType = 'query';
-            if (line.includes('"mutation"') || documentName.toLowerCase().includes('mutation')) {
-              operationType = 'mutation';
-            } else if (
-              line.includes('"subscription"') ||
-              documentName.toLowerCase().includes('subscription')
-            ) {
-              operationType = 'subscription';
-            }
-
-            this.codegenMap.set(documentName, { operationName, operationType });
-            break;
-          }
+        const exports = parseCodegenDocumentExports(content, relPath);
+        for (const e of exports) {
+          this.codegenMap.set(e.documentName, {
+            operationName: e.operationName,
+            operationType: e.operationType,
+          });
         }
 
-        if (this.codegenMap.size > 0) {
-          this.log(`Loaded ${this.codegenMap.size} codegen mappings from ${relPath}`);
+        if (exports.length > 0) {
+          this.log(`Loaded ${exports.length} codegen mappings from ${relPath}`);
         }
       } catch {
         // Skip if can't read

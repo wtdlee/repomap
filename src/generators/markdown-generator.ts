@@ -201,6 +201,7 @@ export class MarkdownGenerator {
 
           const isMutation = df.type.includes('Mutation');
           const src = df.source || '';
+          const conf = df.confidence;
 
           let key = 'direct';
           let label = 'Direct (this page)';
@@ -233,6 +234,8 @@ export class MarkdownGenerator {
           }
 
           const g = ensureGroup(key, label, open);
+          // Store confidence in data attributes (modal), not in visible text.
+          // Keep display text clean (no "[likely]" suffix).
           if (isMutation) g.mutations.add(cleanName);
           else g.queries.add(cleanName);
         }
@@ -272,7 +275,13 @@ export class MarkdownGenerator {
             lines.push('');
             lines.push('<div class="gql-ops-list">');
             for (const name of Array.from(g.queries).sort()) {
-              lines.push(`<span class="gql-op" data-op="${name}">${name}</span>`);
+              const isLikely = allDf.some(
+                (df) =>
+                  (df.operationName || '').replace(/^[→\->\s]+/, '').trim() === name &&
+                  df.confidence === 'likely'
+              );
+              const confAttr = isLikely ? ` data-confidence="likely"` : '';
+              lines.push(`<span class="gql-op" data-op="${name}"${confAttr}>${name}</span>`);
             }
             lines.push('</div>');
             lines.push('');
@@ -283,7 +292,15 @@ export class MarkdownGenerator {
             lines.push('');
             lines.push('<div class="gql-ops-list">');
             for (const name of Array.from(g.mutations).sort()) {
-              lines.push(`<span class="gql-op mutation" data-op="${name}">${name}</span>`);
+              const isLikely = allDf.some(
+                (df) =>
+                  (df.operationName || '').replace(/^[→\->\s]+/, '').trim() === name &&
+                  df.confidence === 'likely'
+              );
+              const confAttr = isLikely ? ` data-confidence="likely"` : '';
+              lines.push(
+                `<span class="gql-op mutation" data-op="${name}"${confAttr}>${name}</span>`
+              );
             }
             lines.push('</div>');
             lines.push('');
