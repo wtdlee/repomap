@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
+import * as fsSync from 'fs';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { DocGeneratorEngine } from './core/engine.js';
@@ -40,12 +41,26 @@ function setupTempCleanup(tempDir: string): void {
   process.on('SIGTERM', cleanup);
 }
 
+/**
+ * Get CLI version from package.json to avoid mismatch.
+ */
+function getCliVersion(): string {
+  try {
+    const pkgUrl = new URL('../package.json', import.meta.url);
+    const raw = fsSync.readFileSync(pkgUrl, 'utf-8');
+    const json = JSON.parse(raw) as { version?: string };
+    return json.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 const program = new Command();
 
 program
   .name('repomap')
   .description('Interactive documentation generator for code repositories')
-  .version('0.6.0');
+  .version(getCliVersion());
 
 /**
  * Auto-detect project type and settings

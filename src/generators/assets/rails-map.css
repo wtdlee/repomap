@@ -531,6 +531,10 @@ header h1 {
   justify-content: space-between;
 }
 
+.controller-card:not(.expanded) .controller-header {
+  border-bottom: none;
+}
+
 .controller-header:hover {
   background: var(--bg-tertiary);
 }

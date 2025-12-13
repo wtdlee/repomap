@@ -45,6 +45,14 @@ export class PagesAnalyzer extends BaseAnalyzer {
   // Codegen Document → Operation name mapping
   private codegenMap = new Map<string, { operationName: string; operationType: string }>();
   private tsResolver: TsModuleResolver | null = null;
+  private coverage = {
+    tsFilesScanned: 0,
+    tsParseFailures: 0,
+    graphqlParseFailures: 0,
+    codegenFilesDetected: 0,
+    codegenFilesParsed: 0,
+    codegenExportsFound: 0,
+  };
 
   constructor(config: RepositoryConfig) {
     super(config);
@@ -62,6 +70,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     // Find page files from multiple possible locations
     const pageFiles = await this.findPageFiles();
+    this.coverage.tsFilesScanned += pageFiles.length;
 
     this.log(`Found ${pageFiles.length} page files`);
 
@@ -107,7 +116,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     this.log(`Analyzed ${validPages.length} pages successfully`);
 
-    return { pages: validPages };
+    return { pages: validPages, coverage: this.coverage };
   }
 
   /**
@@ -140,7 +149,10 @@ export class PagesAnalyzer extends BaseAnalyzer {
         // Fast pre-filter: most codegen outputs contain "Document" + "definitions"
         if (!content.includes('Document') || !content.includes('definitions')) continue;
 
+        this.coverage.codegenFilesDetected += 1;
         const exports = parseCodegenDocumentExports(content, relPath);
+        this.coverage.codegenFilesParsed += 1;
+        this.coverage.codegenExportsFound += exports.length;
         for (const e of exports) {
           this.codegenMap.set(e.documentName, {
             operationName: e.operationName,
@@ -204,6 +216,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
         steps: steps.length > 0 ? steps : undefined,
       };
     } catch {
+      this.coverage.tsParseFailures += 1;
       return null;
     }
   }

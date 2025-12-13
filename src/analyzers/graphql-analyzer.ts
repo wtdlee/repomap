@@ -20,6 +20,15 @@ import type {
  * Uses @swc/core for fast parsing
  */
 export class GraphQLAnalyzer extends BaseAnalyzer {
+  private coverage = {
+    tsFilesScanned: 0,
+    tsParseFailures: 0,
+    graphqlParseFailures: 0,
+    codegenFilesDetected: 0,
+    codegenFilesParsed: 0,
+    codegenExportsFound: 0,
+  };
+
   constructor(config: RepositoryConfig) {
     super(config);
   }
@@ -62,7 +71,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
     this.log(`Found ${uniqueOperations.length} GraphQL operations`);
 
-    return { graphqlOperations: uniqueOperations };
+    return { graphqlOperations: uniqueOperations, coverage: this.coverage };
   }
 
   /**
@@ -122,7 +131,10 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         // Fast pre-filter
         if (!content.includes('Document') || !content.includes('definitions')) continue;
 
+        this.coverage.codegenFilesDetected += 1;
         const exports = parseCodegenDocumentExports(content, relativePath);
+        this.coverage.codegenFilesParsed += 1;
+        this.coverage.codegenExportsFound += exports.length;
         for (const e of exports) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const doc = e.document as any;
@@ -271,8 +283,13 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     // Process files in parallel
     const results = await parallelMapSafe(graphqlFiles, async (filePath) => {
       const content = await fs.readFile(filePath, 'utf-8');
-      const document = parseGraphQL(content);
-      return this.extractOperationsFromDocument(document, path.relative(this.basePath, filePath));
+      try {
+        const document = parseGraphQL(content);
+        return this.extractOperationsFromDocument(document, path.relative(this.basePath, filePath));
+      } catch {
+        this.coverage.graphqlParseFailures += 1;
+        return [];
+      }
     });
 
     return results.flat();
@@ -293,6 +310,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
       ],
       absolute: true,
     });
+    this.coverage.tsFilesScanned += tsFiles.length;
 
     // Process files in parallel batches
     const batchSize = 50;
@@ -321,6 +339,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
             return this.analyzeModuleForGraphQL(ast, content, relativePath);
           } catch {
+            this.coverage.tsParseFailures += 1;
             return [];
           }
         },
@@ -369,6 +388,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               operations.push(...fileOps);
             } catch {
               // Skip unparseable GraphQL
+              this.coverage.graphqlParseFailures += 1;
             }
           }
         }
@@ -401,6 +421,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
                 operations.push(...fileOps);
               } catch {
                 // Skip unparseable GraphQL
+                this.coverage.graphqlParseFailures += 1;
               }
             }
           }

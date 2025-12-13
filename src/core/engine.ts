@@ -188,6 +188,14 @@ export class DocGeneratorEngine {
       timestamp: new Date().toISOString(),
       version,
       commitHash,
+      coverage: {
+        tsFilesScanned: 0,
+        tsParseFailures: 0,
+        graphqlParseFailures: 0,
+        codegenFilesDetected: 0,
+        codegenFilesParsed: 0,
+        codegenExportsFound: 0,
+      },
       pages: [],
       graphqlOperations: [],
       apiCalls: [],
@@ -199,6 +207,14 @@ export class DocGeneratorEngine {
     };
 
     for (const result of results) {
+      if (result.coverage && merged.coverage) {
+        merged.coverage.tsFilesScanned += result.coverage.tsFilesScanned || 0;
+        merged.coverage.tsParseFailures += result.coverage.tsParseFailures || 0;
+        merged.coverage.graphqlParseFailures += result.coverage.graphqlParseFailures || 0;
+        merged.coverage.codegenFilesDetected += result.coverage.codegenFilesDetected || 0;
+        merged.coverage.codegenFilesParsed += result.coverage.codegenFilesParsed || 0;
+        merged.coverage.codegenExportsFound += result.coverage.codegenExportsFound || 0;
+      }
       if (result.pages) merged.pages.push(...result.pages);
       if (result.graphqlOperations) merged.graphqlOperations.push(...result.graphqlOperations);
       if (result.apiCalls) merged.apiCalls.push(...result.apiCalls);

@@ -79,6 +79,8 @@ export interface AnalysisResult {
   timestamp: string;
   version: string;
   commitHash: string;
+  /** Coverage / observability metrics to prevent silent omissions */
+  coverage?: CoverageMetrics;
   pages: PageInfo[];
   graphqlOperations: GraphQLOperation[];
   apiCalls: APICall[];
@@ -87,6 +89,21 @@ export interface AnalysisResult {
   apiEndpoints: APIEndpoint[];
   models: ModelInfo[];
   crossRepoLinks: CrossRepoLink[];
+}
+
+export interface CoverageMetrics {
+  /** Number of TS/TSX/JS/JSX files scanned by analyzers (best-effort) */
+  tsFilesScanned: number;
+  /** Number of source files that failed to parse (SWC/TS parser failures) */
+  tsParseFailures: number;
+  /** Number of GraphQL parse failures (graphql parse errors) */
+  graphqlParseFailures: number;
+  /** Number of codegen files detected (best-effort) */
+  codegenFilesDetected: number;
+  /** Number of codegen files successfully parsed by AST */
+  codegenFilesParsed: number;
+  /** Number of Document exports extracted from codegen outputs */
+  codegenExportsFound: number;
 }
 
 /**

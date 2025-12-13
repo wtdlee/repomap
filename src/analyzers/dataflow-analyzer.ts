@@ -16,6 +16,14 @@ import type { AnalysisResult, DataFlow, ComponentInfo, RepositoryConfig } from '
  */
 export class DataFlowAnalyzer extends BaseAnalyzer {
   private componentCache: Map<string, ComponentInfo> = new Map();
+  private coverage = {
+    tsFilesScanned: 0,
+    tsParseFailures: 0,
+    graphqlParseFailures: 0,
+    codegenFilesDetected: 0,
+    codegenFilesParsed: 0,
+    codegenExportsFound: 0,
+  };
 
   constructor(config: RepositoryConfig) {
     super(config);
@@ -36,7 +44,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
 
     this.log(`Analyzed ${components.length} components and ${dataFlows.length} data flows`);
 
-    return { components, dataFlows };
+    return { components, dataFlows, coverage: this.coverage };
   }
 
   private async analyzeComponents(): Promise<ComponentInfo[]> {
@@ -85,6 +93,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     });
 
     this.log(`[DataFlowAnalyzer] Found ${files.length} component files to analyze`);
+    this.coverage.tsFilesScanned += files.length;
 
     // Process files in batches to avoid overwhelming I/O
     const batchSize = 50;
@@ -117,6 +126,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
           components.push(...componentInfos);
         } catch {
           // Skip files that can't be parsed
+          this.coverage.tsParseFailures += 1;
         }
       }
     }
