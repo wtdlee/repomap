@@ -5,6 +5,7 @@ import * as path from 'path';
 import { parse as parseGraphQL, DocumentNode, DefinitionNode, TypeNode } from 'graphql';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
+import { isGraphQLHook, hasGraphQLIndicators } from './constants.js';
 import type {
   AnalysisResult,
   GraphQLOperation,
@@ -89,17 +90,26 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
   /**
    * Analyze GraphQL Code Generator output files
-   * Supports client preset pattern: __generated__/graphql.ts
+   * Supports multiple codegen patterns: client preset, near-operation-file, etc.
    */
   private async analyzeCodegenGenerated(): Promise<GraphQLOperation[]> {
     const operations: GraphQLOperation[] = [];
 
-    // Find potential codegen output files
+    // Find potential codegen output files with broader patterns
     const generatedFiles = await fg(
-      ['**/__generated__/graphql.ts', '**/__generated__/gql.ts', '**/generated/graphql.ts'],
+      [
+        '**/__generated__/graphql.ts',
+        '**/__generated__/gql.ts',
+        '**/generated/graphql.ts',
+        '**/generated/gql.ts',
+        '**/*.generated.ts',
+        '**/*.generated.tsx',
+        '**/graphql/generated.ts',
+        '**/gql/generated.ts',
+      ],
       {
         cwd: this.basePath,
-        ignore: ['**/node_modules/**', '**/.next/**'],
+        ignore: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**'],
         absolute: true,
       }
     );
@@ -421,10 +431,11 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   /**
    * Traverse AST nodes with variable context tracking
    */
-
   private traverseNodeWithContext(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     node: any,
     varStack: string[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     callback: (node: any, currentVarName: string | null) => void
   ): void {
     if (!node || typeof node !== 'object') return;
@@ -682,18 +693,33 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
     const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
-      ignore: ['**/node_modules/**', '**/.next/**', '**/__generated__/**'],
+      ignore: [
+        '**/node_modules/**',
+        '**/.next/**',
+        '**/__generated__/**',
+        '**/dist/**',
+        '**/build/**',
+      ],
       absolute: true,
     });
 
-    // Build lookup maps for O(1) access
+    // Build comprehensive lookup maps for O(1) access
     const operationByName = new Map<string, GraphQLOperation>();
     const operationByDocument = new Map<string, GraphQLOperation>();
     const operationByVariableName = new Map<string, GraphQLOperation>();
+    const operationByQueryType = new Map<string, GraphQLOperation>();
 
     for (const op of operations) {
       operationByName.set(op.name, op);
       operationByDocument.set(`${op.name}Document`, op);
+
+      // Add Query/Mutation type variants for generic extraction
+      operationByQueryType.set(`${op.name}Query`, op);
+      operationByQueryType.set(`${op.name}Mutation`, op);
+      operationByQueryType.set(`${op.name}Subscription`, op);
+      operationByQueryType.set(`${op.name}QueryVariables`, op);
+      operationByQueryType.set(`${op.name}MutationVariables`, op);
+
       // Map all variable names to operation
       if (op.variableNames) {
         for (const varName of op.variableNames) {
@@ -702,10 +728,14 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
       }
     }
 
-    // Collect all searchable names for single regex
+    // Collect all searchable names
     const allSearchableNames = new Set<string>();
     for (const op of operations) {
+      allSearchableNames.add(op.name);
       allSearchableNames.add(`${op.name}Document`);
+      allSearchableNames.add(`${op.name}Query`);
+      allSearchableNames.add(`${op.name}Mutation`);
+      allSearchableNames.add(`${op.name}Subscription`);
       if (op.variableNames) {
         for (const varName of op.variableNames) {
           allSearchableNames.add(varName);
@@ -713,11 +743,10 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
       }
     }
 
-    // Build a single regex to match all names at once (if not too large)
+    // Build a single regex to match all names at once
     let namesPattern: RegExp | null = null;
     const namesArray = Array.from(allSearchableNames);
     if (namesArray.length > 0 && namesArray.length < 2000) {
-      // Escape special regex chars and sort by length (longest first) for proper matching
       const escaped = namesArray
         .sort((a, b) => b.length - a.length)
         .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
@@ -734,23 +763,12 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
             const content = await fs.readFile(filePath, 'utf-8');
             const relativePath = path.relative(this.basePath, filePath);
 
-            // Quick pre-filter: skip files without relevant keywords
-            if (
-              !content.includes('Document') &&
-              !content.includes('useQuery') &&
-              !content.includes('useMutation') &&
-              !content.includes('Query') &&
-              !content.includes('Mutation') &&
-              !content.includes('GET_') &&
-              !content.includes('SEARCH_') &&
-              !content.includes('CREATE_') &&
-              !content.includes('UPDATE_') &&
-              !content.includes('DELETE_')
-            ) {
+            // Expanded pre-filter: check for any GraphQL-related keywords
+            if (!hasGraphQLIndicators(content)) {
               return;
             }
 
-            // Find all references using single regex
+            // Method 1: Find all references using single regex (fast path)
             if (namesPattern) {
               const foundNames = new Set<string>();
               let match;
@@ -762,7 +780,11 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               // Map found names to operations
               for (const name of foundNames) {
                 const operation =
-                  operationByDocument.get(name) || operationByVariableName.get(name);
+                  operationByDocument.get(name) ||
+                  operationByVariableName.get(name) ||
+                  operationByQueryType.get(name) ||
+                  operationByName.get(name);
+
                 if (operation && relativePath !== operation.filePath) {
                   if (!operation.usedIn.includes(relativePath)) {
                     operation.usedIn.push(relativePath);
@@ -771,27 +793,167 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               }
             }
 
-            // Also check traditional patterns (useQuery<Name>, etc.)
-            for (const [name, operation] of operationByName) {
-              if (relativePath === operation.filePath) continue;
-              if (operation.usedIn.includes(relativePath)) continue;
-
-              if (
-                content.includes(`useQuery<${name}`) ||
-                content.includes(`useMutation<${name}`) ||
-                content.includes(`useLazyQuery<${name}`) ||
-                content.includes(`useSubscription<${name}`) ||
-                content.includes(`${name}Query`) ||
-                content.includes(`${name}Mutation`)
-              ) {
-                operation.usedIn.push(relativePath);
-              }
-            }
+            // Method 2: AST-based hook analysis for accurate type generic extraction
+            await this.findUsageWithAST(
+              content,
+              filePath,
+              relativePath,
+              operationByName,
+              operationByQueryType
+            );
           } catch {
             // Skip unreadable files
           }
         })
       );
     }
+  }
+
+  /**
+   * Find operation usage using AST analysis for accurate type generic extraction
+   */
+  private async findUsageWithAST(
+    content: string,
+    filePath: string,
+    relativePath: string,
+    operationByName: Map<string, GraphQLOperation>,
+    operationByQueryType: Map<string, GraphQLOperation>
+  ): Promise<void> {
+    try {
+      const isTsx = filePath.endsWith('.tsx') || filePath.endsWith('.jsx');
+      const ast = parseSync(content, {
+        syntax: filePath.endsWith('.ts') || filePath.endsWith('.tsx') ? 'typescript' : 'ecmascript',
+        tsx: isTsx,
+        jsx: isTsx,
+        comments: false,
+      });
+
+      // Traverse AST to find hook calls with type generics
+      this.traverseNodeForUsage(ast, content, (node) => {
+        if (node.type === 'CallExpression') {
+          const calleeName = this.getCalleeNameForUsage(node.callee);
+
+          // Check if it's a GraphQL hook
+          if (calleeName && isGraphQLHook(calleeName)) {
+            // Extract type generic: useQuery<GetUserQuery>
+            const typeName = this.extractTypeGenericFromCall(node, content);
+            if (typeName) {
+              const operation =
+                operationByQueryType.get(typeName) ||
+                operationByName.get(typeName.replace(/Query$|Mutation$|Variables$/, ''));
+              if (operation && relativePath !== operation.filePath) {
+                if (!operation.usedIn.includes(relativePath)) {
+                  operation.usedIn.push(relativePath);
+                }
+              }
+            }
+
+            // Extract from first argument
+            const argName = this.extractFirstArgName(node);
+            if (argName) {
+              const cleanName = argName.replace(/Document$/, '');
+              const operation = operationByName.get(cleanName) || operationByQueryType.get(argName);
+              if (operation && relativePath !== operation.filePath) {
+                if (!operation.usedIn.includes(relativePath)) {
+                  operation.usedIn.push(relativePath);
+                }
+              }
+            }
+          }
+        }
+      });
+    } catch {
+      // Skip files that can't be parsed
+    }
+  }
+
+  /**
+   * Traverse AST nodes for usage analysis
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private traverseNodeForUsage(node: any, content: string, callback: (node: any) => void): void {
+    if (!node || typeof node !== 'object') return;
+
+    callback(node);
+
+    for (const key of Object.keys(node)) {
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          this.traverseNodeForUsage(item, content, callback);
+        }
+      } else if (value && typeof value === 'object') {
+        this.traverseNodeForUsage(value, content, callback);
+      }
+    }
+  }
+
+  /**
+   * Get callee name for usage tracking
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private getCalleeNameForUsage(callee: any): string | null {
+    if (!callee) return null;
+
+    if (callee.type === 'Identifier') {
+      return callee.value;
+    }
+
+    if (callee.type === 'MemberExpression' && callee.property?.type === 'Identifier') {
+      return callee.property.value;
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract type generic from hook call
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractTypeGenericFromCall(call: any, content: string): string | null {
+    // Method 1: Direct type arguments
+    if (call.typeArguments?.params?.length > 0) {
+      const firstTypeArg = call.typeArguments.params[0];
+      if (
+        firstTypeArg?.type === 'TsTypeReference' &&
+        firstTypeArg.typeName?.type === 'Identifier'
+      ) {
+        return firstTypeArg.typeName.value;
+      }
+    }
+
+    // Method 2: Extract from source position
+    if (call.callee?.span) {
+      const start = call.callee.span.end;
+      const searchRegion = content.slice(start, start + 150);
+      const genericMatch = searchRegion.match(
+        /^<\s*(\w+)(?:Query|Mutation|Variables|Subscription)?(?:\s*,|\s*>)/
+      );
+      if (genericMatch) {
+        return genericMatch[1];
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract first argument name from call
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractFirstArgName(call: any): string | null {
+    if (call.arguments?.length > 0) {
+      const firstArg = call.arguments[0].expression;
+
+      if (firstArg?.type === 'Identifier') {
+        return firstArg.value;
+      }
+
+      if (firstArg?.type === 'MemberExpression' && firstArg.property?.type === 'Identifier') {
+        return firstArg.property.value;
+      }
+    }
+
+    return null;
   }
 }

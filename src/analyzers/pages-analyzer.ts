@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
+import { ALL_GRAPHQL_HOOKS, isQueryHook, isMutationHook, getHookType } from './constants.js';
 import type {
   AnalysisResult,
   PageInfo,
@@ -96,44 +97,68 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   /**
    * Load GraphQL Code Generator mapping from __generated__ files
+   * Dynamically searches for codegen output files
    */
   private async loadCodegenMapping(): Promise<void> {
-    const generatedPaths = [
-      'src/__generated__/graphql.ts',
-      'src/__generated__/gql.ts',
-      '__generated__/graphql.ts',
-    ];
+    // Dynamically find all potential codegen files
+    const generatedFiles = await fg(
+      [
+        '**/__generated__/graphql.ts',
+        '**/__generated__/gql.ts',
+        '**/generated/graphql.ts',
+        '**/generated/gql.ts',
+        '**/*.generated.ts',
+        '**/graphql.ts', // Root level graphql files
+      ],
+      {
+        cwd: this.basePath,
+        ignore: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**'],
+        absolute: true,
+      }
+    );
 
-    for (const relPath of generatedPaths) {
-      const fullPath = this.resolvePath(relPath);
-      if (!fs.existsSync(fullPath)) continue;
-
+    for (const fullPath of generatedFiles) {
       try {
         const content = await fsPromises.readFile(fullPath, 'utf-8');
+        const relPath = path.relative(this.basePath, fullPath);
+
+        // Skip if file doesn't contain DocumentNode (not a codegen file)
+        if (!content.includes('DocumentNode')) continue;
+
         const lines = content.split('\n');
 
         for (const line of lines) {
           // Match: export const XxxDocument = {...} as unknown as DocumentNode
-          if (!line.includes('Document =') || !line.includes('DocumentNode')) continue;
+          if (!line.includes('Document') || !line.includes('=')) continue;
 
-          const match = line.match(/export\s+const\s+(\w+Document)\s*=/);
-          if (!match) continue;
+          // Multiple patterns for codegen output
+          const patterns = [
+            /export\s+const\s+(\w+Document)\s*=/,
+            /export\s+const\s+(\w+):\s*DocumentNode\s*=/,
+            /const\s+(\w+Document)\s*=.*DocumentNode/,
+          ];
 
-          const documentName = match[1];
-          const operationName = documentName.replace(/Document$/, '');
+          for (const pattern of patterns) {
+            const match = line.match(pattern);
+            if (!match) continue;
 
-          // Determine type from content
-          let operationType = 'query';
-          if (line.includes('"mutation"') || documentName.toLowerCase().includes('mutation')) {
-            operationType = 'mutation';
-          } else if (
-            line.includes('"subscription"') ||
-            documentName.toLowerCase().includes('subscription')
-          ) {
-            operationType = 'subscription';
+            const documentName = match[1];
+            const operationName = documentName.replace(/Document$/, '');
+
+            // Determine type from content
+            let operationType = 'query';
+            if (line.includes('"mutation"') || documentName.toLowerCase().includes('mutation')) {
+              operationType = 'mutation';
+            } else if (
+              line.includes('"subscription"') ||
+              documentName.toLowerCase().includes('subscription')
+            ) {
+              operationType = 'subscription';
+            }
+
+            this.codegenMap.set(documentName, { operationName, operationType });
+            break;
           }
-
-          this.codegenMap.set(documentName, { operationName, operationType });
         }
 
         if (this.codegenMap.size > 0) {
@@ -332,8 +357,8 @@ export class PagesAnalyzer extends BaseAnalyzer {
               const elementProp = this.getJsxAttribute(node, 'element');
 
               const componentName = componentProp || elementProp;
-              if (componentName && importMap.has(componentName)) {
-                const importPath = importMap.get(componentName)!;
+              const importPath = componentName ? importMap.get(componentName) : undefined;
+              if (importPath) {
                 const resolvedPath = this.resolveImportPath(path.dirname(appPath), importPath);
                 if (resolvedPath && fs.existsSync(resolvedPath)) {
                   routeFiles.push(resolvedPath);
@@ -641,101 +666,318 @@ export class PagesAnalyzer extends BaseAnalyzer {
   }
 
   /**
-   * Extract data fetching operations
+   * Extract data fetching operations using comprehensive AST analysis
+   * Import tracking, type generic extraction, and variable assignment tracking
    */
   private extractDataFetching(
     ast: Module,
     content: string,
-    imports: Map<string, string>
+    _imports: Map<string, string>
   ): DataFetchingInfo[] {
     const dataFetching: DataFetchingInfo[] = [];
+    const seenOperations = new Set<string>();
 
-    // Build apollo hook aliases map
-    const apolloHookAliases = new Map<string, string>();
-    const apolloHooks = ['useQuery', 'useMutation', 'useLazyQuery', 'useSubscription'];
+    // 1. Build Document import map (import { GetUserDocument } from '...')
+    const documentImports = this.extractDocumentImports(ast);
 
-    for (const [name, source] of imports) {
-      if (source.includes('@apollo/client') || source.includes('apollo')) {
-        if (apolloHooks.includes(name)) {
-          apolloHookAliases.set(name, name);
-        }
-      }
-    }
+    // 2. Build variable assignment map (const doc = GetUserDocument)
+    const variableAssignments = this.extractVariableAssignments(ast);
 
-    // Find hook calls using AST traversal
+    // 3. Find all hook calls using AST traversal
     this.traverseNode(ast, (node) => {
       if (node.type === 'CallExpression') {
         const call = node as CallExpression;
-        const calleeName = this.getCalleeName(call.callee);
+        const result = this.analyzeGraphQLHookCall(
+          call,
+          content,
+          documentImports,
+          variableAssignments
+        );
 
-        if (!calleeName) return;
-
-        // Check for GraphQL hooks
-        const isApolloHook = apolloHooks.includes(calleeName) || apolloHookAliases.has(calleeName);
-        const isCustomQuery =
-          /^use[A-Z].*Query$/.test(calleeName) && !calleeName.includes('Params');
-        const isCustomMutation = /^use[A-Z].*Mutation$/.test(calleeName);
-
-        if (isApolloHook || isCustomQuery || isCustomMutation) {
-          let resolvedType: DataFetchingInfo['type'] = 'useQuery';
-          if (calleeName.includes('Mutation')) {
-            resolvedType = 'useMutation';
-          } else if (calleeName.includes('Lazy')) {
-            resolvedType = 'useLazyQuery';
-          }
-
-          // Extract operation name from first argument
-          let operationName = calleeName.replace(/^use/, '').replace(/Query$|Mutation$/, '');
-
-          if (call.arguments && call.arguments.length > 0) {
-            const firstArg = call.arguments[0].expression;
-            if (firstArg?.type === 'Identifier') {
-              const argName = firstArg.value;
-              // Skip array/object/string patterns (React Query)
-              if (!['[', '{', "'", '"', '`'].some((c) => argName.startsWith(c))) {
-                operationName = argName.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
-
-                // Look up in codegen map
-                if (this.codegenMap.has(argName)) {
-                  const mapped = this.codegenMap.get(argName)!;
-                  operationName = mapped.operationName;
-                }
-              }
-            }
-          }
-
-          // Extract variables
-          const variables: string[] = [];
-          if (call.arguments && call.arguments.length > 1) {
-            const optionsArg = call.arguments[1].expression;
-            if (optionsArg?.type === 'ObjectExpression') {
-              for (const prop of optionsArg.properties || []) {
-                if (
-                  prop.type === 'KeyValueProperty' &&
-                  prop.key?.type === 'Identifier' &&
-                  prop.key.value === 'variables'
-                ) {
-                  if (prop.value?.type === 'ObjectExpression') {
-                    for (const varProp of prop.value.properties || []) {
-                      if (
-                        varProp.type === 'KeyValueProperty' &&
-                        varProp.key?.type === 'Identifier'
-                      ) {
-                        variables.push(varProp.key.value);
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          dataFetching.push({ type: resolvedType, operationName, variables });
+        if (result && !seenOperations.has(`${result.type}:${result.operationName}`)) {
+          seenOperations.add(`${result.type}:${result.operationName}`);
+          dataFetching.push(result);
         }
       }
     });
 
-    // Check for getServerSideProps
+    // 4. Check for getServerSideProps
+    this.extractSSRDataFetching(ast, content, dataFetching, seenOperations);
+
+    // 5. Check for getStaticProps
+    if (content.includes('getStaticProps')) {
+      const key = 'getStaticProps:getStaticProps';
+      if (!seenOperations.has(key)) {
+        seenOperations.add(key);
+        dataFetching.push({
+          type: 'getStaticProps',
+          operationName: 'getStaticProps',
+        });
+      }
+    }
+
+    return dataFetching;
+  }
+
+  /**
+   * Extract Document imports from AST
+   * Tracks imports like: import { GetUserDocument } from '__generated__/graphql'
+   */
+  private extractDocumentImports(ast: Module): Map<string, string> {
+    const documentImports = new Map<string, string>();
+
+    for (const item of ast.body) {
+      if (item.type === 'ImportDeclaration') {
+        const source = (item as ImportDeclaration).source?.value || '';
+
+        // Check if import is from generated/graphql files
+        const isGraphQLImport =
+          source.includes('__generated__') ||
+          source.includes('generated') ||
+          source.includes('graphql') ||
+          source.includes('.generated');
+
+        for (const spec of item.specifiers || []) {
+          const localName =
+            spec.type === 'ImportSpecifier'
+              ? spec.local?.value
+              : spec.type === 'ImportDefaultSpecifier'
+                ? spec.local?.value
+                : null;
+
+          if (localName) {
+            // Track Document imports
+            if (localName.endsWith('Document') || isGraphQLImport) {
+              const operationName = localName.replace(/Document$/, '');
+              documentImports.set(localName, operationName);
+            }
+            // Track Query/Mutation type imports for generic extraction
+            if (localName.endsWith('Query') || localName.endsWith('Mutation')) {
+              documentImports.set(localName, localName.replace(/Query$|Mutation$/, ''));
+            }
+          }
+        }
+      }
+    }
+
+    return documentImports;
+  }
+
+  /**
+   * Extract variable assignments that reference Documents
+   * Tracks: const doc = GetUserDocument
+   */
+  private extractVariableAssignments(ast: Module): Map<string, string> {
+    const assignments = new Map<string, string>();
+
+    this.traverseNode(ast, (node) => {
+      if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') {
+        const varName = node.id.value;
+        const init = node.init;
+
+        if (init?.type === 'Identifier') {
+          const initName = init.value;
+          if (initName.endsWith('Document') || initName.endsWith('Query')) {
+            assignments.set(varName, initName);
+          }
+        }
+      }
+    });
+
+    return assignments;
+  }
+
+  /**
+   * Analyze a GraphQL hook call expression
+   * Supports: useQuery, useMutation, useLazyQuery, useSuspenseQuery, etc.
+   */
+  private analyzeGraphQLHookCall(
+    call: CallExpression,
+    content: string,
+    documentImports: Map<string, string>,
+    variableAssignments: Map<string, string>
+  ): DataFetchingInfo | null {
+    const calleeName = this.getCalleeName(call.callee);
+    if (!calleeName) return null;
+
+    // Check if this is a GraphQL hook using shared utilities
+    const isStandardHook = (ALL_GRAPHQL_HOOKS as readonly string[]).includes(calleeName);
+    const isCustomQuery = isQueryHook(calleeName) && !calleeName.includes('Params');
+    const isCustomMutation = isMutationHook(calleeName);
+
+    if (!isStandardHook && !isCustomQuery && !isCustomMutation) {
+      return null;
+    }
+
+    // Determine hook type using shared utility
+    const resolvedType = getHookType(calleeName);
+
+    // Extract operation name from multiple sources
+    let operationName = calleeName.replace(/^use/, '').replace(/Query$|Mutation$/, '');
+
+    // Method 1: Extract from type generic - useQuery<GetUserQuery>
+    const genericName = this.extractTypeGeneric(call, content);
+    if (genericName) {
+      operationName = genericName.replace(/Query$|Mutation$|Variables$/, '');
+    }
+
+    // Method 2: Extract from first argument
+    if (call.arguments && call.arguments.length > 0) {
+      const firstArg = call.arguments[0].expression;
+      const argOperationName = this.extractOperationFromArgument(
+        firstArg,
+        documentImports,
+        variableAssignments
+      );
+      if (argOperationName) {
+        operationName = argOperationName;
+      }
+    }
+
+    // Extract variables
+    const variables = this.extractVariablesFromCall(call);
+
+    return { type: resolvedType, operationName, variables };
+  }
+
+  /**
+   * Extract type generic from hook call - useQuery<GetUserQuery>
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractTypeGeneric(call: any, content: string): string | null {
+    // SWC stores type arguments in typeArguments
+    if (call.typeArguments?.params?.length > 0) {
+      const firstTypeArg = call.typeArguments.params[0];
+      if (
+        firstTypeArg?.type === 'TsTypeReference' &&
+        firstTypeArg.typeName?.type === 'Identifier'
+      ) {
+        return firstTypeArg.typeName.value;
+      }
+    }
+
+    // Fallback: Extract from source using span positions
+    if (call.callee?.span) {
+      const start = call.callee.span.end;
+      const searchRegion = content.slice(start, start + 100);
+      const genericMatch = searchRegion.match(/^<(\w+)(?:Query|Mutation|Variables)?[,>]/);
+      if (genericMatch) {
+        return genericMatch[1];
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract operation name from function argument
+   * Supports: Identifier, MemberExpression, variable references
+   */
+  private extractOperationFromArgument(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    arg: any,
+    documentImports: Map<string, string>,
+    variableAssignments: Map<string, string>
+  ): string | null {
+    if (!arg) return null;
+
+    // Direct identifier: useQuery(GetUserDocument)
+    if (arg.type === 'Identifier') {
+      const argName = arg.value;
+
+      // Skip React Query patterns
+      if (['[', '{', "'", '"', '`'].some((c) => argName.startsWith(c))) {
+        return null;
+      }
+
+      // Check if it's a known Document import
+      const importedName = documentImports.get(argName);
+      if (importedName) {
+        return importedName;
+      }
+
+      // Check if it's a variable assignment
+      const originalName = variableAssignments.get(argName);
+      if (originalName) {
+        return documentImports.get(originalName) || originalName.replace(/Document$/, '');
+      }
+
+      // Check codegen map
+      const codegenEntry = this.codegenMap.get(argName);
+      if (codegenEntry) {
+        return codegenEntry.operationName;
+      }
+
+      // Default: clean up the name
+      return argName.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
+    }
+
+    // Member expression: useQuery(gql.GetUser) or useQuery(queries.GetUser)
+    if (arg.type === 'MemberExpression') {
+      if (arg.property?.type === 'Identifier') {
+        const propName = arg.property.value;
+        return propName.replace(/Document$/, '').replace(/Query$|Mutation$/, '');
+      }
+    }
+
+    // Tagged template: useQuery(gql`...`)
+    if (arg.type === 'TaggedTemplateExpression') {
+      // Try to extract operation name from the template content
+      if (arg.template?.quasis?.[0]?.raw) {
+        const templateContent = arg.template.quasis[0].raw;
+        const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+        if (opMatch) {
+          return opMatch[1];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract variables from hook call options
+   */
+  private extractVariablesFromCall(call: CallExpression): string[] {
+    const variables: string[] = [];
+
+    if (call.arguments && call.arguments.length > 1) {
+      const optionsArg = call.arguments[1].expression;
+      if (optionsArg?.type === 'ObjectExpression') {
+        for (const prop of optionsArg.properties || []) {
+          if (
+            prop.type === 'KeyValueProperty' &&
+            prop.key?.type === 'Identifier' &&
+            prop.key.value === 'variables'
+          ) {
+            if (prop.value?.type === 'ObjectExpression') {
+              for (const varProp of prop.value.properties || []) {
+                // Handle both KeyValueProperty and Identifier (shorthand) in variables object
+                if (varProp.type === 'KeyValueProperty' && varProp.key?.type === 'Identifier') {
+                  variables.push(varProp.key.value);
+                } else if (varProp.type === 'Identifier') {
+                  // Shorthand property: { foo } is represented as Identifier
+                  variables.push(varProp.value);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return variables;
+  }
+
+  /**
+   * Extract SSR data fetching (getServerSideProps)
+   */
+  private extractSSRDataFetching(
+    ast: Module,
+    content: string,
+    dataFetching: DataFetchingInfo[],
+    seenOperations: Set<string>
+  ): void {
     for (const item of ast.body) {
       if (item.type === 'ExportDeclaration') {
         const decl = (item as ExportDeclaration).declaration;
@@ -746,10 +988,14 @@ export class PagesAnalyzer extends BaseAnalyzer {
               const ssrContent = content.slice(d.span?.start || 0, d.span?.end || content.length);
               for (const [docName, info] of this.codegenMap) {
                 if (ssrContent.includes(docName)) {
-                  dataFetching.push({
-                    type: 'getServerSideProps',
-                    operationName: `→ ${info.operationName}`,
-                  });
+                  const key = `getServerSideProps:→ ${info.operationName}`;
+                  if (!seenOperations.has(key)) {
+                    seenOperations.add(key);
+                    dataFetching.push({
+                      type: 'getServerSideProps',
+                      operationName: `→ ${info.operationName}`,
+                    });
+                  }
                 }
               }
             }
@@ -759,23 +1005,17 @@ export class PagesAnalyzer extends BaseAnalyzer {
           decl?.type === 'FunctionDeclaration' &&
           decl.identifier?.value === 'getServerSideProps'
         ) {
-          dataFetching.push({
-            type: 'getServerSideProps',
-            operationName: 'getServerSideProps',
-          });
+          const key = 'getServerSideProps:getServerSideProps';
+          if (!seenOperations.has(key)) {
+            seenOperations.add(key);
+            dataFetching.push({
+              type: 'getServerSideProps',
+              operationName: 'getServerSideProps',
+            });
+          }
         }
       }
     }
-
-    // Check for getStaticProps
-    if (content.includes('getStaticProps')) {
-      dataFetching.push({
-        type: 'getStaticProps',
-        operationName: 'getStaticProps',
-      });
-    }
-
-    return dataFetching;
   }
 
   /**
@@ -810,7 +1050,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
   /**
    * Extract linked pages from Link components
    */
-  private extractLinkedPages(ast: Module, content: string): string[] {
+  private extractLinkedPages(ast: Module, _content: string): string[] {
     const pages: string[] = [];
 
     this.traverseNode(ast, (node) => {

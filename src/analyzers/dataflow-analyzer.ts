@@ -3,13 +3,13 @@ import fg from 'fast-glob';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
-import type {
-  AnalysisResult,
-  DataFlow,
-  ComponentInfo,
-  PropInfo,
-  RepositoryConfig,
-} from '../types.js';
+import {
+  isQueryHook,
+  isMutationHook,
+  isSubscriptionHook,
+  cleanOperationName,
+} from './constants.js';
+import type { AnalysisResult, DataFlow, ComponentInfo, RepositoryConfig } from '../types.js';
 
 /**
  * Analyzer for data flow patterns using @swc/core for fast parsing
@@ -284,35 +284,296 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     };
   }
 
+  /**
+   * Extract hooks used in component using AST-based analysis
+   * Uses parseSync for accurate detection instead of regex
+   */
   private extractHooksUsed(content: string): string[] {
     const hooks: string[] = [];
+    const seenHooks = new Set<string>();
 
-    // Match useQuery/useMutation/useLazyQuery with first argument (Document name)
-    // Pattern: useQuery(DocumentName or useQuery<Type>(DocumentName
+    // Quick check: if no hooks pattern, skip parsing
+    if (!content.includes('use')) {
+      return hooks;
+    }
+
+    try {
+      const ast = parseSync(content, {
+        syntax: 'typescript',
+        tsx: true,
+        comments: false,
+      });
+
+      // Build Document import map for operation name resolution
+      const documentImports = this.extractDocumentImportsFromAst(ast);
+
+      // Traverse AST to find all hook calls
+      this.traverseForHooks(ast, content, documentImports, hooks, seenHooks);
+    } catch {
+      // Fallback to regex-based extraction if AST parsing fails
+      this.extractHooksWithRegex(content, hooks, seenHooks);
+    }
+
+    return hooks;
+  }
+
+  /**
+   * Extract Document imports from AST for operation name resolution
+   */
+  private extractDocumentImportsFromAst(ast: Module): Map<string, string> {
+    const documentImports = new Map<string, string>();
+
+    for (const item of ast.body) {
+      if (item.type === 'ImportDeclaration') {
+        const source = item.source?.value || '';
+        const isGraphQLImport =
+          source.includes('__generated__') ||
+          source.includes('generated') ||
+          source.includes('graphql') ||
+          source.includes('.generated');
+
+        for (const spec of item.specifiers || []) {
+          let localName: string | undefined;
+          if (spec.type === 'ImportSpecifier') {
+            localName = spec.local?.value;
+          } else if (spec.type === 'ImportDefaultSpecifier') {
+            localName = spec.local?.value;
+          }
+
+          if (localName) {
+            if (localName.endsWith('Document') || isGraphQLImport) {
+              documentImports.set(localName, localName.replace(/Document$/, ''));
+            }
+            if (localName.endsWith('Query') || localName.endsWith('Mutation')) {
+              documentImports.set(localName, localName.replace(/Query$|Mutation$/, ''));
+            }
+          }
+        }
+      }
+    }
+
+    return documentImports;
+  }
+
+  /**
+   * Traverse AST to find hook calls
+   */
+  private traverseForHooks(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    node: any,
+    content: string,
+    documentImports: Map<string, string>,
+    hooks: string[],
+    seenHooks: Set<string>
+  ): void {
+    if (!node || typeof node !== 'object') return;
+
+    if (node.type === 'CallExpression') {
+      this.analyzeHookCall(node, content, documentImports, hooks, seenHooks);
+    }
+
+    for (const key of Object.keys(node)) {
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          this.traverseForHooks(item, content, documentImports, hooks, seenHooks);
+        }
+      } else if (value && typeof value === 'object') {
+        this.traverseForHooks(value, content, documentImports, hooks, seenHooks);
+      }
+    }
+  }
+
+  /**
+   * Analyze a hook call expression
+   */
+  private analyzeHookCall(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    call: any,
+    content: string,
+    documentImports: Map<string, string>,
+    hooks: string[],
+    seenHooks: Set<string>
+  ): void {
+    const calleeName = this.getCalleeNameFromNode(call.callee);
+    if (!calleeName || !calleeName.startsWith('use')) return;
+
+    // Check for GraphQL hooks using shared utilities
+    const isQuery = isQueryHook(calleeName);
+    const isMutation = isMutationHook(calleeName);
+    const isSubscription = isSubscriptionHook(calleeName);
+
+    if (isQuery || isMutation || isSubscription) {
+      const operationName = this.extractOperationNameFromCall(call, content, documentImports);
+      const hookType = isMutation ? 'Mutation' : isSubscription ? 'Subscription' : 'Query';
+      const hookInfo = operationName ? `${hookType}: ${operationName}` : `${hookType}: unknown`;
+
+      if (!seenHooks.has(hookInfo)) {
+        seenHooks.add(hookInfo);
+        hooks.push(hookInfo);
+      }
+      return;
+    }
+
+    // Handle useContext
+    if (calleeName === 'useContext') {
+      const contextName = this.extractContextName(call);
+      if (contextName) {
+        const hookInfo = `🔄 Context: ${contextName}`;
+        if (!seenHooks.has(hookInfo)) {
+          seenHooks.add(hookInfo);
+          hooks.push(hookInfo);
+        }
+      }
+      return;
+    }
+
+    // Other hooks (useState, useEffect, etc.)
+    if (!seenHooks.has(calleeName)) {
+      seenHooks.add(calleeName);
+      hooks.push(calleeName);
+    }
+  }
+
+  /**
+   * Get callee name from call expression node
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private getCalleeNameFromNode(callee: any): string | null {
+    if (!callee) return null;
+
+    if (callee.type === 'Identifier') {
+      return callee.value;
+    }
+
+    if (callee.type === 'MemberExpression') {
+      if (callee.property?.type === 'Identifier') {
+        return callee.property.value;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract operation name from hook call arguments and type generics
+   */
+  private extractOperationNameFromCall(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    call: any,
+    content: string,
+    documentImports: Map<string, string>
+  ): string | null {
+    // Method 1: Extract from type generic - useQuery<GetUserQuery>
+    if (call.typeArguments?.params?.length > 0) {
+      const firstTypeArg = call.typeArguments.params[0];
+      if (
+        firstTypeArg?.type === 'TsTypeReference' &&
+        firstTypeArg.typeName?.type === 'Identifier'
+      ) {
+        const typeName = firstTypeArg.typeName.value;
+        return cleanOperationName(typeName);
+      }
+    }
+
+    // Method 2: Extract from span position (fallback for type generics)
+    if (call.callee?.span) {
+      const start = call.callee.span.end;
+      const searchRegion = content.slice(start, start + 100);
+      const genericMatch = searchRegion.match(/^<(\w+)(?:Query|Mutation|Variables)?[,>]/);
+      if (genericMatch) {
+        return cleanOperationName(genericMatch[1]);
+      }
+    }
+
+    // Method 3: Extract from first argument
+    if (call.arguments?.length > 0) {
+      const firstArg = call.arguments[0].expression;
+
+      // Identifier: useQuery(GetUserDocument)
+      if (firstArg?.type === 'Identifier') {
+        const argName = firstArg.value;
+
+        // Skip generic patterns
+        if (/^(Query|Mutation|QUERY|MUTATION)$/i.test(argName)) {
+          return null;
+        }
+
+        // Check Document imports
+        const importedName = documentImports.get(argName);
+        if (importedName) {
+          return importedName;
+        }
+
+        return cleanOperationName(argName);
+      }
+
+      // MemberExpression: useQuery(queries.GetUser)
+      if (firstArg?.type === 'MemberExpression' && firstArg.property?.type === 'Identifier') {
+        return cleanOperationName(firstArg.property.value);
+      }
+
+      // TaggedTemplateExpression: useQuery(gql`query GetUser { ... }`)
+      if (firstArg?.type === 'TaggedTemplateExpression') {
+        if (firstArg.template?.quasis?.[0]?.raw) {
+          const templateContent = firstArg.template.quasis[0].raw;
+          const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+          if (opMatch) {
+            return opMatch[1];
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract context name from useContext call
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractContextName(call: any): string | null {
+    if (call.arguments?.length > 0) {
+      const firstArg = call.arguments[0].expression;
+      if (firstArg?.type === 'Identifier') {
+        return firstArg.value.replace(/Context$/, '');
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Fallback regex-based hook extraction
+   */
+  private extractHooksWithRegex(content: string, hooks: string[], seenHooks: Set<string>): void {
+    // GraphQL hooks with multiline support
     const graphqlHookRegex =
-      /\b(useQuery|useMutation|useLazyQuery)(?:<[^>]*>)?\s*\(\s*([A-Z_][A-Za-z0-9_]*)/g;
+      /\b(useQuery|useMutation|useLazyQuery|useSuspenseQuery|useBackgroundQuery|useSubscription)(?:<[^>]*>)?\s*\(\s*([A-Z_][A-Za-z0-9_]*)?/gs;
     let gqlMatch;
+
     while ((gqlMatch = graphqlHookRegex.exec(content)) !== null) {
       const hookName = gqlMatch[1];
       const docName = gqlMatch[2];
 
-      // Skip generic variable names like Query, Mutation, QUERY, MUTATION
-      if (/^(Query|Mutation|QUERY|MUTATION)$/i.test(docName)) {
+      if (docName && /^(Query|Mutation|QUERY|MUTATION)$/i.test(docName)) {
         continue;
       }
 
-      const operationName = this.extractOperationName(docName);
+      const operationName = docName ? cleanOperationName(docName) : 'unknown';
+      const hookType = hookName.includes('Mutation')
+        ? 'Mutation'
+        : hookName.includes('Subscription')
+          ? 'Subscription'
+          : 'Query';
+      const hookInfo = `${hookType}: ${operationName}`;
 
-      if (hookName === 'useQuery' || hookName === 'useLazyQuery') {
-        const hookInfo = operationName ? `Query: ${operationName}` : `Query: ${docName}`;
-        if (!hooks.includes(hookInfo)) hooks.push(hookInfo);
-      } else if (hookName === 'useMutation') {
-        const hookInfo = operationName ? `Mutation: ${operationName}` : `Mutation: ${docName}`;
-        if (!hooks.includes(hookInfo)) hooks.push(hookInfo);
+      if (!seenHooks.has(hookInfo)) {
+        seenHooks.add(hookInfo);
+        hooks.push(hookInfo);
       }
     }
 
-    // Match other hooks (useState, useEffect, etc.)
+    // Other hooks
     const hookRegex = /\b(use[A-Z][a-zA-Z0-9]*)\s*\(/g;
     let match;
 
@@ -320,50 +581,36 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       const hookName = match[1];
 
       // Skip already processed GraphQL hooks
-      if (hookName === 'useQuery' || hookName === 'useMutation' || hookName === 'useLazyQuery') {
+      if (
+        [
+          'useQuery',
+          'useMutation',
+          'useLazyQuery',
+          'useSuspenseQuery',
+          'useBackgroundQuery',
+          'useSubscription',
+        ].includes(hookName)
+      ) {
         continue;
       }
 
       if (hookName === 'useContext') {
-        // Try to extract context name
         const contextMatch = content
           .slice(match.index)
           .match(/useContext\s*\(\s*([A-Z][A-Za-z0-9]*)/);
         if (contextMatch) {
           const contextName = contextMatch[1].replace(/Context$/, '');
           const hookInfo = `🔄 Context: ${contextName}`;
-          if (!hooks.includes(hookInfo)) hooks.push(hookInfo);
+          if (!seenHooks.has(hookInfo)) {
+            seenHooks.add(hookInfo);
+            hooks.push(hookInfo);
+          }
         }
-      } else if (!hooks.includes(hookName)) {
+      } else if (!seenHooks.has(hookName)) {
+        seenHooks.add(hookName);
         hooks.push(hookName);
       }
     }
-
-    return hooks;
-  }
-
-  private extractOperationName(args: string): string | null {
-    if (!args) return null;
-
-    // Get the first argument (operation name/document)
-    const firstArg = args.split(',')[0].trim();
-
-    // Skip object/array/string literals
-    if (/^[{[\'"` ]/.test(firstArg)) return null;
-
-    // Clean up the operation name
-    const cleanName = firstArg
-      .replace(/^(GET_|FETCH_|CREATE_|UPDATE_|DELETE_)/, '')
-      .replace(/_QUERY$|_MUTATION$/, '')
-      .replace(/Document$/, '')
-      .replace(/Query$|Mutation$/, '');
-
-    // Skip generic variable names
-    if (!cleanName || cleanName.trim() === '' || /^(QUERY|MUTATION)$/i.test(cleanName.trim())) {
-      return null;
-    }
-
-    return cleanName;
   }
 
   private extractStateManagement(content: string): string[] {
