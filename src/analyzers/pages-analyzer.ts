@@ -12,6 +12,8 @@ import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
+import { parseCodegenDocumentExports } from './codegen-ts-ast.js';
+import { TsModuleResolver } from '../utils/ts-module-resolver.js';
 import {
   ALL_GRAPHQL_HOOKS,
   isQueryHook,
@@ -42,6 +44,15 @@ import type {
 export class PagesAnalyzer extends BaseAnalyzer {
   // Codegen Document → Operation name mapping
   private codegenMap = new Map<string, { operationName: string; operationType: string }>();
+  private tsResolver: TsModuleResolver | null = null;
+  private coverage = {
+    tsFilesScanned: 0,
+    tsParseFailures: 0,
+    graphqlParseFailures: 0,
+    codegenFilesDetected: 0,
+    codegenFilesParsed: 0,
+    codegenExportsFound: 0,
+  };
 
   constructor(config: RepositoryConfig) {
     super(config);
@@ -59,6 +70,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     // Find page files from multiple possible locations
     const pageFiles = await this.findPageFiles();
+    this.coverage.tsFilesScanned += pageFiles.length;
 
     this.log(`Found ${pageFiles.length} page files`);
 
@@ -104,7 +116,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     this.log(`Analyzed ${validPages.length} pages successfully`);
 
-    return { pages: validPages };
+    return { pages: validPages, coverage: this.coverage };
   }
 
   /**
@@ -134,47 +146,22 @@ export class PagesAnalyzer extends BaseAnalyzer {
         const content = await fsPromises.readFile(fullPath, 'utf-8');
         const relPath = path.relative(this.basePath, fullPath);
 
-        // Skip if file doesn't contain DocumentNode (not a codegen file)
-        if (!content.includes('DocumentNode')) continue;
+        // Fast pre-filter: most codegen outputs contain "Document" + "definitions"
+        if (!content.includes('Document') || !content.includes('definitions')) continue;
 
-        const lines = content.split('\n');
-
-        for (const line of lines) {
-          // Match: export const XxxDocument = {...} as unknown as DocumentNode
-          if (!line.includes('Document') || !line.includes('=')) continue;
-
-          // Multiple patterns for codegen output
-          const patterns = [
-            /export\s+const\s+(\w+Document)\s*=/,
-            /export\s+const\s+(\w+):\s*DocumentNode\s*=/,
-            /const\s+(\w+Document)\s*=.*DocumentNode/,
-          ];
-
-          for (const pattern of patterns) {
-            const match = line.match(pattern);
-            if (!match) continue;
-
-            const documentName = match[1];
-            const operationName = documentName.replace(/Document$/, '');
-
-            // Determine type from content
-            let operationType = 'query';
-            if (line.includes('"mutation"') || documentName.toLowerCase().includes('mutation')) {
-              operationType = 'mutation';
-            } else if (
-              line.includes('"subscription"') ||
-              documentName.toLowerCase().includes('subscription')
-            ) {
-              operationType = 'subscription';
-            }
-
-            this.codegenMap.set(documentName, { operationName, operationType });
-            break;
-          }
+        this.coverage.codegenFilesDetected += 1;
+        const exports = parseCodegenDocumentExports(content, relPath);
+        this.coverage.codegenFilesParsed += 1;
+        this.coverage.codegenExportsFound += exports.length;
+        for (const e of exports) {
+          this.codegenMap.set(e.documentName, {
+            operationName: e.operationName,
+            operationType: e.operationType,
+          });
         }
 
-        if (this.codegenMap.size > 0) {
-          this.log(`Loaded ${this.codegenMap.size} codegen mappings from ${relPath}`);
+        if (exports.length > 0) {
+          this.log(`Loaded ${exports.length} codegen mappings from ${relPath}`);
         }
       } catch {
         // Skip if can't read
@@ -229,6 +216,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
         steps: steps.length > 0 ? steps : undefined,
       };
     } catch {
+      this.coverage.tsParseFailures += 1;
       return null;
     }
   }
@@ -263,7 +251,12 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
       const dirPath = this.resolvePath(dir);
       try {
-        const files = await fg(['**/*.tsx', '**/*.ts', '**/*.jsx', '**/*.js'], {
+        const isAppRouterDir = dir === 'app' || dir === 'src/app' || dir.endsWith('/app');
+        const patterns = isAppRouterDir
+          ? ['**/page.{tsx,ts,jsx,js}'] // Next.js App Router pages only
+          : ['**/*.tsx', '**/*.ts', '**/*.jsx', '**/*.js']; // Next.js Pages Router / generic
+
+        const files = await fg(patterns, {
           cwd: dirPath,
           ignore: [
             '_app.tsx',
@@ -331,6 +324,25 @@ export class PagesAnalyzer extends BaseAnalyzer {
    */
   private async findSPARoutes(): Promise<string[]> {
     const routeFiles: string[] = [];
+    // Prepare TS resolver once for alias imports (best-effort).
+    if (!this.tsResolver) {
+      try {
+        const known = await fg(['**/*.{ts,tsx,js,jsx}'], {
+          cwd: this.basePath,
+          ignore: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**'],
+          absolute: false,
+          onlyFiles: true,
+          unique: true,
+          dot: false,
+        });
+        this.tsResolver = new TsModuleResolver(
+          this.basePath,
+          new Set(known.map((f) => f.replace(/\\/g, '/')))
+        );
+      } catch {
+        this.tsResolver = null;
+      }
+    }
     const appPatterns = [
       'src/App.tsx',
       'src/App.jsx',
@@ -371,7 +383,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
               const componentName = componentProp || elementProp;
               const importPath = componentName ? importMap.get(componentName) : undefined;
               if (importPath) {
-                const resolvedPath = this.resolveImportPath(path.dirname(appPath), importPath);
+                const resolvedPath = this.resolveImportPath(appPath, importPath);
                 if (resolvedPath && fs.existsSync(resolvedPath)) {
                   routeFiles.push(resolvedPath);
                 }
@@ -394,8 +406,19 @@ export class PagesAnalyzer extends BaseAnalyzer {
   /**
    * Resolve import path to absolute file path
    */
-  private resolveImportPath(baseDir: string, importPath: string): string | null {
-    if (!importPath.startsWith('.')) return null;
+  private resolveImportPath(fromFileAbs: string, importPath: string): string | null {
+    // Relative first
+    if (!importPath.startsWith('.')) {
+      // Try TS module resolution for aliases (tsconfig paths, workspace aliases, ~/#, etc.)
+      const relFrom = path.relative(this.basePath, fromFileAbs).replace(/\\/g, '/');
+      if (this.tsResolver) {
+        const resolved = this.tsResolver.resolve(relFrom, importPath);
+        if (resolved) {
+          return path.join(this.basePath, resolved.file);
+        }
+      }
+      return null;
+    }
 
     const extensions = [
       '.tsx',
@@ -407,6 +430,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
       '/index.jsx',
       '/index.js',
     ];
+    const baseDir = path.dirname(fromFileAbs);
     const basePath = path.resolve(baseDir, importPath);
 
     for (const ext of extensions) {
@@ -453,12 +477,36 @@ export class PagesAnalyzer extends BaseAnalyzer {
   }
 
   private filePathToRoutePath(filePath: string): string {
+    // Normalize and strip extension
+    let p = filePath.replace(/\\/g, '/').replace(/\.(tsx?|jsx?)$/, '');
+
+    // Next.js App Router: ".../page" maps to directory route
+    p = p.replace(/\/page$/, '');
+    // (Optional) route handlers are not pages, but avoid accidental mapping if ever included
+    p = p.replace(/\/route$/, '');
+
+    // Remove route groups: "(group)" segments
+    const segments = p
+      .split('/')
+      .filter(Boolean)
+      .map((seg) => {
+        // Strip intercepting route prefixes like "(.)", "(..)", "(...)" if present
+        const stripped = seg.replace(/^\(\.\.\.\)|^\(\.\.\)|^\(\.\)/, '');
+        return stripped;
+      });
+
+    const filtered = segments.filter((seg) => {
+      if (seg.startsWith('(') && seg.endsWith(')')) return false; // route group
+      if (seg.startsWith('@')) return false; // parallel routes slot
+      return true;
+    });
+
+    const normalized = filtered.join('/').replace(/\/index$/, '');
+
     return (
       '/' +
-      filePath
-        .replace(/\.tsx?$/, '')
-        .replace(/\.jsx?$/, '')
-        .replace(/\/index$/, '')
+      normalized
+        .replace(/\[\[\.\.\.(\w+)\]\]/g, '*')
         .replace(/\[\.\.\.(\w+)\]/g, '*')
         .replace(/\[(\w+)\]/g, ':$1')
     );
@@ -771,6 +819,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     // Use unified GraphQL context extraction
     const graphqlContext = extractGraphQLContext(ast, content, codegenMapConverted);
+    const extraHookPatterns = this.getGraphQLHookPatterns();
 
     // Find all hook calls using AST traversal
     traverseAst(ast, (node) => {
@@ -782,9 +831,12 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
         // Check for GraphQL hooks - MUST verify it has actual GraphQL arguments
         // This prevents false positives like useQueryParams, useQueryClient, etc.
-        if (isGraphQLHook(calleeName) && hasGraphQLArgument(call, content, graphqlContext)) {
+        if (
+          isGraphQLHook(calleeName, extraHookPatterns) &&
+          hasGraphQLArgument(call, content, graphqlContext)
+        ) {
           const operationName = resolveOperationName(call, content, graphqlContext);
-          const type = getHookType(calleeName);
+          const type = getHookType(calleeName, extraHookPatterns);
 
           const result: DataFetchingInfo = {
             type,
@@ -1043,17 +1095,20 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const calleeName = this.getCalleeName(call.callee);
     if (!calleeName) return null;
 
+    const extraHookPatterns = this.getGraphQLHookPatterns();
+
     // Check if this is a GraphQL hook using shared utilities
     const isStandardHook = (ALL_GRAPHQL_HOOKS as readonly string[]).includes(calleeName);
-    const isCustomQuery = isQueryHook(calleeName) && !calleeName.includes('Params');
-    const isCustomMutation = isMutationHook(calleeName);
+    const isCustomQuery =
+      isQueryHook(calleeName, extraHookPatterns) && !calleeName.includes('Params');
+    const isCustomMutation = isMutationHook(calleeName, extraHookPatterns);
 
     if (!isStandardHook && !isCustomQuery && !isCustomMutation) {
       return null;
     }
 
     // Determine hook type using shared utility
-    const resolvedType = getHookType(calleeName);
+    const resolvedType = getHookType(calleeName, extraHookPatterns);
 
     // Extract operation name from multiple sources
     let operationName = calleeName.replace(/^use/, '').replace(/Query$|Mutation$/, '');
@@ -1377,7 +1432,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
           // Check imports first
           if (documentImports.has(varName)) {
-            return documentImports.get(varName)!;
+            return documentImports.get(varName) || null;
           }
 
           // Check codegen map

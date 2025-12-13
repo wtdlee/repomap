@@ -104,6 +104,17 @@ export class MarkdownGenerator {
       `| Auth Required | ${repo.summary.authRequiredPages} |`,
       `| Public | ${repo.summary.publicPages} |`,
       '',
+      '## Coverage',
+      '',
+      `| Metric | Value |`,
+      `|--------|-------|`,
+      `| TS/JS Files Scanned | ${repo.analysis.coverage?.tsFilesScanned ?? 0} |`,
+      `| TS Parse Failures | ${repo.analysis.coverage?.tsParseFailures ?? 0} |`,
+      `| GraphQL Parse Failures | ${repo.analysis.coverage?.graphqlParseFailures ?? 0} |`,
+      `| Codegen Files Detected | ${repo.analysis.coverage?.codegenFilesDetected ?? 0} |`,
+      `| Codegen Files Parsed | ${repo.analysis.coverage?.codegenFilesParsed ?? 0} |`,
+      `| Codegen Exports Found | ${repo.analysis.coverage?.codegenExportsFound ?? 0} |`,
+      '',
       '## Documentation',
       '',
       `- [Pages](/docs/repos/${repo.name}/pages)`,
@@ -233,6 +244,8 @@ export class MarkdownGenerator {
           }
 
           const g = ensureGroup(key, label, open);
+          // Store confidence in data attributes (modal), not in visible text.
+          // Keep display text clean (no "[likely]" suffix).
           if (isMutation) g.mutations.add(cleanName);
           else g.queries.add(cleanName);
         }
@@ -272,7 +285,13 @@ export class MarkdownGenerator {
             lines.push('');
             lines.push('<div class="gql-ops-list">');
             for (const name of Array.from(g.queries).sort()) {
-              lines.push(`<span class="gql-op" data-op="${name}">${name}</span>`);
+              const isLikely = allDf.some(
+                (df) =>
+                  (df.operationName || '').replace(/^[→\->\s]+/, '').trim() === name &&
+                  df.confidence === 'likely'
+              );
+              const confAttr = isLikely ? ` data-confidence="likely"` : '';
+              lines.push(`<span class="gql-op" data-op="${name}"${confAttr}>${name}</span>`);
             }
             lines.push('</div>');
             lines.push('');
@@ -283,7 +302,15 @@ export class MarkdownGenerator {
             lines.push('');
             lines.push('<div class="gql-ops-list">');
             for (const name of Array.from(g.mutations).sort()) {
-              lines.push(`<span class="gql-op mutation" data-op="${name}">${name}</span>`);
+              const isLikely = allDf.some(
+                (df) =>
+                  (df.operationName || '').replace(/^[→\->\s]+/, '').trim() === name &&
+                  df.confidence === 'likely'
+              );
+              const confAttr = isLikely ? ` data-confidence="likely"` : '';
+              lines.push(
+                `<span class="gql-op mutation" data-op="${name}"${confAttr}>${name}</span>`
+              );
             }
             lines.push('</div>');
             lines.push('');

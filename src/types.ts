@@ -79,6 +79,8 @@ export interface AnalysisResult {
   timestamp: string;
   version: string;
   commitHash: string;
+  /** Coverage / observability metrics to prevent silent omissions */
+  coverage?: CoverageMetrics;
   pages: PageInfo[];
   graphqlOperations: GraphQLOperation[];
   apiCalls: APICall[];
@@ -87,6 +89,21 @@ export interface AnalysisResult {
   apiEndpoints: APIEndpoint[];
   models: ModelInfo[];
   crossRepoLinks: CrossRepoLink[];
+}
+
+export interface CoverageMetrics {
+  /** Number of TS/TSX/JS/JSX files scanned by analyzers (best-effort) */
+  tsFilesScanned: number;
+  /** Number of source files that failed to parse (SWC/TS parser failures) */
+  tsParseFailures: number;
+  /** Number of GraphQL parse failures (graphql parse errors) */
+  graphqlParseFailures: number;
+  /** Number of codegen files detected (best-effort) */
+  codegenFilesDetected: number;
+  /** Number of codegen files successfully parsed by AST */
+  codegenFilesParsed: number;
+  /** Number of Document exports extracted from codegen outputs */
+  codegenExportsFound: number;
 }
 
 /**
@@ -165,6 +182,23 @@ export interface DataFetchingInfo {
   operationName: string;
   variables?: string[];
   source?: string; // Source component or hook name
+  /**
+   * Confidence for the mapping between page <-> hook <-> operation.
+   * - 'certain': direct/close evidence
+   * - 'likely': reachable but indirect evidence
+   * - 'unknown': reachable via widely-shared/common modules (UI may display this as "Common" or omit it)
+   */
+  confidence?: 'certain' | 'likely' | 'unknown';
+  /**
+   * Evidence for why this operation is linked.
+   * This is primarily for debugging missing/incorrect links.
+   */
+  evidence?: Array<{
+    kind: 'import-edge' | 'operation-reference';
+    file: string;
+    line?: number;
+    detail?: string;
+  }>;
 }
 
 export interface NavigationInfo {

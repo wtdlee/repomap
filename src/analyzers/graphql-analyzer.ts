@@ -6,6 +6,7 @@ import { parse as parseGraphQL, DocumentNode, DefinitionNode, TypeNode } from 'g
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
 import { isGraphQLHook, hasGraphQLIndicators } from './graphql-utils.js';
+import { parseCodegenDocumentExports } from './codegen-ts-ast.js';
 import type {
   AnalysisResult,
   GraphQLOperation,
@@ -19,6 +20,15 @@ import type {
  * Uses @swc/core for fast parsing
  */
 export class GraphQLAnalyzer extends BaseAnalyzer {
+  private coverage = {
+    tsFilesScanned: 0,
+    tsParseFailures: 0,
+    graphqlParseFailures: 0,
+    codegenFilesDetected: 0,
+    codegenFilesParsed: 0,
+    codegenExportsFound: 0,
+  };
+
   constructor(config: RepositoryConfig) {
     super(config);
   }
@@ -61,7 +71,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
     this.log(`Found ${uniqueOperations.length} GraphQL operations`);
 
-    return { graphqlOperations: uniqueOperations };
+    return { graphqlOperations: uniqueOperations, coverage: this.coverage };
   }
 
   /**
@@ -118,59 +128,45 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         const content = await fs.readFile(filePath, 'utf-8');
         const relativePath = path.relative(this.basePath, filePath);
 
-        // Optimized line-by-line parsing (Document definitions are on single lines)
-        const lines = content.split('\n');
-        for (const line of lines) {
-          // Quick check before regex
-          if (!line.includes('Document =') || !line.includes('DocumentNode')) continue;
+        // Fast pre-filter
+        if (!content.includes('Document') || !content.includes('definitions')) continue;
 
-          // Match: export const XxxDocument = {...} as unknown as DocumentNode
-          const match = line.match(
-            /export\s+const\s+(\w+Document)\s*=\s*(\{"kind":"Document".+\})\s*as\s+unknown\s+as\s+DocumentNode/
+        this.coverage.codegenFilesDetected += 1;
+        const exports = parseCodegenDocumentExports(content, relativePath);
+        this.coverage.codegenFilesParsed += 1;
+        this.coverage.codegenExportsFound += exports.length;
+        for (const e of exports) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc = e.document as any;
+          const def = doc?.definitions?.[0];
+          if (!def || def.kind !== 'OperationDefinition') continue;
+
+          // Extract variables (simplified for performance)
+          const variables: VariableInfo[] = (def.variableDefinitions || []).map(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (varDef: any) => ({
+              name: varDef.variable?.name?.value || 'unknown',
+              type: this.extractTypeFromAst(varDef.type),
+              required: varDef.type?.kind === 'NonNullType',
+            })
           );
-          if (!match) continue;
 
-          const documentName = match[1];
-          const documentJson = match[2];
-
-          try {
-            const documentObj = JSON.parse(documentJson);
-
-            if (documentObj.kind === 'Document' && documentObj.definitions) {
-              // Only process first definition (main operation)
-              const def = documentObj.definitions[0];
-              if (def?.kind === 'OperationDefinition') {
-                const operationName = def.name?.value || documentName.replace(/Document$/, '');
-                const operationType = def.operation as 'query' | 'mutation' | 'subscription';
-
-                // Extract variables (simplified for performance)
-                const variables: VariableInfo[] = (def.variableDefinitions || []).map(
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  (varDef: any) => ({
-                    name: varDef.variable?.name?.value || 'unknown',
-                    type: this.extractTypeFromAst(varDef.type),
-                    required: varDef.type?.kind === 'NonNullType',
-                  })
-                );
-
-                operations.push({
-                  name: operationName,
-                  type: operationType,
-                  filePath: relativePath,
-                  usedIn: [],
-                  variables,
-                  returnType: this.inferReturnTypeFromAst(def),
-                  fragments: this.extractFragmentReferencesFromAst(def),
-                  fields: this.extractFieldsFromAst(def.selectionSet),
-                });
-              }
-            }
-          } catch {
-            // Skip unparseable JSON
-          }
+          operations.push({
+            name: e.operationName,
+            type: e.operationType,
+            filePath: relativePath,
+            usedIn: [],
+            variables,
+            returnType: this.inferReturnTypeFromAst(def),
+            fragments: this.extractFragmentReferencesFromAst(def),
+            fields: this.extractFieldsFromAst(def.selectionSet),
+            variableNames: [e.documentName],
+          });
         }
 
-        this.log(`Found ${operations.length} operations in codegen output: ${relativePath}`);
+        if (exports.length > 0) {
+          this.log(`Found ${exports.length} operations in codegen output: ${relativePath}`);
+        }
       } catch (error) {
         this.warn(`Failed to analyze codegen file ${filePath}: ${(error as Error).message}`);
       }
@@ -287,8 +283,13 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     // Process files in parallel
     const results = await parallelMapSafe(graphqlFiles, async (filePath) => {
       const content = await fs.readFile(filePath, 'utf-8');
-      const document = parseGraphQL(content);
-      return this.extractOperationsFromDocument(document, path.relative(this.basePath, filePath));
+      try {
+        const document = parseGraphQL(content);
+        return this.extractOperationsFromDocument(document, path.relative(this.basePath, filePath));
+      } catch {
+        this.coverage.graphqlParseFailures += 1;
+        return [];
+      }
     });
 
     return results.flat();
@@ -309,6 +310,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
       ],
       absolute: true,
     });
+    this.coverage.tsFilesScanned += tsFiles.length;
 
     // Process files in parallel batches
     const batchSize = 50;
@@ -337,6 +339,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
             return this.analyzeModuleForGraphQL(ast, content, relativePath);
           } catch {
+            this.coverage.tsParseFailures += 1;
             return [];
           }
         },
@@ -385,6 +388,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               operations.push(...fileOps);
             } catch {
               // Skip unparseable GraphQL
+              this.coverage.graphqlParseFailures += 1;
             }
           }
         }
@@ -417,6 +421,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
                 operations.push(...fileOps);
               } catch {
                 // Skip unparseable GraphQL
+                this.coverage.graphqlParseFailures += 1;
               }
             }
           }
@@ -689,6 +694,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
   private async findOperationUsage(operations: GraphQLOperation[]): Promise<void> {
     if (operations.length === 0) return;
+    const extraHookPatterns = this.getGraphQLHookPatterns();
 
     const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
@@ -801,7 +807,8 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               filePath,
               relativePath,
               operationByName,
-              operationByQueryType
+              operationByQueryType,
+              extraHookPatterns
             );
           } catch {
             // Skip unreadable files
@@ -819,7 +826,8 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     filePath: string,
     relativePath: string,
     operationByName: Map<string, GraphQLOperation>,
-    operationByQueryType: Map<string, GraphQLOperation>
+    operationByQueryType: Map<string, GraphQLOperation>,
+    extraHookPatterns: string[]
   ): Promise<void> {
     try {
       const isTsx = filePath.endsWith('.tsx') || filePath.endsWith('.jsx');
@@ -836,7 +844,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
           const calleeName = this.getCalleeNameForUsage(node.callee);
 
           // Check if it's a GraphQL hook
-          if (calleeName && isGraphQLHook(calleeName)) {
+          if (calleeName && isGraphQLHook(calleeName, extraHookPatterns)) {
             // Extract type generic: useQuery<GetUserQuery>
             const typeName = this.extractTypeGenericFromCall(node, content);
             if (typeName) {

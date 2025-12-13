@@ -78,7 +78,26 @@ export const GRAPHQL_INDICATORS = [
   'SUBSCRIBE_',
   '@apollo',
   'ApolloClient',
+  '@urql',
+  'urql',
+  'react-relay',
+  'Relay',
 ] as const;
+
+function matchPattern(name: string, pattern: string): boolean {
+  if (!pattern) return false;
+  if (pattern === name) return true;
+  if (!pattern.includes('*')) return false;
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`).test(name);
+}
+
+function matchesAnyPattern(name: string, patterns: string[]): boolean {
+  for (const p of patterns) {
+    if (matchPattern(name, p)) return true;
+  }
+  return false;
+}
 
 // ============================================================================
 // Type Definitions
@@ -115,7 +134,10 @@ export interface ExtractedGraphQLOperation {
 /**
  * Check if a hook name is a GraphQL query hook
  */
-export function isQueryHook(hookName: string): boolean {
+export function isQueryHook(hookName: string, extraHookPatterns: string[] = []): boolean {
+  if (matchesAnyPattern(hookName, extraHookPatterns)) {
+    return /Query$/.test(hookName) || !/(Mutation|Subscription)$/.test(hookName);
+  }
   return (
     (GRAPHQL_QUERY_HOOKS as readonly string[]).includes(hookName) ||
     /^use[A-Z].*Query$/.test(hookName)
@@ -125,7 +147,10 @@ export function isQueryHook(hookName: string): boolean {
 /**
  * Check if a hook name is a GraphQL mutation hook
  */
-export function isMutationHook(hookName: string): boolean {
+export function isMutationHook(hookName: string, extraHookPatterns: string[] = []): boolean {
+  if (matchesAnyPattern(hookName, extraHookPatterns)) {
+    return /Mutation$/.test(hookName) || hookName.toLowerCase().includes('mutation');
+  }
   return (
     (GRAPHQL_MUTATION_HOOKS as readonly string[]).includes(hookName) ||
     /^use[A-Z].*Mutation$/.test(hookName)
@@ -135,29 +160,36 @@ export function isMutationHook(hookName: string): boolean {
 /**
  * Check if a hook name is a GraphQL subscription hook
  */
-export function isSubscriptionHook(hookName: string): boolean {
+export function isSubscriptionHook(hookName: string, extraHookPatterns: string[] = []): boolean {
+  if (matchesAnyPattern(hookName, extraHookPatterns)) {
+    return /Subscription$/.test(hookName) || hookName.toLowerCase().includes('subscription');
+  }
   return hookName === 'useSubscription';
 }
 
 /**
  * Check if a hook name is any GraphQL hook
  */
-export function isGraphQLHook(hookName: string): boolean {
+export function isGraphQLHook(hookName: string, extraHookPatterns: string[] = []): boolean {
+  if (matchesAnyPattern(hookName, extraHookPatterns)) return true;
   return (
     (ALL_GRAPHQL_HOOKS as readonly string[]).includes(hookName) ||
-    isQueryHook(hookName) ||
-    isMutationHook(hookName)
+    isQueryHook(hookName, extraHookPatterns) ||
+    isMutationHook(hookName, extraHookPatterns)
   );
 }
 
 /**
  * Get the data fetching type for a hook
  */
-export function getHookType(hookName: string): DataFetchingInfo['type'] {
+export function getHookType(
+  hookName: string,
+  extraHookPatterns: string[] = []
+): DataFetchingInfo['type'] {
   if (HOOK_TYPE_MAP[hookName]) {
     return HOOK_TYPE_MAP[hookName];
   }
-  if (hookName.includes('Mutation')) {
+  if (hookName.includes('Mutation') || matchesAnyPattern(hookName, extraHookPatterns)) {
     return 'useMutation';
   }
   if (hookName.includes('Lazy')) {
@@ -332,6 +364,7 @@ function extractDocumentImportsFromNode(node: any, imports: Map<string, string>)
  */
 
 function extractVariableOperationFromNode(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   node: any,
   content: string,
   operations: Map<string, string>
@@ -383,6 +416,7 @@ function extractVariableOperationFromNode(
  */
 
 function extractStaticPropertyOperationFromNode(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   node: any,
   content: string,
   operations: Map<string, string>
@@ -554,7 +588,26 @@ export function hasGraphQLArgument(
     }
   }
 
-  // 6. Check source content around the call for GraphQL indicators
+  // 6. ObjectExpression for clients like urql: useQuery({ query: MyQuery, variables: ... })
+  if (firstArg.type === 'ObjectExpression') {
+    for (const prop of firstArg.properties || []) {
+      if (prop.type !== 'KeyValueProperty') continue;
+      const key =
+        prop.key?.type === 'Identifier'
+          ? prop.key.value
+          : prop.key?.type === 'StringLiteral'
+            ? prop.key.value
+            : null;
+      if (!key) continue;
+      if (!['query', 'mutation', 'document', 'subscription'].includes(key)) continue;
+      const v = prop.value;
+      if (v && extractFromArgument(v, content, context)) {
+        return true;
+      }
+    }
+  }
+
+  // 7. Check source content around the call for GraphQL indicators
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const span = (call as any).span;
   if (span) {
@@ -636,6 +689,7 @@ function extractFromTypeGeneric(call: any, content: string): string | null {
  */
 
 function extractFromArgument(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   arg: any,
   content: string,
   context: GraphQLFileContext
@@ -751,6 +805,7 @@ function resolveMemberExpressionToOperation(expr: any, context: GraphQLFileConte
  */
 
 function extractFromObjectExpression(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   obj: any,
   content: string,
   context: GraphQLFileContext

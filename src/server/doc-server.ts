@@ -801,7 +801,9 @@ export class DocServer {
 
         if (op.usedIn?.length) {
           html += '<div class="detail-section"><h4>Used In</h4><div style="max-height:100px;overflow-y:auto">';
-          op.usedIn.forEach(f => { html += \`<p style="font-size:12px;color:#666;margin:2px 0">\${f}</p>\`; });
+          op.usedIn.forEach(f => {
+            html += \`<p><code>\${escapeHtml(f)}</code></p>\`;
+          });
           html += '</div></div>';
         }
       } else {
@@ -840,7 +842,9 @@ export class DocServer {
 
           if (partialMatch.usedIn?.length) {
             html += '<div class="detail-section"><h4>Used In</h4><div style="max-height:100px;overflow-y:auto">';
-            partialMatch.usedIn.forEach(f => { html += \`<p style="font-size:12px;color:#666;margin:2px 0">\${f}</p>\`; });
+            partialMatch.usedIn.forEach(f => {
+              html += \`<p><code>\${escapeHtml(f)}</code></p>\`;
+            });
             html += '</div></div>';
           }
         } else {
@@ -922,6 +926,15 @@ export class DocServer {
       return badges[type] || badges.unknown;
     }
 
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     function closeModal() {
       document.getElementById('detailModal').classList.remove('open');
       modalHistory = [];
@@ -966,7 +979,8 @@ export class DocServer {
         el.addEventListener('click', (e) => {
           e.stopPropagation();
           const opName = el.dataset.op || el.textContent?.replace(/^[QM]:\\s*/, '') || '';
-          if (opName) showGraphQLDetail(opName, el);
+          const confidence = el.dataset.confidence || '';
+          if (opName) showGraphQLDetail(opName, el, confidence);
         });
       });
 
@@ -1000,7 +1014,7 @@ export class DocServer {
       });
     });
 
-    function showGraphQLDetail(name, el) {
+    function showGraphQLDetail(name, el, confidence) {
       const modal = document.getElementById('detailModal');
       const title = document.getElementById('modalTitle');
       const body = document.getElementById('modalBody');
@@ -1017,9 +1031,16 @@ export class DocServer {
 
       if (op) {
         titleText = op.name;
+        const confBadge =
+          confidence === 'likely'
+            ? '<span class="detail-badge confidence likely" title="Likely: reachable via the import graph, but indirect (3+ steps)">LIKELY</span>'
+            : '';
         html = \`<div class="detail-section">
           <h4>Type</h4>
-          <p><span class="detail-badge \${op.type}">\${op.type.toUpperCase()}</span></p>
+          <div class="detail-badges">
+            <span class="detail-badge \${op.type}">\${op.type.toUpperCase()}</span>
+            \${confBadge}
+          </div>
         </div>\`;
 
         if (op.returnType) {
@@ -1048,8 +1069,10 @@ export class DocServer {
         }
 
         if (op.usedIn?.length) {
-          html += '<div class="detail-section"><h4>Used In</h4><div style="font-size:12px;color:#666;max-height:100px;overflow-y:auto">';
-          op.usedIn.forEach(f => { html += \`<div style="margin:2px 0">\${f}</div>\`; });
+          html += '<div class="detail-section"><h4>Used In</h4><div style="max-height:100px;overflow-y:auto">';
+          op.usedIn.forEach(f => {
+            html += \`<p><code>\${escapeHtml(f)}</code></p>\`;
+          });
           html += '</div></div>';
         }
       } else {
@@ -1062,7 +1085,9 @@ export class DocServer {
         html = \`
           <div class="detail-section">
             <h4>Type</h4>
-            <p><span class="detail-badge \${type}">\${type.toUpperCase()}</span></p>
+            <div class="detail-badges">
+              <span class="detail-badge \${type}">\${type.toUpperCase()}</span>
+            </div>
           </div>
           <div class="detail-section">
             <h4>Operation Name</h4>
@@ -1188,8 +1213,10 @@ export class DocServer {
       }
 
       if (op.usedIn?.length) {
-        html += '<div class="detail-section"><h4>Used In</h4><div style="font-size:12px;color:#666;max-height:100px;overflow-y:auto">';
-        op.usedIn.forEach(f => { html += \`<div style="margin:2px 0">\${f}</div>\`; });
+        html += '<div class="detail-section"><h4>Used In</h4><div style="max-height:100px;overflow-y:auto">';
+        op.usedIn.forEach(f => {
+          html += \`<p><code>\${escapeHtml(f)}</code></p>\`;
+        });
         html += '</div></div>';
       }
 

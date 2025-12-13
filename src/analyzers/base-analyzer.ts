@@ -37,6 +37,69 @@ export abstract class BaseAnalyzer {
   }
 
   /**
+   * Get list-like setting value (comma/newline separated).
+   * Example: "useMyQuery, useMyMutation" -> ["useMyQuery", "useMyMutation"]
+   */
+  protected getListSetting(key: string, defaultValue: string[] = []): string[] {
+    const raw = this.getSetting(key, '');
+    if (!raw) return defaultValue;
+    return raw
+      .split(/[,\n]/g)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  /**
+   * Resolve effective GraphQL hook patterns by combining:
+   * - a preset selected by `settings.graphqlHookPreset` (default: "auto")
+   * - user-defined patterns from `settings.graphqlHookPatterns`
+   *
+   * Presets are meant to improve out-of-the-box support for common "production variants"
+   * (Relay/urql/custom wrappers) while keeping false positives low.
+   */
+  protected getGraphQLHookPatterns(): string[] {
+    const preset = (this.getSetting('graphqlHookPreset', 'auto') || 'auto').trim().toLowerCase();
+    const user = this.getListSetting('graphqlHookPatterns', []);
+
+    const relay = [
+      'useLazyLoadQuery',
+      'usePreloadedQuery',
+      'useQueryLoader',
+      'useMutation',
+      'useSubscription',
+      'useFragment',
+      'usePaginationFragment',
+      'useRefetchableFragment',
+      'useRelayEnvironment',
+    ];
+    const urql = ['useUrql*'];
+    const commonWrappers = [
+      'useGql*',
+      'useGraphQL*',
+      'useGraphql*',
+      'useApiQuery*',
+      'useApiMutation*',
+    ];
+
+    let presetPatterns: string[] = [];
+    if (preset === 'none' || preset === 'off' || preset === 'false') {
+      presetPatterns = [];
+    } else if (preset === 'apollo') {
+      // Apollo built-ins are handled by the default hook list.
+      presetPatterns = [];
+    } else if (preset === 'urql') {
+      presetPatterns = urql;
+    } else if (preset === 'relay') {
+      presetPatterns = relay;
+    } else {
+      // "auto" (default): safe-ish superset
+      presetPatterns = [...relay, ...urql, ...commonWrappers];
+    }
+
+    return Array.from(new Set([...presetPatterns, ...user]));
+  }
+
+  /**
    * Log analysis progress (silent by default, set REPOMAP_VERBOSE=1 to enable)
    */
   protected log(_message: string): void {
