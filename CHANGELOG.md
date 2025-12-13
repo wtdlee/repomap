@@ -1,5 +1,20 @@
 # @wtdlee/repomap
 
+## 0.9.1
+
+### Patch Changes
+
+- c55ab44: fix: improve GraphQL operation mapping and display
+  - Use evidence-based, import-graph-aware mapping for pages
+  - Reduce false positives in GraphQL usedIn detection
+  - Improve grouping/prioritization (direct vs related vs shared)
+  - Remove "more" buttons and show full lists in docs tables
+
+- 0fd471f: fix: refine dataflow, page-map, and rails-map UI
+  - Fix docs sticky behavior and mermaid styling around dataflow filters
+  - Simplify page-map data operation groups and shorten source labels to file names
+  - Add meaningful sidebar filters for controllers/models/gRPC and support show-all for models
+
 ## 0.9.0
 
 ### Minor Changes
