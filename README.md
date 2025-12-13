@@ -1,14 +1,36 @@
-# @wtdlee/repomap
+<p align="center">
+  <img src="./src/generators/assets/favicon/favicon.svg" alt="Repomap" width="120">
+</p>
 
-[![npm version](https://badge.fury.io/js/@wtdlee%2Frepomap.svg)](https://www.npmjs.com/package/@wtdlee/repomap)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<h1 align="center">@wtdlee/repomap</h1>
 
-Interactive documentation generator for code repositories. Visualize pages, components, routes, and data flows with an intuitive web interface.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@wtdlee/repomap"><img src="https://badge.fury.io/js/@wtdlee%2Frepomap.svg" alt="npm version"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  Interactive documentation generator for code repositories.<br>
+  Visualize pages, components, routes, and data flows with an intuitive web interface.
+</p>
+
+## ⚡ Performance
+
+Powered by [SWC](https://swc.rs/) for blazing-fast AST parsing. Analyze large-scale codebases in seconds.
+
+| Codebase | Scale | Analysis Time |
+|----------|-------|---------------|
+| Next.js Frontend | 30 pages, 970+ components, 640+ GraphQL ops | **~3.2s** |
+| Rails + React Monolith | 5,700+ routes, 490 controllers, 820 models, 80+ gRPC | **~3.5s** |
+
+> 🚀 **10x faster** than ts-morph based solutions. No caching needed!
 
 ## Features
 
 ### 🗺️ Page Map
-- **Multi-framework support** - Next.js (Pages/App Router), React, Rails
+- **Multi-framework support** - Next.js (Pages/App Router), React SPA, Rails
+- **SPA support** - Automatic detection of react-router-dom routes from App.tsx/jsx/js
+- **Zero config for JS projects** - Works without tsconfig.json using smart defaults
 - **Interactive graph view** - Visual representation of page relationships
 - **Route analysis** - Automatic detection of routes, authentication, and data dependencies
 - **React component tracking** - Detect React components used in Rails views
@@ -24,13 +46,16 @@ Interactive documentation generator for code repositories. Visualize pages, comp
 
 ### 🔗 GraphQL Analysis
 - **Operations mapping** - Extract queries, mutations, and fragments
+- **Code Generator support** - Parse `__generated__/graphql.ts` (client preset)
 - **Field details** - View all fields with types and arguments
-- **Usage tracking** - See where operations are used
+- **Usage tracking** - See where operations are used in components
+- **Component integration** - Track GraphQL usage through component dependencies
 
 ### 📊 Data Flow
 - **Visual diagrams** - Mermaid-generated flowcharts
 - **Cross-component tracking** - Follow data through your application
 - **REST API detection** - Automatic API endpoint discovery
+- **High performance** - SWC-based parsing (10x faster than ts-morph)
 
 ## Installation
 
@@ -77,7 +102,6 @@ repomap serve [options]
   -p, --port <number>  Server port (default: 3030)
   -c, --config <path>  Path to config file
   --path <path>        Path to repository to analyze
-  --no-cache           Disable caching (always analyze from scratch)
   --no-open            Don't open browser automatically
 
 # generate command options
@@ -86,7 +110,6 @@ repomap generate [options]
   -o, --output <path>  Output directory
   --repo <name>        Analyze specific repository only
   --watch              Watch for changes and regenerate
-  --no-cache           Disable caching
   --static             Generate standalone HTML files (for GitHub Pages)
   --ci                 CI mode: minimal output, exit codes for errors
   --format <type>      Output format: json, html, markdown (default: all)
@@ -261,7 +284,7 @@ console.log(`Total pages: ${report.repositories[0].summary.totalPages}`);
 ```typescript
 import { DocServer } from "@wtdlee/repomap";
 
-const server = new DocServer(config, 3030, { noCache: false });
+const server = new DocServer(config, 3030);
 await server.start(true); // true = open browser automatically
 ```
 
@@ -392,8 +415,18 @@ export default config;
 | Framework | Features |
 |-----------|----------|
 | **Next.js** | Pages Router, App Router, API routes, data fetching |
-| **React** | Components, GraphQL operations, hooks |
+| **React SPA** | react-router-dom routes, components, hooks (auto-detected from App.tsx) |
+| **React (JS)** | JavaScript projects without tsconfig.json |
 | **Rails** | Routes, Controllers, Models, Views, gRPC, React integration |
+
+### GraphQL Support
+
+| Pattern | Support |
+|---------|---------|
+| `.graphql` files | ✅ Full support |
+| `gql` template literals | ✅ Full support |
+| GraphQL Code Generator (`__generated__/graphql.ts`) | ✅ Full support |
+| `useQuery`, `useMutation`, `useLazyQuery` hooks | ✅ Tracked |
 
 ## Type Definitions
 
@@ -462,8 +495,7 @@ src/
 ├── server/
 │   └── doc-server.ts          # Express server with live reload
 ├── core/
-│   ├── engine.ts              # Main documentation engine
-│   └── cache.ts               # Caching utilities
+│   └── engine.ts              # Main documentation engine
 ├── utils/
 │   ├── env-detector.ts        # Environment detection
 │   └── parallel.ts            # Parallel processing utilities

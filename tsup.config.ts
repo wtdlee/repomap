@@ -45,8 +45,13 @@ export default defineConfig({
   onSuccess: async () => {
     // Copy CSS assets after build
     const { execSync } = await import('child_process');
-    execSync('mkdir -p dist/generators/assets && cp src/generators/assets/*.css dist/generators/assets/');
-    console.log('✓ Copied CSS assets');
+    execSync(
+      'mkdir -p dist/generators/assets && cp src/generators/assets/*.css dist/generators/assets/'
+    );
+    // Copy favicon files
+    execSync(
+      'mkdir -p dist/generators/assets/favicon && cp src/generators/assets/favicon/* dist/generators/assets/favicon/'
+    );
+    console.log('✓ Copied assets (CSS + favicon)');
   },
 });
-

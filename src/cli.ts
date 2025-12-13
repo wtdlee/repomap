@@ -18,7 +18,7 @@ const program = new Command();
 program
   .name('repomap')
   .description('Interactive documentation generator for code repositories')
-  .version('0.1.0');
+  .version('0.6.0');
 
 /**
  * Auto-detect project type and settings
@@ -108,8 +108,6 @@ async function detectProject(dir: string): Promise<RepositoryConfig | null> {
     analyzers.push('pages', 'graphql', 'dataflow', 'rest-api');
   }
 
-  // Rails analyzers are handled separately via Rails analysis
-
   // Determine project type
   let type: 'nextjs' | 'rails' | 'generic' = 'generic';
   if (hasNextjs) {
@@ -197,14 +195,12 @@ async function loadConfig(configPath: string | null, cwd: string): Promise<DocGe
     const fullPath = path.resolve(cwd, file);
     try {
       await fs.access(fullPath);
-      console.log(chalk.gray(`Loading config from: ${fullPath}`));
       const module = await import(fullPath);
       return module.config || module.default;
     } catch {}
   }
 
   // No config file, auto-detect
-  console.log(chalk.gray('No config file found, auto-detecting project...'));
   return createDefaultConfig(cwd);
 }
 
@@ -218,7 +214,6 @@ program
   .option('-o, --output <path>', 'Output directory')
   .option('--repo <name>', 'Analyze specific repository only')
   .option('--watch', 'Watch for changes and regenerate')
-  .option('--no-cache', 'Disable caching (always analyze from scratch)')
   .option('--format <type>', 'Output format: json, html, markdown (default: all)', 'all')
   .option('--ci', 'CI mode: minimal output, exit codes for errors')
   .option('--static', 'Generate standalone HTML files (for GitHub Pages)')
@@ -226,7 +221,7 @@ program
     const isCI = options.ci || process.env.CI === 'true';
 
     if (!isCI) {
-      console.log(chalk.blue.bold('\n📚 Repomap - Documentation Generator\n'));
+      console.log(chalk.blue.bold('\n📚 Repomap\n'));
     }
 
     try {
@@ -248,10 +243,10 @@ program
       }
 
       // Create engine and generate
-      const engine = new DocGeneratorEngine(config, { noCache: !options.cache });
+      const engine = new DocGeneratorEngine(config);
 
       if (options.watch) {
-        console.log(chalk.yellow('\n👀 Watch mode enabled. Press Ctrl+C to stop.\n'));
+        console.log(chalk.yellow('👀 Watch mode enabled. Press Ctrl+C to stop.\n'));
         await watchAndGenerate(engine, config);
       } else {
         const report = await engine.generate();
@@ -261,7 +256,7 @@ program
           const jsonPath = path.join(config.outputDir, 'report.json');
           await fs.mkdir(config.outputDir, { recursive: true });
           await fs.writeFile(jsonPath, JSON.stringify(report, null, 2));
-          if (!isCI) console.log(chalk.green(`📄 JSON report: ${jsonPath}`));
+          if (!isCI) console.log(chalk.gray(`  → ${jsonPath}`));
         }
 
         // Generate static HTML files for GitHub Pages
@@ -282,7 +277,7 @@ program
       }
     } catch (error) {
       console.error(
-        isCI ? `Error: ${(error as Error).message}` : chalk.red('\n❌ Error:'),
+        isCI ? `Error: ${(error as Error).message}` : chalk.red('Error:'),
         (error as Error).message
       );
       process.exit(1);
@@ -321,7 +316,7 @@ async function generateStaticSite(
     staticMode: true,
   });
   await fs.writeFile(path.join(outputDir, 'index.html'), pageMapHtml);
-  if (!isCI) console.log(chalk.green(`📄 Static page map: ${path.join(outputDir, 'index.html')}`));
+  if (!isCI) console.log(chalk.gray(`  → ${path.join(outputDir, 'index.html')}`));
 
   // Generate rails-map.html if Rails detected
   if (railsAnalysis) {
@@ -329,8 +324,7 @@ async function generateStaticSite(
     const railsGenerator = new RailsMapGenerator();
     const railsHtml = railsGenerator.generateFromResult(railsAnalysis);
     await fs.writeFile(path.join(outputDir, 'rails-map.html'), railsHtml);
-    if (!isCI)
-      console.log(chalk.green(`📄 Static Rails map: ${path.join(outputDir, 'rails-map.html')}`));
+    if (!isCI) console.log(chalk.gray(`  → ${path.join(outputDir, 'rails-map.html')}`));
   }
 
   // Copy CSS assets
@@ -349,8 +343,7 @@ async function generateStaticSite(
   }
 
   if (!isCI) {
-    console.log(chalk.green(`\n✅ Static site generated in: ${outputDir}`));
-    console.log(chalk.gray('   Deploy to GitHub Pages or any static hosting'));
+    console.log(chalk.green(`\n✅ Static site generated: ${outputDir}`));
   }
 }
 
@@ -364,18 +357,17 @@ program
   .option('--path <path>', 'Path to repository to analyze (auto-detect if no config)')
   .option('-p, --port <number>', 'Server port', '3030')
   .option('--no-open', "Don't open browser automatically")
-  .option('--no-cache', 'Disable caching (always analyze from scratch)')
   .action(async (options) => {
-    console.log(chalk.blue.bold('\n🌐 Repomap - Documentation Server\n'));
+    console.log(chalk.blue.bold('\n🌐 Repomap\n'));
 
     try {
       const targetPath = options.path || process.cwd();
       const config = await loadConfig(options.config, targetPath);
 
-      const server = new DocServer(config, parseInt(options.port), { noCache: !options.cache });
+      const server = new DocServer(config, parseInt(options.port));
       await server.start(!options.open);
     } catch (error) {
-      console.error(chalk.red('\n❌ Error:'), (error as Error).message);
+      console.error(chalk.red('Error:'), (error as Error).message);
       process.exit(1);
     }
   });
@@ -433,17 +425,6 @@ export const config: DocGeneratorConfig = {
         componentsDir: "${componentsDir}",
       },
     },
-    // Add more repositories for cross-repo analysis:
-    // {
-    //   name: "other-repo",
-    //   displayName: "Other Repository",
-    //   description: "Another repository",
-    //   path: "../other-repo",
-    //   branch: "main",
-    //   type: "nextjs",
-    //   analyzers: ["pages", "graphql", "components", "dataflow"],
-    //   settings: {},
-    // },
   ],
   analysis: {
     include: ["**/*.tsx", "**/*.ts"],
@@ -485,7 +466,7 @@ program
   .option('--path <path>', 'Path to Rails application')
   .option('-o, --output <path>', 'Output HTML file path')
   .action(async (options) => {
-    console.log(chalk.blue.bold('\n🛤️ Repomap - Rails Analyzer\n'));
+    console.log(chalk.blue.bold('\n🛤️ Repomap Rails\n'));
 
     try {
       const targetPath = options.path || process.cwd();
@@ -509,13 +490,13 @@ program
         outputPath,
       });
 
-      console.log(chalk.green(`\n✅ Rails map generated: ${outputPath}`));
+      console.log(chalk.green(`✅ Rails map generated: ${outputPath}`));
 
       // Open in browser
       const { exec } = await import('child_process');
       exec(`open "${outputPath}"`);
     } catch (error) {
-      console.error(chalk.red('\n❌ Error:'), (error as Error).message);
+      console.error(chalk.red('Error:'), (error as Error).message);
       process.exit(1);
     }
   });
@@ -589,18 +570,17 @@ async function watchAndGenerate(
 }
 
 function printSummary(report: DocumentationReport): void {
-  console.log(chalk.green.bold('\n📈 Generation Summary\n'));
+  console.log(chalk.green.bold('\n✅ Complete\n'));
 
   for (const repo of report.repositories) {
-    console.log(chalk.cyan(`  ${repo.displayName}:`));
-    console.log(`    Pages: ${repo.summary.totalPages}`);
-    console.log(`    Components: ${repo.summary.totalComponents}`);
-    console.log(`    GraphQL Operations: ${repo.summary.totalGraphQLOperations}`);
-    console.log(`    Data Flows: ${repo.summary.totalDataFlows}`);
-    console.log();
+    console.log(chalk.white(`  ${repo.displayName}`));
+    console.log(
+      chalk.gray(
+        `    ${repo.summary.totalPages} pages · ${repo.summary.totalComponents} components · ${repo.summary.totalGraphQLOperations} GraphQL ops`
+      )
+    );
   }
-
-  console.log(chalk.gray(`  Generated at: ${report.generatedAt}`));
+  console.log();
 }
 
 function showDiff(previous: DocumentationReport, current: DocumentationReport): void {

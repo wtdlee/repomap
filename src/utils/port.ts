@@ -2,7 +2,6 @@ import * as net from 'net';
 
 /**
  * Check if a port is available
- * ポートが使用可能かどうかを確認
  */
 export function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -27,7 +26,6 @@ export function isPortAvailable(port: number): Promise<boolean> {
 
 /**
  * Find an available port starting from the given port
- * 指定されたポートから利用可能なポートを探す
  *
  * @param startPort - Port to start searching from
  * @param maxAttempts - Maximum number of ports to try (default: 10)

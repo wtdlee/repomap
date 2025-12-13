@@ -1,6 +1,6 @@
 /**
  * Rails Map Generator
- * Rails分析結果をインタラクティブなHTMLページとして生成する
+ * Generates interactive HTML pages from Rails analysis results
  */
 
 import * as fs from 'fs';
@@ -56,7 +56,12 @@ export class RailsMapGenerator {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <title>${title} - Repomap</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg">
+  <link rel="icon" type="image/png" sizes="96x96" href="/favicon/favicon-96x96.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/favicon/site.webmanifest">
   <link rel="stylesheet" href="/rails-map.css">
 </head>
 <body>
@@ -627,6 +632,7 @@ export class RailsMapGenerator {
           // Re-render mermaid diagram
           container.removeAttribute('data-processed');
           window.mermaid.init(undefined, container);
+          setTimeout(initDiagramPanZoom, 100);
         } catch (e) {
           console.error('Mermaid error:', e);
         }
@@ -643,9 +649,302 @@ export class RailsMapGenerator {
         const diagram = document.getElementById('mermaid-diagram');
         if (diagram) {
           window.mermaid.init(undefined, diagram);
+          setTimeout(initDiagramPanZoom, 100);
         }
       };
       document.head.appendChild(script);
+    }
+
+    // Pan and zoom functionality for mermaid diagram
+    function initDiagramPanZoom() {
+      const container = document.getElementById('mermaid-container');
+      const svg = container?.querySelector('svg');
+      if (!svg) return;
+
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      // Style the container
+      container.style.overflow = 'hidden';
+      container.style.cursor = 'grab';
+      container.style.position = 'relative';
+      svg.style.transformOrigin = 'center center';
+      svg.style.transition = 'none';
+
+      // Create fullscreen modal INSIDE the container (important for fullscreen mode)
+      let fsModal = container.querySelector('#fs-detail-modal');
+      if (!fsModal) {
+        fsModal = document.createElement('div');
+        fsModal.id = 'fs-detail-modal';
+        fsModal.style.cssText = 'display:none;position:absolute;top:0;right:0;width:350px;height:100%;background:#161b22;z-index:100;overflow-y:auto;border-left:1px solid #30363d;';
+        container.appendChild(fsModal);
+      }
+
+      // Make SVG and all children clickable
+      svg.style.pointerEvents = 'all';
+      
+      // Direct click on SVG
+      svg.addEventListener('click', (e) => {
+        console.log('[Diagram] Click detected on:', e.target.tagName, e.target.textContent?.substring(0, 30));
+        
+        // Don't handle if it was dragging
+        if (isDragging) return;
+        
+        // Find model name from clicked element or nearby
+        let modelName = null;
+        let searchEl = e.target;
+        
+        // First check if clicked element itself has model name
+        if (searchEl.textContent) {
+          const text = searchEl.textContent.trim();
+          if (/^[A-Z][a-zA-Z0-9_]+$/.test(text) && text.length > 2) {
+            modelName = text;
+          }
+        }
+        
+        // Search parent elements
+        if (!modelName) {
+          for (let i = 0; i < 10 && searchEl && searchEl !== svg; i++) {
+            // Look for text elements in this group
+            const texts = searchEl.querySelectorAll ? searchEl.querySelectorAll('text') : [];
+            for (const t of texts) {
+              const text = t.textContent?.trim();
+              if (text && /^[A-Z][a-zA-Z0-9_]+$/.test(text) && text.length > 2) {
+                modelName = text;
+                break;
+              }
+            }
+            if (modelName) break;
+            searchEl = searchEl.parentElement;
+          }
+        }
+
+        console.log('[Diagram] Found model:', modelName);
+        
+        if (modelName) {
+          // Show in fullscreen modal if in fullscreen, otherwise normal panel
+          if (document.fullscreenElement) {
+            console.log('[Diagram] Showing in fullscreen modal');
+            showModelDetailInModal(modelName);
+          } else {
+            console.log('[Diagram] Showing in detail panel');
+            showModelDetail(modelName);
+          }
+        }
+      });
+
+      // Function to show detail in fullscreen modal
+      window.showModelDetailInModal = (modelOrName) => {
+        let model = modelOrName;
+        if (typeof modelOrName === 'string') {
+          const normalizedName = modelOrName.replace(/_/g, '');
+          model = models.find(m => {
+            const className = (m.className || m.name || '').replace(/[^a-zA-Z0-9]/g, '');
+            return className.toLowerCase() === normalizedName.toLowerCase();
+          });
+        }
+        
+        // Find modal inside the container
+        const modal = container.querySelector('#fs-detail-modal');
+        if (!modal) {
+          console.error('[Diagram] Modal not found in container');
+          return;
+        }
+        
+        if (!model) {
+          modal.innerHTML = \`
+            <div style="padding:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <strong>Model Not Found</strong>
+                <button onclick="document.getElementById('fs-detail-modal').style.display='none'" style="background:none;border:none;color:var(--text-primary);font-size:20px;cursor:pointer;">×</button>
+              </div>
+              <p>Model "\${modelOrName}" not found.</p>
+            </div>
+          \`;
+          modal.style.display = 'block';
+          return;
+        }
+        
+        modal.innerHTML = \`
+          <div style="padding:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+              <strong>\${model.className}</strong>
+              <button onclick="document.getElementById('fs-detail-modal').style.display='none'" style="background:none;border:none;color:var(--text-primary);font-size:20px;cursor:pointer;">×</button>
+            </div>
+            <div style="color:var(--text-secondary);margin-bottom:16px;">extends \${model.parentClass}</div>
+            \${model.associations.length > 0 ? \`
+              <div style="margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:8px;">Associations (\${model.associations.length})</div>
+                \${model.associations.slice(0, 15).map(a => \`
+                  <div style="padding:4px 0;font-size:13px;">
+                    <span style="background:var(--accent-blue);padding:2px 6px;border-radius:3px;font-size:11px;margin-right:6px;">\${a.type}</span>
+                    :\${a.name}
+                    \${a.through ? \`<small style="color:var(--text-secondary);"> through: \${a.through}</small>\` : ''}
+                  </div>
+                \`).join('')}
+              </div>
+            \` : ''}
+            \${model.validations.length > 0 ? \`
+              <div style="margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:8px;">Validations (\${model.validations.length})</div>
+                \${model.validations.slice(0, 10).map(v => \`
+                  <div style="padding:4px 0;font-size:13px;">
+                    <span style="background:var(--accent-green);padding:2px 6px;border-radius:3px;font-size:11px;margin-right:6px;">\${v.type}</span>
+                    \${v.attributes.join(', ')}
+                  </div>
+                \`).join('')}
+              </div>
+            \` : ''}
+            \${model.scopes.length > 0 ? \`
+              <div style="margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:8px;">Scopes (\${model.scopes.length})</div>
+                \${model.scopes.map(s => \`<div style="padding:4px 0;font-size:13px;"><span style="background:var(--accent-orange);padding:2px 6px;border-radius:3px;font-size:11px;margin-right:6px;">scope</span>\${s.name}</div>\`).join('')}
+              </div>
+            \` : ''}
+          </div>
+        \`;
+        modal.style.display = 'block';
+      };
+
+      // Close modal on ESC
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const modal = container.querySelector('#fs-detail-modal');
+          if (modal) modal.style.display = 'none';
+        }
+      });
+
+      // Add zoom controls
+      const controls = document.createElement('div');
+      controls.className = 'diagram-controls';
+      controls.innerHTML = \`
+        <button onclick="diagramZoom(0.2)" title="Zoom In">+</button>
+        <button onclick="diagramZoom(-0.2)" title="Zoom Out">−</button>
+        <button onclick="diagramReset()" title="Reset">⟲</button>
+        <button onclick="diagramFullscreen()" title="Fullscreen" id="fullscreen-btn">⛶</button>
+      \`;
+      controls.style.cssText = 'position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:10';
+      container.appendChild(controls);
+
+      // Fullscreen change handler
+      document.addEventListener('fullscreenchange', () => {
+        const btn = document.getElementById('fullscreen-btn');
+        if (document.fullscreenElement) {
+          if (btn) {
+            btn.textContent = '⛶';
+            btn.title = 'Exit Fullscreen';
+          }
+          container.style.background = '#1e1e1e';
+        } else {
+          if (btn) {
+            btn.textContent = '⛶';
+            btn.title = 'Fullscreen';
+          }
+          container.style.background = '';
+          // Hide fullscreen modal when exiting
+          const modal = container.querySelector('#fs-detail-modal');
+          if (modal) modal.style.display = 'none';
+        }
+      });
+
+      function updateTransform() {
+        svg.style.transform = \`translate(\${translateX}px, \${translateY}px) scale(\${scale})\`;
+      }
+
+      // Mouse wheel zoom
+      container.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        scale = Math.max(0.3, Math.min(3, scale + delta));
+        updateTransform();
+      }, { passive: false });
+
+      // Touch pinch zoom
+      let lastTouchDist = 0;
+      container.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+          lastTouchDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+        } else if (e.touches.length === 1) {
+          isDragging = true;
+          startX = e.touches[0].clientX - translateX;
+          startY = e.touches[0].clientY - translateY;
+        }
+      });
+
+      container.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2) {
+          e.preventDefault();
+          const dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          const delta = (dist - lastTouchDist) * 0.01;
+          scale = Math.max(0.3, Math.min(3, scale + delta));
+          lastTouchDist = dist;
+          updateTransform();
+        } else if (e.touches.length === 1 && isDragging) {
+          translateX = e.touches[0].clientX - startX;
+          translateY = e.touches[0].clientY - startY;
+          updateTransform();
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchend', () => { isDragging = false; });
+
+      // Mouse drag pan
+      container.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        container.style.cursor = 'grabbing';
+        startX = e.clientX - translateX;
+        startY = e.clientY - translateY;
+      });
+
+      container.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        translateX = e.clientX - startX;
+        translateY = e.clientY - startY;
+        updateTransform();
+      });
+
+      container.addEventListener('mouseup', () => {
+        isDragging = false;
+        container.style.cursor = 'grab';
+      });
+
+      container.addEventListener('mouseleave', () => {
+        isDragging = false;
+        container.style.cursor = 'grab';
+      });
+
+      // Global functions for controls
+      window.diagramZoom = (delta) => {
+        scale = Math.max(0.3, Math.min(3, scale + delta));
+        updateTransform();
+      };
+
+      window.diagramReset = () => {
+        scale = 1;
+        translateX = 0;
+        translateY = 0;
+        updateTransform();
+      };
+
+      window.diagramFullscreen = () => {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          container.requestFullscreen().catch(err => {
+            console.error('Fullscreen error:', err);
+          });
+        }
+      };
     }
 
     function highlightParams(path) {
@@ -771,7 +1070,32 @@ export class RailsMapGenerator {
       \`;
     }
 
-    function showModelDetail(model) {
+    function showModelDetail(modelOrName) {
+      // Support both model object and model name string
+      let model = modelOrName;
+      if (typeof modelOrName === 'string') {
+        const normalizedName = modelOrName.replace(/_/g, '');
+        model = models.find(m => {
+          const className = (m.className || m.name || '').replace(/[^a-zA-Z0-9]/g, '');
+          return className.toLowerCase() === normalizedName.toLowerCase();
+        });
+        if (!model) {
+          detailPanel.innerHTML = \`
+            <div class="detail-header">
+              <div class="detail-title">Model Not Found</div>
+              <button class="close-btn" onclick="clearDetail()">×</button>
+            </div>
+            <div class="detail-content">
+              <div class="empty-state">
+                <div>Model "\${modelOrName}" not found in analysis data.</div>
+              </div>
+            </div>
+          \`;
+          detailPanel.classList.add('open');
+          return;
+        }
+      }
+      detailPanel.classList.add('open');
       detailPanel.innerHTML = \`
         <div class="detail-header">
           <div class="detail-title">Model Details</div>

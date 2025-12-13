@@ -1,6 +1,5 @@
 /**
  * Ruby Parser using web-tree-sitter
- * web-tree-sitterを使用したRubyパーサー
  */
 
 import { Parser, Node, Tree, Language } from 'web-tree-sitter';

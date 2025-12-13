@@ -17,13 +17,8 @@ import { detectEnvironments, type EnvironmentDetectionResult } from '../utils/en
 import { analyzeRailsApp, type RailsAnalysisResult } from '../analyzers/rails/index.js';
 import { findAvailablePort } from '../utils/port.js';
 
-export interface DocServerOptions {
-  noCache?: boolean;
-}
-
 /**
  * Documentation server with live reload
- * ライブリロード機能付きドキュメントサーバー
  */
 export class DocServer {
   private config: DocGeneratorConfig;
@@ -36,13 +31,13 @@ export class DocServer {
   private envResult: EnvironmentDetectionResult | null = null;
   private railsAnalysis: RailsAnalysisResult | null = null;
 
-  constructor(config: DocGeneratorConfig, port: number = 3030, options?: DocServerOptions) {
+  constructor(config: DocGeneratorConfig, port: number = 3030) {
     this.config = config;
     this.port = port;
     this.app = express();
     this.server = http.createServer(this.app);
     this.io = new Server(this.server);
-    this.engine = new DocGeneratorEngine(config, { noCache: options?.noCache });
+    this.engine = new DocGeneratorEngine(config);
 
     this.setupRoutes();
     this.setupSocketIO();
@@ -80,6 +75,63 @@ export class DocServer {
           }
         }
         res.status(404).send('CSS not found');
+      });
+    });
+
+    // Serve favicon files
+    const faviconFiles = [
+      'favicon.ico',
+      'favicon.svg',
+      'favicon-96x96.png',
+      'apple-touch-icon.png',
+      'site.webmanifest',
+      'web-app-manifest-192x192.png',
+      'web-app-manifest-512x512.png',
+    ];
+    faviconFiles.forEach((file) => {
+      // Serve at both /favicon/file and /file (for favicon.ico)
+      const routes =
+        file === 'favicon.ico' ? [`/${file}`, `/favicon/${file}`] : [`/favicon/${file}`];
+      routes.forEach((route) => {
+        this.app.get(route, async (req, res) => {
+          const possiblePaths = [
+            path.join(
+              path.dirname(new URL(import.meta.url).pathname),
+              'generators',
+              'assets',
+              'favicon',
+              file
+            ),
+            path.join(
+              path.dirname(new URL(import.meta.url).pathname),
+              '..',
+              'generators',
+              'assets',
+              'favicon',
+              file
+            ),
+            path.join(process.cwd(), 'dist', 'generators', 'assets', 'favicon', file),
+            path.join(process.cwd(), 'src', 'generators', 'assets', 'favicon', file),
+          ];
+
+          for (const filePath of possiblePaths) {
+            try {
+              const data = await fs.readFile(filePath);
+              const ext = file.split('.').pop();
+              const mimeTypes: Record<string, string> = {
+                ico: 'image/x-icon',
+                svg: 'image/svg+xml',
+                png: 'image/png',
+                webmanifest: 'application/manifest+json',
+              };
+              res.type(mimeTypes[ext || ''] || 'application/octet-stream').send(data);
+              return;
+            } catch {
+              // Try next path
+            }
+          }
+          res.status(404).send('File not found');
+        });
       });
     });
 
@@ -169,10 +221,9 @@ export class DocServer {
 
   private setupSocketIO(): void {
     this.io.on('connection', (socket) => {
-      console.log('Client connected');
-
+      // Silent connection handling - only log errors
       socket.on('disconnect', () => {
-        console.log('Client disconnected');
+        // Silent disconnect
       });
     });
   }
@@ -198,9 +249,29 @@ export class DocServer {
       html = html.replace(/<table>/g, '<div class="table-wrapper"><table>');
       html = html.replace(/<\/table>/g, '</table></div>');
       content = html;
-    } catch (e) {
-      console.error(`Failed to render page: ${mdPath}`, e);
-      content = `<h1>Page not found</h1><p>Path: ${cleanPath}</p>`;
+    } catch (err: unknown) {
+      const error = err as NodeJS.ErrnoException;
+      if (error.code === 'ENOENT') {
+        // File not found - normal 404, show helpful message
+        const availableRepos = this.currentReport?.repositories.map((r) => r.name) || [];
+        content = `
+          <h1>Page not found</h1>
+          <p>The requested path <code>${cleanPath}</code> does not exist.</p>
+          ${
+            availableRepos.length > 0
+              ? `
+            <p>Available repositories:</p>
+            <ul>${availableRepos.map((r) => `<li><a href="/docs/repos/${r}">${r}</a></li>`).join('')}</ul>
+          `
+              : ''
+          }
+          <p><a href="/">← Back to home</a></p>
+        `;
+      } else {
+        // Actual error - log it
+        console.error(`⚠️ Error reading ${mdPath}: ${error.message}`);
+        content = `<h1>Error</h1><p>Failed to load page: ${error.message}</p>`;
+      }
     }
 
     return this.getHtmlTemplate(content);
@@ -264,11 +335,16 @@ export class DocServer {
     const graphqlData = this.getGraphQLData();
     const apiCallsData = this.getApiCallsData();
     return `<!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${this.config.site.title}</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg">
+  <link rel="icon" type="image/png" sizes="96x96" href="/favicon/favicon-96x96.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/favicon/site.webmanifest">
   <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script>
@@ -371,7 +447,7 @@ export class DocServer {
         <div class="nav-group">
           <span class="nav-group-title">Analysis</span>
           <div class="nav-subitems">
-            <a href="/docs/cross-repo">Cross Repository</a>
+            ${this.config.repositories.length > 1 ? '<a href="/docs/cross-repo">Cross Repository</a>' : ''}
             <a href="/docs/diagrams">Diagrams</a>
           </div>
         </div>
@@ -420,10 +496,10 @@ export class DocServer {
         container.className = 'mermaid-container';
         container.innerHTML = \`
           <div class="mermaid-controls">
-            <button onclick="zoomDiagram(\${idx}, 0.8)" title="縮小">➖</button>
-            <button onclick="zoomDiagram(\${idx}, 1.25)" title="拡大">➕</button>
-            <button onclick="zoomDiagram(\${idx}, 'reset')" title="リセット">🔄</button>
-            <button onclick="toggleFullscreen(\${idx})" title="全画面">⛶</button>
+            <button onclick="zoomDiagram(\${idx}, 0.8)" title="Zoom Out">➖</button>
+            <button onclick="zoomDiagram(\${idx}, 1.25)" title="Zoom In">➕</button>
+            <button onclick="zoomDiagram(\${idx}, 'reset')" title="Reset">🔄</button>
+            <button onclick="toggleFullscreen(\${idx})" title="Fullscreen">⛶</button>
           </div>
           <div class="mermaid-wrapper" id="wrapper-\${idx}">
             <div class="mermaid-inner" id="inner-\${idx}"></div>
@@ -1188,7 +1264,7 @@ export class DocServer {
     async function regenerate() {
       try {
         const btn = document.querySelector('.regenerate-btn');
-        btn.textContent = '⏳ 生成中...';
+        btn.textContent = '⏳ Generating...';
         btn.disabled = true;
 
         const res = await fetch('/api/regenerate', { method: 'POST' });
@@ -1197,13 +1273,13 @@ export class DocServer {
         if (data.success) {
           window.location.reload();
         } else {
-          alert('生成に失敗しました: ' + data.error);
+          alert('Generation failed: ' + data.error);
         }
       } catch (e) {
-        alert('エラー: ' + e.message);
+        alert('Error: ' + e.message);
       } finally {
         const btn = document.querySelector('.regenerate-btn');
-        btn.textContent = '🔄 再生成';
+        btn.textContent = '🔄 Regenerate';
         btn.disabled = false;
       }
     }
@@ -1215,30 +1291,32 @@ export class DocServer {
   async start(openBrowser: boolean = true): Promise<void> {
     // Detect environments first
     const rootPath = this.config.repositories[0]?.path || process.cwd();
-    console.log('🔍 Detecting project environments...');
     this.envResult = await detectEnvironments(rootPath);
 
-    if (this.envResult.environments.length > 0) {
-      console.log(`   Found: ${this.envResult.environments.map((e) => e.type).join(', ')}`);
-      for (const env of this.envResult.environments) {
-        if (env.features.length > 0) {
-          console.log(`   ${env.type} features: ${env.features.join(', ')}`);
-        }
-      }
-    }
-
     // Generate initial documentation for frontend
-    console.log('\n📚 Generating documentation...');
     this.currentReport = await this.engine.generate();
+
+    // Print summary
+    console.log();
+    for (const repo of this.currentReport.repositories) {
+      const s = repo.summary;
+      console.log(`  ✅ ${repo.displayName}`);
+      console.log(
+        `     ${s.totalPages} pages · ${s.totalComponents} components · ${s.totalGraphQLOperations} GraphQL · ${s.totalDataFlows} data flows`
+      );
+    }
 
     // If Rails is detected, also analyze Rails
     if (this.envResult.hasRails) {
-      console.log('\n🛤️  Analyzing Rails application...');
+      console.log('\n  Rails...');
       try {
         this.railsAnalysis = await analyzeRailsApp(rootPath);
-        console.log(`   ✅ Rails analysis complete`);
+        const s = this.railsAnalysis.summary;
+        console.log(
+          `    ${s.totalRoutes} routes · ${s.totalControllers} controllers · ${s.totalModels} models · ${s.totalGrpcServices} gRPC`
+        );
       } catch (error) {
-        console.error(`   ⚠️ Rails analysis failed:`, (error as Error).message);
+        console.error(`  ⚠️ Rails analysis failed:`, (error as Error).message);
       }
     }
 
@@ -1276,7 +1354,7 @@ export class DocServer {
   }
 
   private async regenerate(): Promise<void> {
-    console.log('\n🔄 Regenerating documentation...');
+    console.log('\n🔄 Regenerating...');
     this.currentReport = await this.engine.generate();
 
     // Re-analyze Rails if detected
@@ -1289,8 +1367,15 @@ export class DocServer {
       }
     }
 
+    // Print summary
+    for (const repo of this.currentReport.repositories) {
+      console.log(
+        `  ${repo.displayName}: ${repo.summary.totalPages} pages · ${repo.summary.totalComponents} components · ${repo.summary.totalGraphQLOperations} GraphQL`
+      );
+    }
+
     this.io.emit('reload');
-    console.log('✅ Documentation regenerated');
+    console.log('✅ Done');
   }
 
   private async watchForChanges(): Promise<void> {

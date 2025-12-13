@@ -1,6 +1,5 @@
 /**
  * Environment detection utilities
- * 環境検出ユーティリティ
  */
 
 import * as fs from 'fs/promises';
@@ -26,7 +25,6 @@ export interface EnvironmentDetectionResult {
 
 /**
  * Detect all environments in the given directory
- * 指定されたディレクトリ内のすべての環境を検出
  */
 export async function detectEnvironments(rootPath: string): Promise<EnvironmentDetectionResult> {
   const environments: DetectedEnvironment[] = [];

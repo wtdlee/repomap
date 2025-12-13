@@ -1,7 +1,6 @@
 import { simpleGit } from 'simple-git';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import fg from 'fast-glob';
 import type {
   DocGeneratorConfig,
   RepositoryConfig,
@@ -20,50 +19,40 @@ import { DataFlowAnalyzer } from '../analyzers/dataflow-analyzer.js';
 import { RestApiAnalyzer } from '../analyzers/rest-api-analyzer.js';
 import { MermaidGenerator } from '../generators/mermaid-generator.js';
 import { MarkdownGenerator } from '../generators/markdown-generator.js';
-import { AnalysisCache } from './cache.js';
 
 /**
  * Main documentation generation engine
- * メインドキュメント生成エンジン
  */
 export class DocGeneratorEngine {
   private config: DocGeneratorConfig;
   private mermaidGenerator: MermaidGenerator;
   private markdownGenerator: MarkdownGenerator;
-  private noCache: boolean;
 
-  constructor(config: DocGeneratorConfig, options?: { noCache?: boolean }) {
+  constructor(config: DocGeneratorConfig) {
     this.config = config;
     this.mermaidGenerator = new MermaidGenerator();
     this.markdownGenerator = new MarkdownGenerator();
-    this.noCache = options?.noCache ?? false;
   }
 
   /**
    * Run documentation generation for all configured repositories
    */
   async generate(): Promise<DocumentationReport> {
-    console.log('🚀 Starting documentation generation...\n');
-
     const repositoryReports: RepositoryReport[] = [];
 
     for (const repoConfig of this.config.repositories) {
       try {
-        console.log(`\n📦 Analyzing ${repoConfig.displayName}...`);
         const report = await this.analyzeRepository(repoConfig);
         repositoryReports.push(report);
-        console.log(`✅ Completed ${repoConfig.displayName}`);
       } catch (error) {
-        console.error(`❌ Failed to analyze ${repoConfig.name}:`, (error as Error).message);
+        console.error(`❌ ${repoConfig.name}: ${(error as Error).message}`);
       }
     }
 
-    // Cross-repository analysis
-    console.log('\n🔗 Running cross-repository analysis...');
+    // Cross-repository analysis (silent)
     const crossRepoAnalysis = this.analyzeCrossRepo(repositoryReports);
 
-    // Generate diagrams
-    console.log('\n📊 Generating diagrams...');
+    // Generate diagrams (silent)
     const results = repositoryReports.map((r) => r.analysis);
     const crossRepoLinks = this.extractCrossRepoLinks(results);
     const diagrams = this.mermaidGenerator.generateAll(results, crossRepoLinks);
@@ -75,75 +64,29 @@ export class DocGeneratorEngine {
       diagrams,
     };
 
-    // Write documentation
-    console.log('\n📝 Writing documentation...');
+    // Write documentation (silent)
     await this.writeDocumentation(report);
-
-    console.log('\n✨ Documentation generation complete!');
-    console.log(`📁 Output: ${this.config.outputDir}`);
 
     return report;
   }
 
   /**
-   * Analyze a single repository (with caching)
+   * Analyze a single repository
    */
   private async analyzeRepository(repoConfig: RepositoryConfig): Promise<RepositoryReport> {
-    // Initialize cache
-    const cache = new AnalysisCache(repoConfig.path);
-    await cache.init();
-
     // Get repository info
     const { version, commitHash } = await this.getRepoInfo(repoConfig);
 
-    // Compute content hash for cache key
-    const sourceFiles = await fg(['**/*.{ts,tsx,graphql}'], {
-      cwd: repoConfig.path,
-      ignore: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**'],
-      absolute: true,
-    });
-    const contentHash = await cache.computeFilesHash(sourceFiles);
-    // Include repomap version in cache key to invalidate when analyzer logic changes
-    const cacheKey = `analysis_v${version}_${repoConfig.name}_${commitHash}`;
-
-    // Check cache (skip if noCache is enabled)
-    if (this.noCache) {
-      console.log(`  🔄 Cache disabled, analyzing from scratch...`);
-    }
-    const cachedResult = this.noCache ? null : cache.get<AnalysisResult>(cacheKey, contentHash);
-    if (cachedResult) {
-      console.log(`  ⚡ Using cached analysis (hash: ${contentHash.slice(0, 8)}...)`);
-
-      const summary = {
-        totalPages: cachedResult.pages.length,
-        totalComponents: cachedResult.components.length,
-        totalGraphQLOperations: cachedResult.graphqlOperations.length,
-        totalDataFlows: cachedResult.dataFlows.length,
-        authRequiredPages: cachedResult.pages.filter((p) => p.authentication.required).length,
-        publicPages: cachedResult.pages.filter((p) => !p.authentication.required).length,
-      };
-
-      return {
-        name: repoConfig.name,
-        displayName: repoConfig.displayName,
-        version,
-        commitHash,
-        analysis: cachedResult,
-        summary,
-      };
-    }
-
-    // Run analyzers in PARALLEL for faster analysis
+    // Run analyzers in parallel for faster analysis
     const analyzers = repoConfig.analyzers
       .map((analyzerType) => this.createAnalyzer(analyzerType, repoConfig))
       .filter((a): a is NonNullable<typeof a> => a !== null);
 
-    console.log(`  Running ${analyzers.length} analyzers in parallel...`);
     const startTime = Date.now();
-
     const analysisResults = await Promise.all(analyzers.map((analyzer) => analyzer.analyze()));
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    console.log(`  Analysis completed in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
+    console.log(`  Analyzed ${repoConfig.displayName} in ${elapsed}s`);
 
     // Merge results
     const analysis = this.mergeAnalysisResults(
@@ -153,10 +96,8 @@ export class DocGeneratorEngine {
       commitHash
     );
 
-    // Save to cache
-    cache.set(cacheKey, contentHash, analysis);
-    await cache.save();
-    console.log(`  💾 Analysis cached (hash: ${contentHash.slice(0, 8)}...)`);
+    // Enrich pages with GraphQL operations from custom hooks
+    this.enrichPagesWithHookGraphQL(analysis);
 
     // Calculate summary
     const summary = {
@@ -355,6 +296,256 @@ export class DocGeneratorEngine {
   }
 
   /**
+   * Enrich pages with GraphQL operations from custom hooks and imported variables
+   * Links GraphQL operations to pages via custom hooks and imported variables
+   *
+   * Strategy:
+   * 1. Build hookName → GraphQL operations mapping from:
+   *    - graphqlOperations.filePath (hook files contain GraphQL definitions)
+   *    - components with type='hook' and their hooks array
+   * 2. Build variableName → GraphQL operations mapping from:
+   *    - graphqlOperations.variableNames (e.g., "Query" → "GetNewProfile")
+   * 3. For each page/component, add matched GraphQL operations to dataFetching
+   */
+  private enrichPagesWithHookGraphQL(analysis: AnalysisResult): void {
+    // Step 1: Build hook → GraphQL mapping from graphqlOperations.filePath
+    const hookToGraphQL = new Map<string, Set<string>>();
+
+    for (const op of analysis.graphqlOperations) {
+      if (!op.filePath) continue;
+
+      // Extract hook name from file path (e.g., "useInternalPostPermission.ts" → "useInternalPostPermission")
+      const fileName = op.filePath.split('/').pop() || '';
+      const baseName = fileName.replace(/\.(ts|tsx|js|jsx)$/, '');
+
+      // Only process if it looks like a hook file
+      if (baseName.startsWith('use')) {
+        if (!hookToGraphQL.has(baseName)) {
+          hookToGraphQL.set(baseName, new Set());
+        }
+        hookToGraphQL.get(baseName)!.add(op.name);
+      }
+    }
+
+    // Step 2: Build hook → GraphQL mapping from components with type='hook'
+    for (const comp of analysis.components) {
+      if (comp.type !== 'hook') continue;
+
+      // Extract GraphQL operations from hooks array (e.g., "Query: GetProduct")
+      const graphqlOps: string[] = [];
+      for (const hook of comp.hooks) {
+        const match = hook.match(/^(Query|Mutation|Subscription):\s*(.+)$/);
+        if (match) {
+          graphqlOps.push(match[2]);
+        }
+      }
+
+      if (graphqlOps.length > 0) {
+        if (!hookToGraphQL.has(comp.name)) {
+          hookToGraphQL.set(comp.name, new Set());
+        }
+        for (const op of graphqlOps) {
+          hookToGraphQL.get(comp.name)!.add(op);
+        }
+      }
+    }
+
+    // Step 3: Build filePath → GraphQL operations mapping
+    // This is the key for accurate matching: match by file path, not variable name
+    const filePathToGraphQL = new Map<
+      string,
+      { opName: string; opType: 'query' | 'mutation' | 'subscription' }[]
+    >();
+
+    for (const op of analysis.graphqlOperations) {
+      if (op.type !== 'query' && op.type !== 'mutation' && op.type !== 'subscription') continue;
+      if (!op.filePath) continue;
+
+      // Normalize file path (remove extension for matching)
+      const normalizedPath = op.filePath.replace(/\.(ts|tsx|js|jsx)$/, '');
+
+      if (!filePathToGraphQL.has(normalizedPath)) {
+        filePathToGraphQL.set(normalizedPath, []);
+      }
+      filePathToGraphQL.get(normalizedPath)!.push({ opName: op.name, opType: op.type });
+    }
+
+    // Step 4: Build operation type lookup (exclude fragments)
+    const opTypeMap = new Map<string, 'query' | 'mutation' | 'subscription'>();
+    for (const op of analysis.graphqlOperations) {
+      if (op.type === 'query' || op.type === 'mutation' || op.type === 'subscription') {
+        opTypeMap.set(op.name, op.type);
+      }
+    }
+
+    // Step 5: Enrich pages dataFetching
+    for (const page of analysis.pages) {
+      // Get existing operation names
+      const existingOps = new Set(
+        page.dataFetching.map((df) => df.operationName?.replace(/^[→\->\s]+/, '') || '')
+      );
+
+      // Check components (containers) that this page uses
+      const pageComponent = analysis.components.find(
+        (c) => c.filePath === `src/pages/${page.filePath}`
+      );
+
+      if (!pageComponent) continue;
+
+      // Collect hooks from page component and its dependencies
+      const hooksToCheck: string[] = [];
+      hooksToCheck.push(...pageComponent.hooks.filter((h) => h.startsWith('use')));
+      // Also check dependencies that are hooks
+      for (const dep of pageComponent.dependencies) {
+        if (dep.startsWith('use')) {
+          hooksToCheck.push(dep);
+        }
+      }
+
+      // Add GraphQL operations from hooks
+      for (const hookName of hooksToCheck) {
+        const graphqlOps = hookToGraphQL.get(hookName);
+        if (!graphqlOps) continue;
+
+        for (const opName of graphqlOps) {
+          if (existingOps.has(opName)) continue;
+          existingOps.add(opName);
+
+          const opType = opTypeMap.get(opName) || 'query';
+          page.dataFetching.push({
+            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
+            operationName: opName,
+            source: `hook:${hookName}`,
+          });
+        }
+      }
+
+      // Add GraphQL operations from imported files (file path based matching)
+      if (pageComponent.imports) {
+        for (const imp of pageComponent.imports) {
+          // Resolve relative import path to absolute path from page's directory
+          const pageDir = path.dirname(pageComponent.filePath);
+          let resolvedPath = imp.path;
+
+          if (imp.path.startsWith('.')) {
+            // Resolve relative path
+            resolvedPath = path.join(pageDir, imp.path);
+            // Normalize (remove .., .)
+            resolvedPath = path.normalize(resolvedPath);
+          } else if (imp.path.startsWith('@/')) {
+            // Handle @/ alias (common in Next.js projects)
+            resolvedPath = imp.path.replace('@/', 'src/');
+          }
+
+          // Remove extension for matching
+          resolvedPath = resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, '');
+
+          // Check if this file contains GraphQL operations
+          const graphqlOps = filePathToGraphQL.get(resolvedPath);
+          if (!graphqlOps) continue;
+
+          for (const op of graphqlOps) {
+            if (existingOps.has(op.opName)) continue;
+            existingOps.add(op.opName);
+
+            page.dataFetching.push({
+              type: op.opType === 'mutation' ? 'useMutation' : 'useQuery',
+              operationName: op.opName,
+              source: `import:${imp.path}`,
+            });
+          }
+        }
+      }
+    }
+
+    // Step 6: Also enrich components with container type
+    for (const comp of analysis.components) {
+      if (comp.type !== 'container' && comp.type !== 'page') continue;
+
+      // Find matching page to add dataFetching
+      const matchingPage = analysis.pages.find(
+        (p) => p.component === comp.name || p.filePath?.includes(comp.name)
+      );
+      if (!matchingPage) continue;
+
+      // Get existing operation names from page
+      const existingOps = new Set(
+        matchingPage.dataFetching.map((df) => df.operationName?.replace(/^[→\->\s]+/, '') || '')
+      );
+
+      // Check hooks in this component
+      for (const hookName of comp.hooks) {
+        if (!hookName.startsWith('use')) continue;
+
+        const graphqlOps = hookToGraphQL.get(hookName);
+        if (!graphqlOps) continue;
+
+        for (const opName of graphqlOps) {
+          if (existingOps.has(opName)) continue;
+          existingOps.add(opName);
+
+          const opType = opTypeMap.get(opName) || 'query';
+          matchingPage.dataFetching.push({
+            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
+            operationName: opName,
+            source: `component:${comp.name}`,
+          });
+        }
+      }
+
+      // Also check dependencies that are hooks
+      for (const dep of comp.dependencies) {
+        if (!dep.startsWith('use')) continue;
+
+        const graphqlOps = hookToGraphQL.get(dep);
+        if (!graphqlOps) continue;
+
+        for (const opName of graphqlOps) {
+          if (existingOps.has(opName)) continue;
+          existingOps.add(opName);
+
+          const opType = opTypeMap.get(opName) || 'query';
+          matchingPage.dataFetching.push({
+            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
+            operationName: opName,
+            source: `component:${comp.name}`,
+          });
+        }
+      }
+
+      // Also check imported files for GraphQL operations
+      if (comp.imports) {
+        for (const imp of comp.imports) {
+          const compDir = path.dirname(comp.filePath);
+          let resolvedPath = imp.path;
+
+          if (imp.path.startsWith('.')) {
+            resolvedPath = path.normalize(path.join(compDir, imp.path));
+          } else if (imp.path.startsWith('@/')) {
+            resolvedPath = imp.path.replace('@/', 'src/');
+          }
+
+          resolvedPath = resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, '');
+
+          const graphqlOps = filePathToGraphQL.get(resolvedPath);
+          if (!graphqlOps) continue;
+
+          for (const op of graphqlOps) {
+            if (existingOps.has(op.opName)) continue;
+            existingOps.add(op.opName);
+
+            matchingPage.dataFetching.push({
+              type: op.opType === 'mutation' ? 'useMutation' : 'useQuery',
+              operationName: op.opName,
+              source: `component:${comp.name}`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Write documentation to output directory
    */
   private async writeDocumentation(report: DocumentationReport): Promise<void> {
@@ -371,12 +562,10 @@ export class DocGeneratorEngine {
       const dir = path.dirname(fullPath);
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(fullPath, content, 'utf-8');
-      console.log(`  📄 ${filePath}`);
     }
 
     // Write JSON report
     const jsonPath = path.join(outputDir, 'report.json');
     await fs.writeFile(jsonPath, JSON.stringify(report, null, 2), 'utf-8');
-    console.log(`  📋 report.json`);
   }
 }
