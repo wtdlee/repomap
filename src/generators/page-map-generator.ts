@@ -2303,26 +2303,41 @@ export class PageMapGenerator {
             : directOps.length + ' total';
           dataHtml += '<div class="detail-section"><h4>Data Operations <span style="font-weight:normal;font-size:11px;color:var(--text2)">(' + countLabel + ')</span></h4>';
 
+          // Calculate continuous UI indent levels (depth gaps become 1 step)
+          let prevDepth = -1;
+          let uiLevel = -1;
+          const pathToUiLevel = new Map();
+          sortedPaths.forEach(pathName => {
+            const ops = groupedByPath.get(pathName);
+            const depth = pathName === 'Direct' ? 0 : (ops[0]?.depth || 1);
+            if (depth > prevDepth) {
+              uiLevel++;
+            }
+            pathToUiLevel.set(pathName, uiLevel);
+            prevDepth = depth;
+          });
+
           sortedPaths.forEach(pathName => {
             const ops = groupedByPath.get(pathName);
             const isDirect = pathName === 'Direct';
             const depthIndicator = isDirect ? '' : '↳ ';
             const pathLabel = isDirect ? 'Direct (this page)' : pathName;
-            // UI indent: max 1 level difference (Direct=0, others=1)
-            const uiIndent = isDirect ? 0 : 12;
+            // UI indent: 4px per level added to base padding (10px)
+            const uiLevel = pathToUiLevel.get(pathName) || 0;
+            const uiIndent = uiLevel * 4;
+            const totalPadding = 10 + uiIndent;
 
-            // Path header with subtle indent indicator
+            // Group container, header aligned with detail-item content
             dataHtml += '<div class="data-path-group" style="margin:8px 0">' +
-              '<div class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+uiIndent+'px">' +
+              '<div class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+totalPadding+'px">' +
               depthIndicator + '<span class="text-accent">' + pathLabel + '</span> (' + ops.length + ')' +
               '</div>';
 
             ops.forEach(op => {
               const isQ = !op.type?.includes('Mutation');
               const srcArg = op.sourcePath !== 'Direct' ? ",\\'"+op.sourcePath.replace(/'/g, "\\\\'")+"\\'": '';
-              // detail-item has no indent, only inner content has subtle indent via padding
-              dataHtml += '<div class="detail-item data-op" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
-                '<span style="display:inline-block;width:'+(uiIndent+4)+'px"></span>' +
+              // detail-item keeps base padding, adds indent
+              dataHtml += '<div class="detail-item data-op" style="padding:8px 10px 8px '+totalPadding+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
                 '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'" style="font-size:10px">'+(isQ?'Q':'M')+'</span> '+op.queryName+'</div>';
             });
 
