@@ -1,6 +1,5 @@
 /**
  * Rails Analyzers - Index
- * Rails分析モジュールのエクスポート
  */
 
 export {

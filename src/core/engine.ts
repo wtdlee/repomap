@@ -24,7 +24,6 @@ import { AnalysisCache } from './cache.js';
 
 /**
  * Main documentation generation engine
- * メインドキュメント生成エンジン
  */
 export class DocGeneratorEngine {
   private config: DocGeneratorConfig;
@@ -359,7 +358,7 @@ export class DocGeneratorEngine {
 
   /**
    * Enrich pages with GraphQL operations from custom hooks and imported variables
-   * 커스텀 훅 및 import된 변수에서 GraphQL 작업을 페이지에 연결
+   * Links GraphQL operations to pages via custom hooks and imported variables
    *
    * Strategy:
    * 1. Build hookName → GraphQL operations mapping from:
@@ -476,7 +475,7 @@ export class DocGeneratorEngine {
           const opType = opTypeMap.get(opName) || 'query';
           page.dataFetching.push({
             type: opType === 'mutation' ? 'useMutation' : 'useQuery',
-            operationName: `→ ${opName}`,
+            operationName: opName,
             source: `hook:${hookName}`,
           });
         }
@@ -512,7 +511,7 @@ export class DocGeneratorEngine {
 
             page.dataFetching.push({
               type: op.opType === 'mutation' ? 'useMutation' : 'useQuery',
-              operationName: `→ ${op.opName}`,
+              operationName: op.opName,
               source: `import:${imp.path}`,
             });
           }
@@ -549,7 +548,7 @@ export class DocGeneratorEngine {
           const opType = opTypeMap.get(opName) || 'query';
           matchingPage.dataFetching.push({
             type: opType === 'mutation' ? 'useMutation' : 'useQuery',
-            operationName: `→ ${opName}`,
+            operationName: opName,
             source: `component:${comp.name}`,
           });
         }
@@ -569,7 +568,7 @@ export class DocGeneratorEngine {
           const opType = opTypeMap.get(opName) || 'query';
           matchingPage.dataFetching.push({
             type: opType === 'mutation' ? 'useMutation' : 'useQuery',
-            operationName: `→ ${opName}`,
+            operationName: opName,
             source: `component:${comp.name}`,
           });
         }
@@ -598,7 +597,7 @@ export class DocGeneratorEngine {
 
             matchingPage.dataFetching.push({
               type: op.opType === 'mutation' ? 'useMutation' : 'useQuery',
-              operationName: `→ ${op.opName}`,
+              operationName: op.opName,
               source: `component:${comp.name}`,
             });
           }

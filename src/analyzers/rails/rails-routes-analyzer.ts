@@ -1,6 +1,5 @@
 /**
  * Rails Routes Analyzer using tree-sitter
- * tree-sitterを使用してroutes.rbを解析する
  */
 
 import * as fs from 'fs';

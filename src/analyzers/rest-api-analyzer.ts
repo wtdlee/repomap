@@ -8,7 +8,6 @@ import type { AnalysisResult, APICall, RepositoryConfig } from '../types.js';
 
 /**
  * Analyzer for REST API calls (fetch, axios, useSWR, etc.)
- * REST API呼び出しの分析器
  * Uses @swc/core for fast parsing
  */
 export class RestApiAnalyzer extends BaseAnalyzer {

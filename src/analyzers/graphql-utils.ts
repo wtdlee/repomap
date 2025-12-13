@@ -1,6 +1,5 @@
 /**
  * Unified GraphQL extraction utilities
- * 統合GraphQL抽出ユーティリティ
  *
  * This module provides a single source of truth for all GraphQL operation extraction.
  * All analyzers should use these utilities instead of implementing their own logic.

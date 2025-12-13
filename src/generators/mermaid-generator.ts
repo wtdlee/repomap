@@ -9,7 +9,6 @@ import type {
 
 /**
  * Mermaid diagram generator
- * Mermaidダイアグラム生成器
  */
 export class MermaidGenerator {
   /**

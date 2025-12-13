@@ -16,7 +16,6 @@ import type {
 
 /**
  * Analyzer for GraphQL operations
- * GraphQL操作の分析器
  * Uses @swc/core for fast parsing
  */
 export class GraphQLAnalyzer extends BaseAnalyzer {

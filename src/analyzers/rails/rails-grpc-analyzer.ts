@@ -1,6 +1,5 @@
 /**
  * Rails gRPC Service Analyzer using tree-sitter
- * tree-sitterを使用してgRPCサービスを解析する
  */
 
 import * as fs from 'fs';

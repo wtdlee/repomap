@@ -19,7 +19,6 @@ const CACHE_VERSION = '1.1';
 
 /**
  * File-based cache for analysis results
- * ファイルベースのキャッシュシステム
  */
 export class AnalysisCache {
   private cacheDir: string;

@@ -11,7 +11,6 @@ import type {
 
 /**
  * Markdown documentation generator
- * Markdownドキュメント生成器
  */
 export class MarkdownGenerator {
   /**
@@ -913,9 +912,9 @@ export class MarkdownGenerator {
 
   private generateCrossRepoDoc(report: DocumentationReport): string {
     const lines: string[] = [
-      '# クロスリポジトリ分析',
+      '# Cross Repository Analysis',
       '',
-      '## アーキテクチャ概要',
+      '## Architecture Overview',
       '',
       '```mermaid',
       'flowchart TB',
@@ -932,7 +931,7 @@ export class MarkdownGenerator {
     lines.push('');
 
     // API Connections
-    lines.push('## API接続');
+    lines.push('## API Connections');
     lines.push('');
     for (const conn of report.crossRepoAnalysis.apiConnections) {
       lines.push(`- **${conn.frontend}** → **${conn.backend}**: \`${conn.endpoint}\``);
@@ -940,7 +939,7 @@ export class MarkdownGenerator {
     lines.push('');
 
     // Shared types
-    lines.push('## 共有型');
+    lines.push('## Shared Types');
     lines.push('');
     for (const type of report.crossRepoAnalysis.sharedTypes) {
       lines.push(`- \`${type}\``);
@@ -993,24 +992,24 @@ export class MarkdownGenerator {
     lines.push('│');
 
     if (queries.length > 0 || mutations.length > 0) {
-      lines.push('├─ 📡 データ取得 (Query)');
+      lines.push('├─ 📡 Data Fetching (Query)');
       for (const q of queries.slice(0, 5)) {
         lines.push(`│   ├─ ${q.substring(0, 40)}`);
         lines.push(`│   │   └─ GraphQL Server → Apollo Cache → Component`);
       }
       if (queries.length > 5) {
-        lines.push(`│   └─ ... 他 ${queries.length - 5} 件`);
+        lines.push(`│   └─ ... and ${queries.length - 5} more`);
       }
 
       if (mutations.length > 0) {
         lines.push('│');
-        lines.push('├─ ✏️ データ更新 (Mutation)');
+        lines.push('├─ ✏️ Data Mutation (Mutation)');
         for (const m of mutations.slice(0, 5)) {
           lines.push(`│   ├─ ${m.substring(0, 40)}`);
           lines.push(`│   │   └─ Component → GraphQL Server → Apollo Cache`);
         }
         if (mutations.length > 5) {
-          lines.push(`│   └─ ... 他 ${mutations.length - 5} 件`);
+          lines.push(`│   └─ ... and ${mutations.length - 5} more`);
         }
       }
     }
@@ -1022,7 +1021,7 @@ export class MarkdownGenerator {
         lines.push(`│   └─ ${c}`);
       }
       if (containers.length > 5) {
-        lines.push(`│   └─ ... 他 ${containers.length - 5} 件`);
+        lines.push(`│   └─ ... and ${containers.length - 5} more`);
       }
     }
 

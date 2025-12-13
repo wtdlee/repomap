@@ -1,6 +1,5 @@
 /**
  * Rails Model Analyzer using tree-sitter
- * tree-sitterを使用してモデルファイルを解析する
  */
 
 import * as fs from 'fs';

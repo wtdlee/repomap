@@ -462,7 +462,33 @@ header h1 {
   background: var(--bg-secondary);
   border-radius: 8px;
   padding: 20px;
-  overflow-x: auto;
+  overflow: hidden;
+  position: relative;
+  min-height: 300px;
+  cursor: grab;
+}
+
+.mermaid-container:active {
+  cursor: grabbing;
+}
+
+.diagram-controls button {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.diagram-controls button:hover {
+  background: var(--accent);
 }
 
 /* Scrollbar */

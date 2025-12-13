@@ -38,7 +38,6 @@ import type {
 
 /**
  * Analyzer for Next.js/React pages using @swc/core for fast parsing
- * Next.js/Reactページの分析器 (@swc/core使用)
  */
 export class PagesAnalyzer extends BaseAnalyzer {
   // Codegen Document → Operation name mapping

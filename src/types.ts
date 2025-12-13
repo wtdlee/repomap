@@ -1,6 +1,5 @@
 /**
  * Type definitions for the documentation generator
- * ドキュメント生成ツールの型定義
  */
 
 export interface DocGeneratorConfig {
@@ -92,7 +91,6 @@ export interface AnalysisResult {
 
 /**
  * Frontend API call information
- * フロントエンドAPIコール情報
  */
 export interface APICall {
   /** Unique identifier */

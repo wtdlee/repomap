@@ -13,7 +13,6 @@ import type { AnalysisResult, DataFlow, ComponentInfo, RepositoryConfig } from '
 
 /**
  * Analyzer for data flow patterns using @swc/core for fast parsing
- * データフローパターンの分析器 (@swc/core使用)
  */
 export class DataFlowAnalyzer extends BaseAnalyzer {
   private componentCache: Map<string, ComponentInfo> = new Map();

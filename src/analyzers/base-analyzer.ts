@@ -2,7 +2,6 @@ import type { RepositoryConfig, AnalysisResult } from '../types.js';
 
 /**
  * Base class for all analyzers
- * 全分析器の基底クラス
  */
 export abstract class BaseAnalyzer {
   protected config: RepositoryConfig;
@@ -15,19 +14,16 @@ export abstract class BaseAnalyzer {
 
   /**
    * Run the analysis
-   * 分析を実行
    */
   abstract analyze(): Promise<Partial<AnalysisResult>>;
 
   /**
    * Get the analyzer name
-   * 分析器名を取得
    */
   abstract getName(): string;
 
   /**
    * Resolve path relative to repository root
-   * リポジトリルートからの相対パスを解決
    */
   protected resolvePath(relativePath: string): string {
     return `${this.basePath}/${relativePath}`;
@@ -35,7 +31,6 @@ export abstract class BaseAnalyzer {
 
   /**
    * Get setting value with fallback
-   * 設定値を取得（フォールバック付き）
    */
   protected getSetting(key: string, defaultValue: string = ''): string {
     return this.config.settings[key] ?? defaultValue;
@@ -43,7 +38,6 @@ export abstract class BaseAnalyzer {
 
   /**
    * Log analysis progress
-   * 分析進捗をログ出力
    */
   protected log(message: string): void {
     console.log(`[${this.getName()}] ${message}`);
@@ -51,7 +45,6 @@ export abstract class BaseAnalyzer {
 
   /**
    * Log warning
-   * 警告をログ出力
    */
   protected warn(message: string): void {
     console.warn(`[${this.getName()}] ⚠️ ${message}`);
@@ -59,7 +52,6 @@ export abstract class BaseAnalyzer {
 
   /**
    * Log error
-   * エラーをログ出力
    */
   protected error(message: string, error?: Error): void {
     console.error(`[${this.getName()}] ❌ ${message}`, error?.message || '');

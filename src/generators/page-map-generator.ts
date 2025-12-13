@@ -2207,38 +2207,41 @@ export class PageMapGenerator {
         const graphqlOps = allDataFetching.filter(df => df.type !== 'component');
         const componentRefs = allDataFetching.filter(df => df.type === 'component');
 
-        // Parse operations to extract path info and depth
+        // Parse operations to extract source path from df.source field or operationName pattern
         const parsedOps = graphqlOps.map(df => {
           const rawName = df.operationName || '';
-          // Pattern: "→ QueryName (via HookA)" or "→ → QueryName (via HookA)" etc.
+          const source = df.source || '';
+
+          // Count leading arrows for depth (from extractComponentGraphQL)
           const arrowCount = (rawName.match(/→/g) || []).length;
 
-          // Extract query name and path
-          let queryName = rawName.replace(/^[→\\s]+/, '').replace(/^\\u2192\\s*/g, '');
-          let sourcePath = '';
+          // Extract query name - remove arrows and (via xxx) pattern
+          let queryName = rawName.replace(/^[→\\s]+/, '').trim();
+          let sourcePath = 'Direct';
+          let depth = 0;
 
-          // Extract "(via X)" for hook
+          // Method 1: Extract from (via xxx) pattern in operationName (from extractComponentGraphQL)
           const viaMatch = queryName.match(/\\s*\\(via\\s+([^)]+)\\)/);
           if (viaMatch) {
             sourcePath = viaMatch[1];
             queryName = queryName.replace(viaMatch[0], '').trim();
+            depth = arrowCount || 1;
           }
-
-          // Extract "(ComponentName)" for component - check after removing via
-          const compMatch = queryName.match(/\\s*\\(([A-Z][a-zA-Z0-9]+)\\)$/);
-          if (compMatch) {
-            if (!sourcePath) sourcePath = compMatch[1];
-            queryName = queryName.replace(compMatch[0], '').trim();
+          // Method 2: Use df.source field (from engine.ts enrichPagesWithHookGraphQL)
+          else if (source.startsWith('component:')) {
+            sourcePath = source.replace('component:', '');
+            depth = 1;
+          } else if (source.startsWith('hook:')) {
+            sourcePath = source.replace('hook:', '');
+            depth = 1;
           }
-
-          // Further clean the query name
-          queryName = queryName.replace(/^[→\\s]+/, '').trim();
+          // "import:xxx" or no source stays as Direct
 
           return {
             ...df,
             queryName,
-            sourcePath: sourcePath || 'Direct',
-            depth: arrowCount
+            sourcePath,
+            depth
           };
         });
 
@@ -2302,19 +2305,24 @@ export class PageMapGenerator {
 
           sortedPaths.forEach(pathName => {
             const ops = groupedByPath.get(pathName);
-            const depthIndicator = pathName === 'Direct' ? '' : '↳ ';
-            const pathLabel = pathName === 'Direct' ? 'Direct (this page)' : pathName;
+            const isDirect = pathName === 'Direct';
+            const depthIndicator = isDirect ? '' : '↳ ';
+            const pathLabel = isDirect ? 'Direct (this page)' : pathName;
+            // UI indent: max 1 level difference (Direct=0, others=1)
+            const uiIndent = isDirect ? 0 : 12;
 
-            // Path header with depth visual
+            // Path header with subtle indent indicator
             dataHtml += '<div class="data-path-group" style="margin:8px 0">' +
-              '<div class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+(ops[0]?.depth * 8)+'px">' +
+              '<div class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+uiIndent+'px">' +
               depthIndicator + '<span class="text-accent">' + pathLabel + '</span> (' + ops.length + ')' +
               '</div>';
 
             ops.forEach(op => {
               const isQ = !op.type?.includes('Mutation');
               const srcArg = op.sourcePath !== 'Direct' ? ",\\'"+op.sourcePath.replace(/'/g, "\\\\'")+"\\'": '';
-              dataHtml += '<div class="detail-item data-op" style="padding-left:'+(8 + op.depth * 8)+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
+              // detail-item has no indent, only inner content has subtle indent via padding
+              dataHtml += '<div class="detail-item data-op" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
+                '<span style="display:inline-block;width:'+(uiIndent+4)+'px"></span>' +
                 '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'" style="font-size:10px">'+(isQ?'Q':'M')+'</span> '+op.queryName+'</div>';
             });
 

@@ -1,6 +1,6 @@
 /**
  * Rails Map Generator
- * Rails分析結果をインタラクティブなHTMLページとして生成する
+ * Generates interactive HTML pages from Rails analysis results
  */
 
 import * as fs from 'fs';
@@ -627,6 +627,7 @@ export class RailsMapGenerator {
           // Re-render mermaid diagram
           container.removeAttribute('data-processed');
           window.mermaid.init(undefined, container);
+          setTimeout(initDiagramPanZoom, 100);
         } catch (e) {
           console.error('Mermaid error:', e);
         }
@@ -643,9 +644,127 @@ export class RailsMapGenerator {
         const diagram = document.getElementById('mermaid-diagram');
         if (diagram) {
           window.mermaid.init(undefined, diagram);
+          setTimeout(initDiagramPanZoom, 100);
         }
       };
       document.head.appendChild(script);
+    }
+
+    // Pan and zoom functionality for mermaid diagram
+    function initDiagramPanZoom() {
+      const container = document.getElementById('mermaid-container');
+      const svg = container?.querySelector('svg');
+      if (!svg) return;
+
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      // Style the container
+      container.style.overflow = 'hidden';
+      container.style.cursor = 'grab';
+      container.style.position = 'relative';
+      svg.style.transformOrigin = 'center center';
+      svg.style.transition = 'none';
+
+      // Add zoom controls
+      const controls = document.createElement('div');
+      controls.className = 'diagram-controls';
+      controls.innerHTML = \`
+        <button onclick="diagramZoom(0.2)" title="Zoom In">+</button>
+        <button onclick="diagramZoom(-0.2)" title="Zoom Out">−</button>
+        <button onclick="diagramReset()" title="Reset">⟲</button>
+      \`;
+      controls.style.cssText = 'position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:10';
+      container.appendChild(controls);
+
+      function updateTransform() {
+        svg.style.transform = \`translate(\${translateX}px, \${translateY}px) scale(\${scale})\`;
+      }
+
+      // Mouse wheel zoom
+      container.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        scale = Math.max(0.3, Math.min(3, scale + delta));
+        updateTransform();
+      }, { passive: false });
+
+      // Touch pinch zoom
+      let lastTouchDist = 0;
+      container.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+          lastTouchDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+        } else if (e.touches.length === 1) {
+          isDragging = true;
+          startX = e.touches[0].clientX - translateX;
+          startY = e.touches[0].clientY - translateY;
+        }
+      });
+
+      container.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2) {
+          e.preventDefault();
+          const dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          const delta = (dist - lastTouchDist) * 0.01;
+          scale = Math.max(0.3, Math.min(3, scale + delta));
+          lastTouchDist = dist;
+          updateTransform();
+        } else if (e.touches.length === 1 && isDragging) {
+          translateX = e.touches[0].clientX - startX;
+          translateY = e.touches[0].clientY - startY;
+          updateTransform();
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchend', () => { isDragging = false; });
+
+      // Mouse drag pan
+      container.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        container.style.cursor = 'grabbing';
+        startX = e.clientX - translateX;
+        startY = e.clientY - translateY;
+      });
+
+      container.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        translateX = e.clientX - startX;
+        translateY = e.clientY - startY;
+        updateTransform();
+      });
+
+      container.addEventListener('mouseup', () => {
+        isDragging = false;
+        container.style.cursor = 'grab';
+      });
+
+      container.addEventListener('mouseleave', () => {
+        isDragging = false;
+        container.style.cursor = 'grab';
+      });
+
+      // Global functions for controls
+      window.diagramZoom = (delta) => {
+        scale = Math.max(0.3, Math.min(3, scale + delta));
+        updateTransform();
+      };
+
+      window.diagramReset = () => {
+        scale = 1;
+        translateX = 0;
+        translateY = 0;
+        updateTransform();
+      };
     }
 
     function highlightParams(path) {

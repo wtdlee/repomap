@@ -1,6 +1,5 @@
 /**
  * Rails Controller Analyzer using tree-sitter
- * tree-sitterを使用してコントローラファイルを解析する
  */
 
 import * as fs from 'fs';

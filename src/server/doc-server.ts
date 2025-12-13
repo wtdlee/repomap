@@ -23,7 +23,6 @@ export interface DocServerOptions {
 
 /**
  * Documentation server with live reload
- * ライブリロード機能付きドキュメントサーバー
  */
 export class DocServer {
   private config: DocGeneratorConfig;
@@ -420,10 +419,10 @@ export class DocServer {
         container.className = 'mermaid-container';
         container.innerHTML = \`
           <div class="mermaid-controls">
-            <button onclick="zoomDiagram(\${idx}, 0.8)" title="縮小">➖</button>
-            <button onclick="zoomDiagram(\${idx}, 1.25)" title="拡大">➕</button>
-            <button onclick="zoomDiagram(\${idx}, 'reset')" title="リセット">🔄</button>
-            <button onclick="toggleFullscreen(\${idx})" title="全画面">⛶</button>
+            <button onclick="zoomDiagram(\${idx}, 0.8)" title="Zoom Out">➖</button>
+            <button onclick="zoomDiagram(\${idx}, 1.25)" title="Zoom In">➕</button>
+            <button onclick="zoomDiagram(\${idx}, 'reset')" title="Reset">🔄</button>
+            <button onclick="toggleFullscreen(\${idx})" title="Fullscreen">⛶</button>
           </div>
           <div class="mermaid-wrapper" id="wrapper-\${idx}">
             <div class="mermaid-inner" id="inner-\${idx}"></div>
@@ -1188,7 +1187,7 @@ export class DocServer {
     async function regenerate() {
       try {
         const btn = document.querySelector('.regenerate-btn');
-        btn.textContent = '⏳ 生成中...';
+        btn.textContent = '⏳ Generating...';
         btn.disabled = true;
 
         const res = await fetch('/api/regenerate', { method: 'POST' });
@@ -1197,13 +1196,13 @@ export class DocServer {
         if (data.success) {
           window.location.reload();
         } else {
-          alert('生成に失敗しました: ' + data.error);
+          alert('Generation failed: ' + data.error);
         }
       } catch (e) {
-        alert('エラー: ' + e.message);
+        alert('Error: ' + e.message);
       } finally {
         const btn = document.querySelector('.regenerate-btn');
-        btn.textContent = '🔄 再生成';
+        btn.textContent = '🔄 Regenerate';
         btn.disabled = false;
       }
     }
