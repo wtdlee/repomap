@@ -1,7 +1,6 @@
-import { Project, SyntaxKind } from 'ts-morph';
+import { parseSync, Module, TaggedTemplateExpression, CallExpression, Expression } from '@swc/core';
 import fg from 'fast-glob';
 import * as fs from 'fs/promises';
-import { existsSync } from 'fs';
 import * as path from 'path';
 import { parse as parseGraphQL, DocumentNode, DefinitionNode, TypeNode } from 'graphql';
 import { BaseAnalyzer } from './base-analyzer.js';
@@ -17,25 +16,11 @@ import type {
 /**
  * Analyzer for GraphQL operations
  * GraphQL操作の分析器
+ * Uses @swc/core for fast parsing
  */
 export class GraphQLAnalyzer extends BaseAnalyzer {
-  private project: Project;
-
   constructor(config: RepositoryConfig) {
     super(config);
-    const tsConfigPath = this.resolvePath('tsconfig.json');
-    const hasTsConfig = existsSync(tsConfigPath);
-
-    this.project = new Project({
-      ...(hasTsConfig ? { tsConfigFilePath: tsConfigPath } : {}),
-      skipAddingFilesFromTsConfig: true,
-      compilerOptions: hasTsConfig
-        ? undefined
-        : {
-            allowJs: true,
-            jsx: 2, // React
-          },
-    });
   }
 
   getName(): string {
@@ -303,7 +288,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   private async analyzeInlineGraphQL(): Promise<GraphQLOperation[]> {
     const operations: GraphQLOperation[] = [];
 
-    const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
+    const tsFiles = await fg(['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'], {
       cwd: this.basePath,
       ignore: [
         '**/node_modules/**',
@@ -311,200 +296,217 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
         '**/__tests__/**',
         '**/*.test.*',
         '**/*.spec.*',
+        '**/__generated__/**',
       ],
       absolute: true,
     });
 
-    for (const filePath of tsFiles) {
-      try {
-        const sourceFile = this.project.addSourceFileAtPath(filePath);
-        const relativePath = path.relative(this.basePath, filePath);
-
-        // Check if file imports gql from any GraphQL-related source
-        // Supports: @apollo/client, graphql-tag, graphql.macro, __generated__/gql, gql-masked, etc.
-        const hasGqlImport = sourceFile.getImportDeclarations().some((imp) => {
-          const spec = imp.getModuleSpecifierValue();
-          const namedImports = imp.getNamedImports().map((n) => n.getName());
-          const defaultImport = imp.getDefaultImport()?.getText();
-
-          // Check if gql is imported from GraphQL-related modules
-          return (
-            (namedImports.includes('gql') ||
-              namedImports.includes('graphql') ||
-              defaultImport === 'gql') &&
-            (spec.includes('graphql') ||
-              spec.includes('apollo') ||
-              spec.includes('gql') ||
-              spec.includes('__generated__'))
-          );
-        });
-
-        // Find gql`` or graphql`` template literals
-        const taggedTemplates = sourceFile.getDescendantsOfKind(
-          SyntaxKind.TaggedTemplateExpression
-        );
-
-        for (const template of taggedTemplates) {
-          const tag = template.getTag().getText();
-          if (tag === 'gql' || tag === 'graphql') {
-            try {
-              const templateLiteral = template.getTemplate();
-              let content = '';
-
-              if (templateLiteral.isKind(SyntaxKind.NoSubstitutionTemplateLiteral)) {
-                content = templateLiteral.getLiteralValue();
-              } else if (templateLiteral.isKind(SyntaxKind.TemplateExpression)) {
-                // Handle template with substitutions - extract text safely
-                const fullText = templateLiteral.getText();
-                // Remove template literal backticks and fragment interpolations
-                content = fullText
-                  .slice(1, -1) // Remove outer backticks
-                  .replace(/\$\{[^}]*\}/g, ''); // Remove ${...} entirely (usually fragment refs)
-              }
-
-              if (content && content.trim()) {
-                try {
-                  // Try to parse the GraphQL
-                  const document = parseGraphQL(content);
-                  const fileOperations = this.extractOperationsFromDocument(document, relativePath);
-                  operations.push(...fileOperations);
-                } catch {
-                  // Skip unparseable GraphQL - this is expected for templates with complex interpolations
-                }
-              }
-            } catch {
-              // Skip templates that can't be processed
-            }
-          }
-        }
-
-        // Find gql() function calls: gql(/* GraphQL */ `...`) or gql(`...`)
-        // Also supports typed-document-node codegen pattern: gql(/* GraphQL */ `...`)
-        const callExpressions = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
-        for (const call of callExpressions) {
+    // Process files in parallel batches
+    const batchSize = 100;
+    for (let i = 0; i < tsFiles.length; i += batchSize) {
+      const batch = tsFiles.slice(i, i + batchSize);
+      const results = await parallelMapSafe(
+        batch,
+        async (filePath) => {
           try {
-            const expression = call.getExpression();
-            const expressionText = expression.getText();
+            const content = await fs.readFile(filePath, 'utf-8');
 
-            // Match gql() or graphql() function calls
-            if (expressionText === 'gql' || expressionText === 'graphql') {
-              const args = call.getArguments();
-              if (args.length > 0) {
-                const firstArg = args[0];
-                let content = '';
-
-                // Handle template literal argument (direct or with /* GraphQL */ comment)
-                if (firstArg.isKind(SyntaxKind.NoSubstitutionTemplateLiteral)) {
-                  content = firstArg.getLiteralValue();
-                } else if (firstArg.isKind(SyntaxKind.TemplateExpression)) {
-                  const fullText = firstArg.getText();
-                  content = fullText.slice(1, -1).replace(/\$\{[^}]*\}/g, ''); // Remove fragment refs
-                } else {
-                  // Try to get text content (might be a variable or other expression)
-                  const argText = firstArg.getText();
-                  // Check if it's a template literal wrapped in comments (/* GraphQL */ `...`)
-                  if (argText.includes('`')) {
-                    // Handle /* GraphQL */ `query { ... }` pattern
-                    const match = argText.match(/\/\*\s*GraphQL\s*\*\/\s*`([^`]*)`/);
-                    if (match) {
-                      content = match[1];
-                    } else {
-                      // Fallback: just extract template literal
-                      const simpleMatch = argText.match(/`([^`]*)`/);
-                      if (simpleMatch) {
-                        content = simpleMatch[1];
-                      }
-                    }
-                  }
-                }
-
-                if (content && content.trim()) {
-                  try {
-                    const document = parseGraphQL(content);
-                    const fileOperations = this.extractOperationsFromDocument(
-                      document,
-                      relativePath
-                    );
-
-                    // Extract variable name from parent declaration
-                    // e.g., export const GET_USER = graphql(`...`) -> variableName = "GET_USER"
-                    const variableName = this.extractVariableNameFromCall(call);
-                    if (variableName) {
-                      for (const op of fileOperations) {
-                        op.variableNames = op.variableNames || [];
-                        op.variableNames.push(variableName);
-                        // Also add Document variant
-                        op.variableNames.push(`${op.name}Document`);
-                      }
-                    }
-
-                    operations.push(...fileOperations);
-                  } catch {
-                    // Skip unparseable GraphQL
-                  }
-                }
-              }
+            // Quick pre-filter: skip files without GraphQL indicators
+            if (!content.includes('gql') && !content.includes('graphql')) {
+              return [];
             }
+
+            const relativePath = path.relative(this.basePath, filePath);
+            const isTsx = filePath.endsWith('.tsx') || filePath.endsWith('.jsx');
+
+            const ast = parseSync(content, {
+              syntax:
+                filePath.endsWith('.ts') || filePath.endsWith('.tsx') ? 'typescript' : 'ecmascript',
+              tsx: isTsx,
+              jsx: isTsx,
+            });
+
+            return this.analyzeModuleForGraphQL(ast, content, relativePath);
           } catch {
-            // Skip calls that can't be processed
+            return [];
           }
-        }
-
-        // Find exported const queries with GraphQL-like naming patterns
-        // Supports: SCREAMING_CASE (e.g., SEARCH_COMPANIES) and PascalCase (e.g., Query, Mutation)
-        if (hasGqlImport) {
-          const variableDeclarations = sourceFile.getVariableDeclarations();
-          for (const varDecl of variableDeclarations) {
-            const name = varDecl.getName();
-            // Match GraphQL-like variable names
-            const isGraphQLLike =
-              name.includes('QUERY') ||
-              name.includes('MUTATION') ||
-              name.includes('FRAGMENT') ||
-              name.includes('Query') ||
-              name.includes('Mutation') ||
-              name.includes('Subscription') ||
-              // SCREAMING_CASE constants ending in related words
-              /^[A-Z_]+_(QUERY|MUTATION|FRAGMENT|SUBSCRIPTION)$/.test(name) ||
-              // PascalCase Query suffix
-              /Query$|Mutation$|Fragment$|Subscription$/.test(name);
-
-            if (isGraphQLLike) {
-              const initializer = varDecl.getInitializer();
-              // Tagged template is handled above, but let's also handle
-              // cases where the initializer is a call expression
-              if (initializer && initializer.isKind(SyntaxKind.CallExpression)) {
-                // Already handled above in the call expression loop
-              }
-            }
-          }
-        }
-      } catch (error) {
-        this.warn(`Failed to analyze ${filePath}: ${(error as Error).message}`);
-      }
+        },
+        10
+      );
+      operations.push(...results.flat());
     }
 
     return operations;
   }
 
   /**
-   * Extract variable name from parent declaration
-   * e.g., export const GET_USER = graphql(`...`) -> "GET_USER"
+   * Analyze a parsed module for GraphQL operations
+   */
+  private analyzeModuleForGraphQL(
+    ast: Module,
+    content: string,
+    filePath: string
+  ): GraphQLOperation[] {
+    const operations: GraphQLOperation[] = [];
+    const variableContextStack: string[] = [];
+
+    // Traverse AST to find tagged templates and call expressions
+    this.traverseNodeWithContext(ast, variableContextStack, (node, currentVarName) => {
+      // Tagged template: gql`...` or graphql`...`
+      if (node.type === 'TaggedTemplateExpression') {
+        const tagged = node as TaggedTemplateExpression;
+        const tagName = this.getTagName(tagged.tag);
+
+        if (tagName === 'gql' || tagName === 'graphql') {
+          const graphqlContent = this.extractTemplateContent(tagged.template, content);
+          if (graphqlContent) {
+            try {
+              const document = parseGraphQL(graphqlContent);
+              const fileOps = this.extractOperationsFromDocument(document, filePath);
+
+              // Add variable name context
+              if (currentVarName) {
+                for (const op of fileOps) {
+                  op.variableNames = op.variableNames || [];
+                  op.variableNames.push(currentVarName);
+                  op.variableNames.push(`${op.name}Document`);
+                }
+              }
+
+              operations.push(...fileOps);
+            } catch {
+              // Skip unparseable GraphQL
+            }
+          }
+        }
+      }
+
+      // Call expression: gql(`...`) or graphql(`...`)
+      if (node.type === 'CallExpression') {
+        const call = node as CallExpression;
+        const calleeName = this.getCalleeName(call.callee);
+
+        if (calleeName === 'gql' || calleeName === 'graphql') {
+          if (call.arguments.length > 0) {
+            const firstArg = call.arguments[0].expression;
+            const graphqlContent = this.extractGraphQLFromExpression(firstArg, content);
+
+            if (graphqlContent) {
+              try {
+                const document = parseGraphQL(graphqlContent);
+                const fileOps = this.extractOperationsFromDocument(document, filePath);
+
+                // Add variable name context
+                if (currentVarName) {
+                  for (const op of fileOps) {
+                    op.variableNames = op.variableNames || [];
+                    op.variableNames.push(currentVarName);
+                    op.variableNames.push(`${op.name}Document`);
+                  }
+                }
+
+                operations.push(...fileOps);
+              } catch {
+                // Skip unparseable GraphQL
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return operations;
+  }
+
+  /**
+   * Traverse AST nodes with variable context tracking
+   */
+
+  private traverseNodeWithContext(
+    node: any,
+    varStack: string[],
+    callback: (node: any, currentVarName: string | null) => void
+  ): void {
+    if (!node || typeof node !== 'object') return;
+
+    // Track variable declaration context
+    let addedVar = false;
+    if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') {
+      varStack.push(node.id.value);
+      addedVar = true;
+    }
+
+    callback(node, varStack.length > 0 ? varStack[varStack.length - 1] : null);
+
+    for (const key of Object.keys(node)) {
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          this.traverseNodeWithContext(item, varStack, callback);
+        }
+      } else if (value && typeof value === 'object') {
+        this.traverseNodeWithContext(value, varStack, callback);
+      }
+    }
+
+    if (addedVar) {
+      varStack.pop();
+    }
+  }
+
+  /**
+   * Get tag name from tagged template expression
+   */
+  private getTagName(tag: Expression): string | null {
+    if (tag.type === 'Identifier') {
+      return tag.value;
+    }
+    return null;
+  }
+
+  /**
+   * Get callee name from call expression
+   */
+  private getCalleeName(callee: Expression | { type: 'Super' | 'Import' }): string | null {
+    if (callee.type === 'Identifier') {
+      return callee.value;
+    }
+    return null;
+  }
+
+  /**
+   * Extract content from template literal
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractVariableNameFromCall(call: any): string | null {
-    try {
-      // Walk up the AST to find the variable declaration
-      let parent = call.getParent();
-      while (parent) {
-        if (parent.isKind?.(SyntaxKind.VariableDeclaration)) {
-          return parent.getName?.() || null;
-        }
-        parent = parent.getParent?.();
+  private extractTemplateContent(template: any, fullContent: string): string | null {
+    if (template.type === 'TemplateLiteral') {
+      // Simple template without expressions
+      if (template.quasis.length === 1 && template.expressions.length === 0) {
+        return template.quasis[0].raw;
       }
-    } catch {
-      // Ignore errors
+      // Template with expressions - extract from source
+      const start = template.span.start;
+      const end = template.span.end;
+      const rawContent = fullContent.slice(start, end);
+      // Remove backticks and interpolations
+      return rawContent.slice(1, -1).replace(/\$\{[^}]*\}/g, '');
     }
+    return null;
+  }
+
+  /**
+   * Extract GraphQL content from expression (handles various patterns)
+   */
+  private extractGraphQLFromExpression(expr: Expression, fullContent: string): string | null {
+    if (expr.type === 'TemplateLiteral') {
+      return this.extractTemplateContent(expr, fullContent);
+    }
+
+    // Handle /* GraphQL */ `...` pattern - extract from source
+    if (expr.type === 'StringLiteral') {
+      return expr.value;
+    }
+
     return null;
   }
 
@@ -723,7 +725,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     }
 
     // Process files in parallel batches
-    const batchSize = 50;
+    const batchSize = 100;
     for (let i = 0; i < tsFiles.length; i += batchSize) {
       const batch = tsFiles.slice(i, i + batchSize);
       await Promise.all(

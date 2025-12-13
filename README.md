@@ -8,7 +8,9 @@ Interactive documentation generator for code repositories. Visualize pages, comp
 ## Features
 
 ### 🗺️ Page Map
-- **Multi-framework support** - Next.js (Pages/App Router), React, Rails
+- **Multi-framework support** - Next.js (Pages/App Router), React SPA, Rails
+- **SPA support** - Automatic detection of react-router-dom routes from App.tsx/jsx/js
+- **Zero config for JS projects** - Works without tsconfig.json using smart defaults
 - **Interactive graph view** - Visual representation of page relationships
 - **Route analysis** - Automatic detection of routes, authentication, and data dependencies
 - **React component tracking** - Detect React components used in Rails views
@@ -24,13 +26,16 @@ Interactive documentation generator for code repositories. Visualize pages, comp
 
 ### 🔗 GraphQL Analysis
 - **Operations mapping** - Extract queries, mutations, and fragments
+- **Code Generator support** - Parse `__generated__/graphql.ts` (client preset)
 - **Field details** - View all fields with types and arguments
-- **Usage tracking** - See where operations are used
+- **Usage tracking** - See where operations are used in components
+- **Component integration** - Track GraphQL usage through component dependencies
 
 ### 📊 Data Flow
 - **Visual diagrams** - Mermaid-generated flowcharts
 - **Cross-component tracking** - Follow data through your application
 - **REST API detection** - Automatic API endpoint discovery
+- **High performance** - SWC-based parsing (10x faster than ts-morph)
 
 ## Installation
 
@@ -392,8 +397,18 @@ export default config;
 | Framework | Features |
 |-----------|----------|
 | **Next.js** | Pages Router, App Router, API routes, data fetching |
-| **React** | Components, GraphQL operations, hooks |
+| **React SPA** | react-router-dom routes, components, hooks (auto-detected from App.tsx) |
+| **React (JS)** | JavaScript projects without tsconfig.json |
 | **Rails** | Routes, Controllers, Models, Views, gRPC, React integration |
+
+### GraphQL Support
+
+| Pattern | Support |
+|---------|---------|
+| `.graphql` files | ✅ Full support |
+| `gql` template literals | ✅ Full support |
+| GraphQL Code Generator (`__generated__/graphql.ts`) | ✅ Full support |
+| `useQuery`, `useMutation`, `useLazyQuery` hooks | ✅ Tracked |
 
 ## Type Definitions
 

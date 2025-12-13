@@ -2,6 +2,7 @@ import { Project, SourceFile, SyntaxKind, Node } from 'ts-morph';
 import fg from 'fast-glob';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
 import type {
@@ -165,12 +166,36 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     this.log(`Found ${pageFiles.length} page files`);
 
-    // Add all files to project first (sequential for ts-morph safety)
-    for (const filePath of pageFiles) {
+    // Read all files in parallel batches for better I/O performance
+    const batchSize = 100;
+    const fileContents = new Map<string, string>();
+
+    for (let i = 0; i < pageFiles.length; i += batchSize) {
+      const batch = pageFiles.slice(i, i + batchSize);
+      const results = await Promise.all(
+        batch.map(async (filePath) => {
+          try {
+            const content = await fsPromises.readFile(filePath, 'utf-8');
+            return { filePath, content };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      for (const result of results) {
+        if (result) {
+          fileContents.set(result.filePath, result.content);
+        }
+      }
+    }
+
+    // Create source files in memory (faster than addSourceFileAtPath)
+    for (const [filePath, content] of fileContents) {
       try {
-        this.project.addSourceFileAtPath(filePath);
+        this.project.createSourceFile(filePath, content, { overwrite: true });
       } catch {
-        // Ignore files that can't be added
+        // Ignore files that can't be parsed
       }
     }
 
@@ -182,7 +207,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
         const pagesPath = this.detectPagesRoot(filePath);
         return this.analyzePageFile(filePath, pagesPath);
       },
-      4 // Limit concurrency for ts-morph stability
+      8 // Increased concurrency since files are already in memory
     );
 
     // Filter out null results
