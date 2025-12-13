@@ -1,7 +1,6 @@
 import { simpleGit } from 'simple-git';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import fg from 'fast-glob';
 import type {
   DocGeneratorConfig,
   RepositoryConfig,
@@ -20,7 +19,6 @@ import { DataFlowAnalyzer } from '../analyzers/dataflow-analyzer.js';
 import { RestApiAnalyzer } from '../analyzers/rest-api-analyzer.js';
 import { MermaidGenerator } from '../generators/mermaid-generator.js';
 import { MarkdownGenerator } from '../generators/markdown-generator.js';
-import { AnalysisCache } from './cache.js';
 
 /**
  * Main documentation generation engine
@@ -29,40 +27,32 @@ export class DocGeneratorEngine {
   private config: DocGeneratorConfig;
   private mermaidGenerator: MermaidGenerator;
   private markdownGenerator: MarkdownGenerator;
-  private noCache: boolean;
 
-  constructor(config: DocGeneratorConfig, options?: { noCache?: boolean }) {
+  constructor(config: DocGeneratorConfig) {
     this.config = config;
     this.mermaidGenerator = new MermaidGenerator();
     this.markdownGenerator = new MarkdownGenerator();
-    this.noCache = options?.noCache ?? false;
   }
 
   /**
    * Run documentation generation for all configured repositories
    */
   async generate(): Promise<DocumentationReport> {
-    console.log('🚀 Starting documentation generation...\n');
-
     const repositoryReports: RepositoryReport[] = [];
 
     for (const repoConfig of this.config.repositories) {
       try {
-        console.log(`\n📦 Analyzing ${repoConfig.displayName}...`);
         const report = await this.analyzeRepository(repoConfig);
         repositoryReports.push(report);
-        console.log(`✅ Completed ${repoConfig.displayName}`);
       } catch (error) {
-        console.error(`❌ Failed to analyze ${repoConfig.name}:`, (error as Error).message);
+        console.error(`❌ ${repoConfig.name}: ${(error as Error).message}`);
       }
     }
 
-    // Cross-repository analysis
-    console.log('\n🔗 Running cross-repository analysis...');
+    // Cross-repository analysis (silent)
     const crossRepoAnalysis = this.analyzeCrossRepo(repositoryReports);
 
-    // Generate diagrams
-    console.log('\n📊 Generating diagrams...');
+    // Generate diagrams (silent)
     const results = repositoryReports.map((r) => r.analysis);
     const crossRepoLinks = this.extractCrossRepoLinks(results);
     const diagrams = this.mermaidGenerator.generateAll(results, crossRepoLinks);
@@ -74,75 +64,29 @@ export class DocGeneratorEngine {
       diagrams,
     };
 
-    // Write documentation
-    console.log('\n📝 Writing documentation...');
+    // Write documentation (silent)
     await this.writeDocumentation(report);
-
-    console.log('\n✨ Documentation generation complete!');
-    console.log(`📁 Output: ${this.config.outputDir}`);
 
     return report;
   }
 
   /**
-   * Analyze a single repository (with caching)
+   * Analyze a single repository
    */
   private async analyzeRepository(repoConfig: RepositoryConfig): Promise<RepositoryReport> {
-    // Initialize cache
-    const cache = new AnalysisCache(repoConfig.path);
-    await cache.init();
-
     // Get repository info
     const { version, commitHash } = await this.getRepoInfo(repoConfig);
 
-    // Compute content hash for cache key
-    const sourceFiles = await fg(['**/*.{ts,tsx,graphql}'], {
-      cwd: repoConfig.path,
-      ignore: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**'],
-      absolute: true,
-    });
-    const contentHash = await cache.computeFilesHash(sourceFiles);
-    // Include repomap version in cache key to invalidate when analyzer logic changes
-    const cacheKey = `analysis_v${version}_${repoConfig.name}_${commitHash}`;
-
-    // Check cache (skip if noCache is enabled)
-    if (this.noCache) {
-      console.log(`  🔄 Cache disabled, analyzing from scratch...`);
-    }
-    const cachedResult = this.noCache ? null : cache.get<AnalysisResult>(cacheKey, contentHash);
-    if (cachedResult) {
-      console.log(`  ⚡ Using cached analysis (hash: ${contentHash.slice(0, 8)}...)`);
-
-      const summary = {
-        totalPages: cachedResult.pages.length,
-        totalComponents: cachedResult.components.length,
-        totalGraphQLOperations: cachedResult.graphqlOperations.length,
-        totalDataFlows: cachedResult.dataFlows.length,
-        authRequiredPages: cachedResult.pages.filter((p) => p.authentication.required).length,
-        publicPages: cachedResult.pages.filter((p) => !p.authentication.required).length,
-      };
-
-      return {
-        name: repoConfig.name,
-        displayName: repoConfig.displayName,
-        version,
-        commitHash,
-        analysis: cachedResult,
-        summary,
-      };
-    }
-
-    // Run analyzers in PARALLEL for faster analysis
+    // Run analyzers in parallel for faster analysis
     const analyzers = repoConfig.analyzers
       .map((analyzerType) => this.createAnalyzer(analyzerType, repoConfig))
       .filter((a): a is NonNullable<typeof a> => a !== null);
 
-    console.log(`  Running ${analyzers.length} analyzers in parallel...`);
     const startTime = Date.now();
-
     const analysisResults = await Promise.all(analyzers.map((analyzer) => analyzer.analyze()));
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    console.log(`  Analysis completed in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
+    console.log(`  Analyzed ${repoConfig.displayName} in ${elapsed}s`);
 
     // Merge results
     const analysis = this.mergeAnalysisResults(
@@ -154,11 +98,6 @@ export class DocGeneratorEngine {
 
     // Enrich pages with GraphQL operations from custom hooks
     this.enrichPagesWithHookGraphQL(analysis);
-
-    // Save to cache
-    cache.set(cacheKey, contentHash, analysis);
-    await cache.save();
-    console.log(`  💾 Analysis cached (hash: ${contentHash.slice(0, 8)}...)`);
 
     // Calculate summary
     const summary = {
@@ -623,12 +562,10 @@ export class DocGeneratorEngine {
       const dir = path.dirname(fullPath);
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(fullPath, content, 'utf-8');
-      console.log(`  📄 ${filePath}`);
     }
 
     // Write JSON report
     const jsonPath = path.join(outputDir, 'report.json');
     await fs.writeFile(jsonPath, JSON.stringify(report, null, 2), 'utf-8');
-    console.log(`  📋 report.json`);
   }
 }

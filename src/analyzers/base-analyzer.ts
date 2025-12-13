@@ -37,23 +37,27 @@ export abstract class BaseAnalyzer {
   }
 
   /**
-   * Log analysis progress
+   * Log analysis progress (silent by default, set REPOMAP_VERBOSE=1 to enable)
    */
-  protected log(message: string): void {
-    console.log(`[${this.getName()}] ${message}`);
+  protected log(_message: string): void {
+    // Silent by default for cleaner output
+    // Enable with REPOMAP_VERBOSE=1
+    if (process.env.REPOMAP_VERBOSE === '1') {
+      console.log(`[${this.getName()}] ${_message}`);
+    }
   }
 
   /**
-   * Log warning
+   * Log warning (always shown)
    */
   protected warn(message: string): void {
-    console.warn(`[${this.getName()}] ⚠️ ${message}`);
+    console.warn(`⚠️ ${message}`);
   }
 
   /**
-   * Log error
+   * Log error (always shown)
    */
   protected error(message: string, error?: Error): void {
-    console.error(`[${this.getName()}] ❌ ${message}`, error?.message || '');
+    console.error(`❌ ${message}`, error?.message || '');
   }
 }

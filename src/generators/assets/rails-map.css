@@ -597,6 +597,38 @@ header h1 {
   background: var(--accent);
 }
 
+/* Fullscreen mode */
+.mermaid-container:fullscreen {
+  background: var(--bg-primary);
+  padding: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mermaid-container:fullscreen svg {
+  max-width: none;
+  max-height: none;
+  cursor: pointer;
+}
+
+.mermaid-container:fullscreen .diagram-controls {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+}
+
+/* Detail panel in fullscreen - overlay style */
+.mermaid-container:fullscreen ~ .detail-panel,
+body:has(.mermaid-container:fullscreen) .detail-panel.open {
+  position: fixed;
+  right: 0;
+  top: 0;
+  height: 100vh;
+  z-index: 10001;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

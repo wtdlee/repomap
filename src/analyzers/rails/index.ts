@@ -93,49 +93,35 @@ export interface RailsSummary {
  * Analyze a complete Rails application
  */
 export async function analyzeRailsApp(rootPath: string): Promise<RailsAnalysisResult> {
-  console.log(`\n📦 Analyzing Rails application at: ${rootPath}\n`);
+  const verbose = process.env.REPOMAP_VERBOSE === '1';
 
   // Routes
-  console.log('🔄 Analyzing routes...');
   const routesAnalyzer = new RailsRoutesAnalyzer(rootPath);
   const routes = await routesAnalyzer.analyze();
-  console.log(`   ✅ Found ${routes.routes.length} routes`);
 
   // Controllers
-  console.log('🔄 Analyzing controllers...');
   const controllersAnalyzer = new RailsControllerAnalyzer(rootPath);
   const controllers = await controllersAnalyzer.analyze();
-  console.log(
-    `   ✅ Found ${controllers.controllers.length} controllers with ${controllers.totalActions} actions`
-  );
 
   // Models
-  console.log('🔄 Analyzing models...');
   const modelsAnalyzer = new RailsModelAnalyzer(rootPath);
   const models = await modelsAnalyzer.analyze();
-  console.log(
-    `   ✅ Found ${models.models.length} models with ${models.totalAssociations} associations`
-  );
 
   // gRPC Services
-  console.log('🔄 Analyzing gRPC services...');
   const grpcAnalyzer = new RailsGrpcAnalyzer(rootPath);
   const grpc = await grpcAnalyzer.analyze();
-  console.log(`   ✅ Found ${grpc.services.length} gRPC services with ${grpc.totalRpcs} RPCs`);
 
   // Views
-  console.log('🔄 Analyzing views...');
   const views = await analyzeRailsViews(rootPath);
-  console.log(
-    `   ✅ Found ${views.summary.totalViews} views and ${views.summary.totalPages} pages`
-  );
 
   // React Components
-  console.log('🔄 Analyzing React components...');
   const react = await analyzeReactComponents(rootPath);
-  console.log(
-    `   ✅ Found ${react.summary.totalComponents} React components (${react.summary.ssrComponents} SSR, ${react.summary.clientComponents} client)`
-  );
+
+  if (verbose) {
+    console.log(
+      `  Rails: ${routes.routes.length} routes, ${controllers.controllers.length} controllers, ${models.models.length} models`
+    );
+  }
 
   // Combine all namespaces
   const allNamespaces = [

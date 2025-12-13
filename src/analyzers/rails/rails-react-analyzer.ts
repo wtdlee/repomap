@@ -129,9 +129,6 @@ export async function analyzeReactComponents(rootPath: string): Promise<ReactAna
 
   // 1. Detect project structure
   const detectedPaths = await detectProjectStructure(rootPath);
-  console.log(
-    `   📂 Detected paths: ${detectedPaths.entryDirs.length} entry dirs, ${detectedPaths.componentDirs.length} component dirs (${detectedPaths.integrationPattern})`
-  );
 
   // 2. Analyze entry point files from all detected directories
   for (const entryDir of detectedPaths.entryDirs) {
