@@ -2311,7 +2311,7 @@ export class PageMapGenerator {
           sortedPaths.forEach(pathName => {
             const ops = groupedByPath.get(pathName);
             const isDirect = pathName === 'Direct';
-            const depthIndicator = isDirect ? '' : '↳ ';
+            // Remove the "↳" prefix (UI becomes cleaner with <details>/<summary>)
             const pathLabel = isDirect ? 'Direct (this page)' : pathName;
             // UI indent: 4px per level added to base padding (10px)
             const uiLevel = pathToUiLevel.get(pathName) || 0;
@@ -2325,19 +2325,51 @@ export class PageMapGenerator {
             const detailsOpenAttr = isCollapsedByDefault ? '' : ' open';
 
             dataHtml += '<details class="data-path-group" style="margin:8px 0"' + detailsOpenAttr + '>' +
-              '<summary class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+totalPadding+'px;cursor:pointer">' +
-              depthIndicator + '<span class="text-accent">' + pathLabel + '</span> (' + ops.length + ')' +
+              '<summary class="data-path-header" style="--pad-left:'+totalPadding+'px">' +
+              '<span class="text-accent">' + pathLabel + '</span> (' + ops.length + ')' +
               '</summary>';
 
+            // Secondary grouping inside the group by concrete source file (sourceDetail).
+            // This reduces noise when a group contains operations from many files.
+            const bySource = new Map();
             ops.forEach(op => {
-              const isQ = !op.type?.includes('Mutation');
-              const sourceForModal = op.sourceDetail || op.sourcePath;
-              const srcArg = op.sourcePath !== 'Direct' && sourceForModal
-                ? ",\\'"+sourceForModal.replace(/'/g, "\\\\'")+"\\'"
-                : '';
-              // detail-item keeps base padding, adds indent
-              dataHtml += '<div class="detail-item data-op" style="padding:8px 10px 8px '+totalPadding+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
-                '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'" style="font-size:10px">'+(isQ?'Q':'M')+'</span> '+op.queryName+'</div>';
+              const key = op.sourceDetail || '';
+              if (!bySource.has(key)) bySource.set(key, []);
+              bySource.get(key).push(op);
+            });
+
+            const sourceKeys = Array.from(bySource.keys()).sort((a, b) => {
+              // Put "unknown/empty" at the end
+              if (!a && b) return 1;
+              if (a && !b) return -1;
+              return String(a).localeCompare(String(b));
+            });
+
+            sourceKeys.forEach(sourceKey => {
+              const sourceOps = bySource.get(sourceKey) || [];
+              const hasSourceHeader = !!sourceKey && sourceKeys.length > 1;
+
+              if (hasSourceHeader) {
+                dataHtml += '<details class="data-source-group" style="margin:6px" open>' +
+                  '<summary class="data-source-header" style="--pad-left:'+totalPadding+'px">' +
+                  '<span style="opacity:0.9">' + sourceKey + '</span> (' + sourceOps.length + ')' +
+                  '</summary>';
+              }
+
+              sourceOps.forEach(op => {
+                const isQ = !op.type?.includes('Mutation');
+                const sourceForModal = op.sourceDetail || op.sourcePath;
+                const srcArg = op.sourcePath !== 'Direct' && sourceForModal
+                  ? ",\\'"+sourceForModal.replace(/'/g, "\\\\'")+"\\'"
+                  : '';
+                // detail-item keeps base padding, adds indent
+                dataHtml += '<div class="detail-item data-op" style="padding:8px 10px 8px '+totalPadding+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
+                  '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'" style="font-size:10px">'+(isQ?'Q':'M')+'</span> '+op.queryName+'</div>';
+              });
+
+              if (hasSourceHeader) {
+                dataHtml += '</details>';
+              }
             });
 
             dataHtml += '</details>';
