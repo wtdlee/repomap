@@ -371,7 +371,7 @@ export class DocServer {
         <div class="nav-group">
           <span class="nav-group-title">Analysis</span>
           <div class="nav-subitems">
-            <a href="/docs/cross-repo">Cross Repository</a>
+            ${this.config.repositories.length > 1 ? '<a href="/docs/cross-repo">Cross Repository</a>' : ''}
             <a href="/docs/diagrams">Diagrams</a>
           </div>
         </div>

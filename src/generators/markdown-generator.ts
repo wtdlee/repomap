@@ -32,8 +32,10 @@ export class MarkdownGenerator {
       docs.set(`repos/${repo.name}/dataflow.md`, this.generateDataFlowDoc(repo));
     }
 
-    // Cross-repo analysis
-    docs.set('cross-repo.md', this.generateCrossRepoDoc(report));
+    // Cross-repo analysis (only if multiple repositories)
+    if (report.repositories.length > 1) {
+      docs.set('cross-repo.md', this.generateCrossRepoDoc(report));
+    }
 
     // Diagrams
     docs.set('diagrams.md', this.generateDiagramsDoc(report.diagrams));
@@ -70,7 +72,9 @@ export class MarkdownGenerator {
 
     lines.push('## Quick Links');
     lines.push('');
-    lines.push('- [Cross Repository](/docs/cross-repo)');
+    if (report.repositories.length > 1) {
+      lines.push('- [Cross Repository](/docs/cross-repo)');
+    }
     lines.push('- [Diagrams](/docs/diagrams)');
     lines.push('- [Page Map (Interactive)](/page-map)');
     lines.push('');
@@ -152,49 +156,88 @@ export class MarkdownGenerator {
         const auth = page.authentication.required ? 'Required' : 'Public';
         const layout = page.layout || '-';
         const dataOps: string[] = [];
-        const queries = page.dataFetching.filter((df) => !df.type.includes('Mutation'));
-        const mutations = page.dataFetching.filter((df) => df.type.includes('Mutation'));
+        const seenNames = new Set<string>();
 
-        // Show first 2 queries - use original name for consistency, filter empty
-        for (const q of queries.slice(0, 2)) {
+        // Deduplicate queries and mutations by clean name, prioritize direct queries over refs
+        const allDf = page.dataFetching;
+        const queries = allDf.filter((df) => !df.type.includes('Mutation'));
+        const mutations = allDf.filter((df) => df.type.includes('Mutation'));
+
+        // Process queries - deduplicate by clean name, prefer direct over ref
+        const uniqueQueries: { cleanName: string; isRef: boolean }[] = [];
+        for (const q of queries) {
           const rawName = q.operationName || '';
           if (!rawName || rawName.trim().length < 2) continue;
           const isRef = rawName.startsWith('→') || rawName.startsWith('->');
-          const cleanName = rawName.replace(/^[→\->\s]+/, '');
-          if (cleanName && cleanName.trim().length > 0) {
-            if (isRef) {
-              dataOps.push(
-                `<span class="gql-ref" data-ref="${cleanName}" title="Component">${cleanName}</span>`
-              );
-            } else {
-              dataOps.push(`<span class="gql-op" data-op="${cleanName}">${cleanName}</span>`);
+          const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
+          if (!cleanName || cleanName.length < 2) continue;
+
+          // Skip if already seen, but update to direct if previously was ref
+          const existing = uniqueQueries.find((u) => u.cleanName === cleanName);
+          if (existing) {
+            if (!isRef && existing.isRef) {
+              existing.isRef = false; // Upgrade ref to direct
             }
+            continue;
+          }
+          if (!seenNames.has(cleanName)) {
+            seenNames.add(cleanName);
+            uniqueQueries.push({ cleanName, isRef });
           }
         }
-        // Show first 2 mutations - use original name for consistency, filter empty
-        for (const m of mutations.slice(0, 2)) {
+
+        // Process mutations - deduplicate by clean name, prefer direct over ref
+        const uniqueMutations: { cleanName: string; isRef: boolean }[] = [];
+        for (const m of mutations) {
           const rawName = m.operationName || '';
           if (!rawName || rawName.trim().length < 2) continue;
           const isRef = rawName.startsWith('→') || rawName.startsWith('->');
-          const cleanName = rawName.replace(/^[→\->\s]+/, '');
-          if (cleanName && cleanName.trim().length > 0) {
-            if (isRef) {
-              dataOps.push(
-                `<span class="gql-ref mutation" data-ref="${cleanName}" title="Component">${cleanName}</span>`
-              );
-            } else {
-              dataOps.push(
-                `<span class="gql-op mutation" data-op="${cleanName}">${cleanName}</span>`
-              );
+          const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
+          if (!cleanName || cleanName.length < 2) continue;
+
+          const existing = uniqueMutations.find((u) => u.cleanName === cleanName);
+          if (existing) {
+            if (!isRef && existing.isRef) {
+              existing.isRef = false;
             }
+            continue;
+          }
+          if (!seenNames.has(cleanName)) {
+            seenNames.add(cleanName);
+            uniqueMutations.push({ cleanName, isRef });
           }
         }
-        // If there are more, add a "more" button
+
+        // Show first 2 unique queries
+        for (const q of uniqueQueries.slice(0, 2)) {
+          if (q.isRef) {
+            dataOps.push(
+              `<span class="gql-ref" data-ref="${q.cleanName}" title="Component">${q.cleanName}</span>`
+            );
+          } else {
+            dataOps.push(`<span class="gql-op" data-op="${q.cleanName}">${q.cleanName}</span>`);
+          }
+        }
+
+        // Show first 2 unique mutations
+        for (const m of uniqueMutations.slice(0, 2)) {
+          if (m.isRef) {
+            dataOps.push(
+              `<span class="gql-ref mutation" data-ref="${m.cleanName}" title="Component">${m.cleanName}</span>`
+            );
+          } else {
+            dataOps.push(
+              `<span class="gql-op mutation" data-op="${m.cleanName}">${m.cleanName}</span>`
+            );
+          }
+        }
+
+        // Calculate remaining based on deduplicated counts
         const remaining =
-          queries.length +
-          mutations.length -
-          Math.min(queries.length, 2) -
-          Math.min(mutations.length, 2);
+          uniqueQueries.length +
+          uniqueMutations.length -
+          Math.min(uniqueQueries.length, 2) -
+          Math.min(uniqueMutations.length, 2);
         if (remaining > 0) {
           dataOps.push(
             `<span class="gql-more" data-type="all" data-page="${page.path}">+${remaining} more</span>`
@@ -212,54 +255,86 @@ export class MarkdownGenerator {
         const mutations = page.dataFetching.filter((df) => df.type.includes('Mutation'));
 
         if (queries.length > 0 || mutations.length > 0) {
+          // Deduplicate queries by clean name
+          const seenQueryNames = new Set<string>();
+          const uniqueQueries: { cleanName: string; isRef: boolean }[] = [];
+          for (const q of queries) {
+            const rawName = q.operationName || '';
+            if (!rawName || rawName.trim().length < 2) continue;
+            const isRef = rawName.startsWith('→') || rawName.startsWith('->');
+            const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
+            if (!cleanName || cleanName.length < 2) continue;
+
+            const existing = uniqueQueries.find((u) => u.cleanName === cleanName);
+            if (existing) {
+              if (!isRef && existing.isRef) existing.isRef = false;
+              continue;
+            }
+            if (!seenQueryNames.has(cleanName)) {
+              seenQueryNames.add(cleanName);
+              uniqueQueries.push({ cleanName, isRef });
+            }
+          }
+
+          // Deduplicate mutations by clean name
+          const seenMutNames = new Set<string>();
+          const uniqueMutations: { cleanName: string; isRef: boolean }[] = [];
+          for (const m of mutations) {
+            const rawName = m.operationName || '';
+            if (!rawName || rawName.trim().length < 2) continue;
+            const isRef = rawName.startsWith('→') || rawName.startsWith('->');
+            const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
+            if (!cleanName || cleanName.length < 2) continue;
+
+            const existing = uniqueMutations.find((u) => u.cleanName === cleanName);
+            if (existing) {
+              if (!isRef && existing.isRef) existing.isRef = false;
+              continue;
+            }
+            if (!seenMutNames.has(cleanName)) {
+              seenMutNames.add(cleanName);
+              uniqueMutations.push({ cleanName, isRef });
+            }
+          }
+
+          if (uniqueQueries.length === 0 && uniqueMutations.length === 0) continue;
+
           lines.push(`### ${page.path}`);
           lines.push('');
           lines.push(`> ${page.filePath}`);
           lines.push('');
 
-          // Queries section - filter empty
-          const validQs = queries.filter(
-            (q) => q.operationName && q.operationName.trim().length >= 2
-          );
-          if (validQs.length > 0) {
-            lines.push(`**Queries (${validQs.length})**`);
+          // Queries section
+          if (uniqueQueries.length > 0) {
+            lines.push(`**Queries (${uniqueQueries.length})**`);
             lines.push('');
             lines.push('<div class="gql-ops-list">');
-            for (const q of validQs) {
-              const rawName = q.operationName || '';
-              const isRef = rawName.startsWith('→') || rawName.startsWith('->');
-              const cleanName = rawName.replace(/^[→\->\s]+/, '');
-              if (isRef) {
+            for (const q of uniqueQueries) {
+              if (q.isRef) {
                 lines.push(
-                  `<span class="gql-ref" data-ref="${cleanName}" title="Component">${cleanName}</span>`
+                  `<span class="gql-ref" data-ref="${q.cleanName}" title="Component">${q.cleanName}</span>`
                 );
               } else {
-                lines.push(`<span class="gql-op" data-op="${cleanName}">${cleanName}</span>`);
+                lines.push(`<span class="gql-op" data-op="${q.cleanName}">${q.cleanName}</span>`);
               }
             }
             lines.push('</div>');
             lines.push('');
           }
 
-          // Mutations section - filter empty
-          const validMuts = mutations.filter(
-            (m) => m.operationName && m.operationName.trim().length >= 2
-          );
-          if (validMuts.length > 0) {
-            lines.push(`**Mutations (${validMuts.length})**`);
+          // Mutations section
+          if (uniqueMutations.length > 0) {
+            lines.push(`**Mutations (${uniqueMutations.length})**`);
             lines.push('');
             lines.push('<div class="gql-ops-list">');
-            for (const m of validMuts) {
-              const rawName = m.operationName || '';
-              const isRef = rawName.startsWith('→') || rawName.startsWith('->');
-              const cleanName = rawName.replace(/^[→\->\s]+/, '');
-              if (isRef) {
+            for (const m of uniqueMutations) {
+              if (m.isRef) {
                 lines.push(
-                  `<span class="gql-ref mutation" data-ref="${cleanName}" title="Component">${cleanName}</span>`
+                  `<span class="gql-ref mutation" data-ref="${m.cleanName}" title="Component">${m.cleanName}</span>`
                 );
               } else {
                 lines.push(
-                  `<span class="gql-op mutation" data-op="${cleanName}">${cleanName}</span>`
+                  `<span class="gql-op mutation" data-op="${m.cleanName}">${m.cleanName}</span>`
                 );
               }
             }
@@ -329,20 +404,44 @@ export class MarkdownGenerator {
       lines.push('| Component | Type | Data |');
       lines.push('|-----------|------|------|');
 
+      // Container components
       for (const comp of containers) {
         const dataOps = this.formatComponentDataOps(comp);
         lines.push(`| ${comp.name} | Container | ${dataOps || '-'} |`);
       }
+
+      // Presentational components (show all with data)
       for (const comp of presentationals.slice(0, 10)) {
-        lines.push(`| ${comp.name} | UI | - |`);
+        const dataOps = this.formatComponentDataOps(comp);
+        lines.push(`| ${comp.name} | UI | ${dataOps || '-'} |`);
       }
-      if (presentationals.length > 10) {
-        lines.push(`| *+${presentationals.length - 10} more* | UI | - |`);
-      }
+
+      // Hook components (show all with data)
       for (const comp of hooks) {
-        lines.push(`| ${comp.name} | Hook | - |`);
+        const dataOps = this.formatComponentDataOps(comp);
+        lines.push(`| ${comp.name} | Hook | ${dataOps || '-'} |`);
       }
       lines.push('');
+
+      // Collapsible section for remaining UI components
+      if (presentationals.length > 10) {
+        const remainingComps = presentationals.slice(10);
+        const sectionId = `more-ui-${pagePath.replace(/[^a-zA-Z0-9]/g, '-')}`;
+        lines.push(`<details id="${sectionId}">`);
+        lines.push(
+          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">▸ Show ${remainingComps.length} more UI components</summary>`
+        );
+        lines.push('');
+        lines.push('| Component | Type | Data |');
+        lines.push('|-----------|------|------|');
+        for (const comp of remainingComps) {
+          const dataOps = this.formatComponentDataOps(comp);
+          lines.push(`| ${comp.name} | UI | ${dataOps || '-'} |`);
+        }
+        lines.push('');
+        lines.push('</details>');
+        lines.push('');
+      }
     }
 
     // Type summary tables
@@ -352,18 +451,36 @@ export class MarkdownGenerator {
     for (const [type, components] of byType) {
       lines.push(`### ${type.charAt(0).toUpperCase() + type.slice(1)} (${components.length})`);
       lines.push('');
-      lines.push('| Name | File |');
-      lines.push('|------|------|');
+      lines.push('| Name | File | Data |');
+      lines.push('|------|------|------|');
 
       for (const comp of components.slice(0, 25)) {
         const shortPath = comp.filePath.replace('src/features/', '').replace('src/', '');
-        lines.push(`| ${comp.name} | ${shortPath} |`);
-      }
-
-      if (components.length > 25) {
-        lines.push(`| *+${components.length - 25} more* | |`);
+        const dataOps = this.formatComponentDataOps(comp);
+        lines.push(`| ${comp.name} | ${shortPath} | ${dataOps || '-'} |`);
       }
       lines.push('');
+
+      // Collapsible section for remaining components
+      if (components.length > 25) {
+        const remainingComps = components.slice(25);
+        const sectionId = `more-${type}-components`;
+        lines.push(`<details id="${sectionId}">`);
+        lines.push(
+          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">▸ Show ${remainingComps.length} more ${type} components</summary>`
+        );
+        lines.push('');
+        lines.push('| Name | File | Data |');
+        lines.push('|------|------|------|');
+        for (const comp of remainingComps) {
+          const shortPath = comp.filePath.replace('src/features/', '').replace('src/', '');
+          const dataOps = this.formatComponentDataOps(comp);
+          lines.push(`| ${comp.name} | ${shortPath} | ${dataOps || '-'} |`);
+        }
+        lines.push('');
+        lines.push('</details>');
+        lines.push('');
+      }
     }
 
     return lines.join('\n');

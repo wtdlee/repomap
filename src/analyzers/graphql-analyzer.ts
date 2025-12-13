@@ -5,7 +5,7 @@ import * as path from 'path';
 import { parse as parseGraphQL, DocumentNode, DefinitionNode, TypeNode } from 'graphql';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
-import { isGraphQLHook, hasGraphQLIndicators } from './constants.js';
+import { isGraphQLHook, hasGraphQLIndicators } from './graphql-utils.js';
 import type {
   AnalysisResult,
   GraphQLOperation,

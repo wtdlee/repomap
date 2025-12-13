@@ -2159,8 +2159,10 @@ export class PageMapGenerator {
         // Extract GraphQL from this component's hooks
         if (comp.hooks) {
           comp.hooks.forEach(hook => {
-            if (hook.includes('Query') || hook.includes('Mutation')) {
-              let queryName = hook.replace('Query: ', '').replace('Mutation: ', '').trim();
+            // Only match hooks with "Query: " or "Mutation: " prefix (from dataflow analyzer)
+            // This avoids matching unrelated hooks like useQueryParams
+            if (hook.startsWith('Query: ') || hook.startsWith('Mutation: ') || hook.startsWith('Subscription: ')) {
+              let queryName = hook.replace('Query: ', '').replace('Mutation: ', '').replace('Subscription: ', '').trim();
               // Skip empty names or hooks without actual operation names
               if (!queryName) {
                 return;
@@ -2398,9 +2400,9 @@ export class PageMapGenerator {
       if (!comp || visited.has(comp.name)) return false;
       visited.add(comp.name);
       
-      // Check hooks for GraphQL queries
-      if (comp.hooks && comp.hooks.some(h => 
-        h.includes('Query') || h.includes('Mutation')
+      // Check hooks for GraphQL queries (only match "Query: X" or "Mutation: X" format)
+      if (comp.hooks && comp.hooks.some(h =>
+        h.startsWith('Query: ') || h.startsWith('Mutation: ') || h.startsWith('Subscription: ')
       )) {
         return true;
       }
@@ -2485,9 +2487,9 @@ export class PageMapGenerator {
     ]);
 
     // Debug: log pagesWithGraphQL count
-    console.log('📊 GraphQL Stats: totalComponents=' + components.length + 
-      ', componentsWithGraphQL=' + components.filter(c => c.hooks && c.hooks.some(h => h.includes('Query') || h.includes('Mutation'))).length +
-      ', pagesWithGraphQL=' + pagesWithGraphQL.size + 
+    console.log('📊 GraphQL Stats: totalComponents=' + components.length +
+      ', componentsWithGraphQL=' + components.filter(c => c.hooks && c.hooks.some(h => h.startsWith('Query: ') || h.startsWith('Mutation: '))).length +
+      ', pagesWithGraphQL=' + pagesWithGraphQL.size +
       ', totalPages=' + pages.length);
 
     const pagesWithRestApi = new Set(pages.filter(p => {
@@ -2707,6 +2709,8 @@ export class PageMapGenerator {
       document.querySelectorAll('.page-item').forEach(p => {
         p.style.removeProperty('display');
         p.style.display = 'flex';
+        // Reset opacity (set by hierarchies filter)
+        p.style.removeProperty('opacity');
       });
     }
 
@@ -2865,9 +2869,8 @@ export class PageMapGenerator {
       closeDetail();
     });
 
-    // Expand "more" items
+    // Expand "more" items - inserts items before the button and removes the button
     window.expandMore = function(type, items, btn) {
-      const container = btn.parentElement;
       let html = '';
       items.forEach(item => {
         if (type === 'usedIn') {
@@ -2880,7 +2883,9 @@ export class PageMapGenerator {
             '<span class="tag" style="background:#6b7280">FRAGMENT</span> '+item.name+'</div>';
         }
       });
-      container.innerHTML = html;
+      // Insert new items before the button, then remove the button
+      btn.insertAdjacentHTML('beforebegin', html);
+      btn.remove();
     };
 
     function showDataDetail(rawName, sourcePath) {
@@ -3000,7 +3005,7 @@ export class PageMapGenerator {
           op.usedIn.slice(0,8).forEach(f => { html += '<div class="detail-item">'+f+'</div>'; });
           if (op.usedIn.length > 8) {
             const remaining = op.usedIn.slice(8);
-            html += '<div class="expand-more" onclick="expandMore(\\'usedIn\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" style="color:var(--accent);font-size:11px;cursor:pointer;padding:4px 0">▸ Show '+(op.usedIn.length-8)+' more files</div>';
+            html += '<div class="expand-more" onclick="event.stopPropagation(); expandMore(\\'usedIn\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" style="color:var(--accent);font-size:11px;cursor:pointer;padding:4px 0">▸ Show '+(op.usedIn.length-8)+' more files</div>';
           }
           html += '</div>';
         }
@@ -3043,7 +3048,7 @@ export class PageMapGenerator {
             });
             if (queries.length > 5) {
               const remaining = queries.slice(5).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'query\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (queries.length - 5) + ' more queries</div>';
+              html += '<div class="expand-more" onclick="event.stopPropagation(); expandMore(\\'query\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (queries.length - 5) + ' more queries</div>';
             }
           }
 
@@ -3055,7 +3060,7 @@ export class PageMapGenerator {
             });
             if (mutations.length > 5) {
               const remaining = mutations.slice(5).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'mutation\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (mutations.length - 5) + ' more mutations</div>';
+              html += '<div class="expand-more" onclick="event.stopPropagation(); expandMore(\\'mutation\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (mutations.length - 5) + ' more mutations</div>';
             }
           }
 
@@ -3067,7 +3072,7 @@ export class PageMapGenerator {
             });
             if (fragments.length > 3) {
               const remaining = fragments.slice(3).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'fragment\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (fragments.length - 3) + ' more fragments</div>';
+              html += '<div class="expand-more" onclick="event.stopPropagation(); expandMore(\\'fragment\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (fragments.length - 3) + ' more fragments</div>';
             }
           }
 
@@ -3183,7 +3188,7 @@ export class PageMapGenerator {
             });
             if (queries.length > 8) {
               const remaining = queries.slice(8).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'query\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (queries.length - 8) + ' more</div>';
+              html += '<div class="expand-more" onclick="event.stopPropagation(); expandMore(\\'query\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (queries.length - 8) + ' more</div>';
             }
           }
 
@@ -3195,7 +3200,7 @@ export class PageMapGenerator {
             });
             if (mutations.length > 5) {
               const remaining = mutations.slice(5).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'mutation\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (mutations.length - 5) + ' more</div>';
+              html += '<div class="expand-more" onclick="event.stopPropagation(); expandMore(\\'mutation\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (mutations.length - 5) + ' more</div>';
             }
           }
 
@@ -3207,7 +3212,7 @@ export class PageMapGenerator {
             });
             if (fragments.length > 3) {
               const remaining = fragments.slice(3).map(o => ({name: o.name}));
-              html += '<div class="expand-more" onclick="expandMore(\\'fragment\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (fragments.length - 3) + ' more</div>';
+              html += '<div class="expand-more" onclick="event.stopPropagation(); expandMore(\\'fragment\\', '+JSON.stringify(remaining).replace(/"/g, '&quot;')+', this)" class="expand-more">▸ Show ' + (fragments.length - 3) + ' more</div>';
             }
           }
 

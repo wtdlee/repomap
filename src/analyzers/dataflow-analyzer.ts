@@ -8,7 +8,7 @@ import {
   isMutationHook,
   isSubscriptionHook,
   cleanOperationName,
-} from './constants.js';
+} from './graphql-utils.js';
 import type { AnalysisResult, DataFlow, ComponentInfo, RepositoryConfig } from '../types.js';
 
 /**
@@ -307,8 +307,12 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       // Build Document import map for operation name resolution
       const documentImports = this.extractDocumentImportsFromAst(ast);
 
+      // Build variable -> operation name mapping from gql() calls
+      // e.g., const Query = gql(`query GetFollowPage { ... }`)
+      const variableOperationMap = this.extractVariableOperationMap(ast, content);
+
       // Traverse AST to find all hook calls
-      this.traverseForHooks(ast, content, documentImports, hooks, seenHooks);
+      this.traverseForHooks(ast, content, documentImports, variableOperationMap, hooks, seenHooks);
     } catch {
       // Fallback to regex-based extraction if AST parsing fails
       this.extractHooksWithRegex(content, hooks, seenHooks);
@@ -356,6 +360,102 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
   }
 
   /**
+   * Extract variable -> operation name mapping from gql() calls
+   * e.g., const Query = gql(`query GetFollowPage { ... }`) -> { Query: "GetFollowPage" }
+   */
+  private extractVariableOperationMap(ast: Module, content: string): Map<string, string> {
+    const variableMap = new Map<string, string>();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const processVariableDeclaration = (node: any) => {
+      if (node.type !== 'VariableDeclarator' || node.id?.type !== 'Identifier') return;
+
+      const varName = node.id.value;
+      const init = node.init;
+
+      if (!init) return;
+
+      // Handle: const Query = gql(`query GetFollowPage { ... }`)
+      if (init.type === 'CallExpression') {
+        const calleeName = this.getCalleeNameFromNode(init.callee);
+        if (calleeName === 'gql' || calleeName === 'graphql') {
+          const opName = this.extractOperationNameFromGqlCall(init, content);
+          if (opName) {
+            variableMap.set(varName, opName);
+          }
+        }
+      }
+
+      // Handle: const Query = gql`query GetFollowPage { ... }`
+      if (init.type === 'TaggedTemplateExpression') {
+        const tagName = this.getCalleeNameFromNode(init.tag);
+        if (tagName === 'gql' || tagName === 'graphql') {
+          if (init.template?.quasis?.[0]?.raw) {
+            const templateContent = init.template.quasis[0].raw;
+            const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+            if (opMatch) {
+              variableMap.set(varName, opMatch[1]);
+            }
+          }
+        }
+      }
+    };
+
+    // Traverse AST to find variable declarations
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const traverse = (node: any) => {
+      if (!node || typeof node !== 'object') return;
+
+      processVariableDeclaration(node);
+
+      for (const key of Object.keys(node)) {
+        const value = node[key];
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            traverse(item);
+          }
+        } else if (value && typeof value === 'object') {
+          traverse(value);
+        }
+      }
+    };
+
+    traverse(ast);
+    return variableMap;
+  }
+
+  /**
+   * Extract operation name from gql() function call
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractOperationNameFromGqlCall(call: any, content: string): string | null {
+    if (!call.arguments?.length) return null;
+
+    const firstArgRaw = call.arguments[0];
+    const firstArg = firstArgRaw?.expression || firstArgRaw;
+
+    // Template literal: gql(`query GetUser { ... }`)
+    if (firstArg?.type === 'TemplateLiteral' && firstArg.quasis?.[0]?.raw) {
+      const templateContent = firstArg.quasis[0].raw;
+      const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+      if (opMatch) {
+        return opMatch[1];
+      }
+    }
+
+    // Fallback: extract from source span
+    if (call.span) {
+      const callContent = content.slice(call.span.start, call.span.end);
+      const opMatch = callContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+      if (opMatch) {
+        return opMatch[1];
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Traverse AST to find hook calls
    */
   private traverseForHooks(
@@ -363,23 +463,38 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     node: any,
     content: string,
     documentImports: Map<string, string>,
+    variableOperationMap: Map<string, string>,
     hooks: string[],
     seenHooks: Set<string>
   ): void {
     if (!node || typeof node !== 'object') return;
 
     if (node.type === 'CallExpression') {
-      this.analyzeHookCall(node, content, documentImports, hooks, seenHooks);
+      this.analyzeHookCall(node, content, documentImports, variableOperationMap, hooks, seenHooks);
     }
 
     for (const key of Object.keys(node)) {
       const value = node[key];
       if (Array.isArray(value)) {
         for (const item of value) {
-          this.traverseForHooks(item, content, documentImports, hooks, seenHooks);
+          this.traverseForHooks(
+            item,
+            content,
+            documentImports,
+            variableOperationMap,
+            hooks,
+            seenHooks
+          );
         }
       } else if (value && typeof value === 'object') {
-        this.traverseForHooks(value, content, documentImports, hooks, seenHooks);
+        this.traverseForHooks(
+          value,
+          content,
+          documentImports,
+          variableOperationMap,
+          hooks,
+          seenHooks
+        );
       }
     }
   }
@@ -392,6 +507,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     call: any,
     content: string,
     documentImports: Map<string, string>,
+    variableOperationMap: Map<string, string>,
     hooks: string[],
     seenHooks: Set<string>
   ): void {
@@ -404,15 +520,32 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     const isSubscription = isSubscriptionHook(calleeName);
 
     if (isQuery || isMutation || isSubscription) {
-      const operationName = this.extractOperationNameFromCall(call, content, documentImports);
-      const hookType = isMutation ? 'Mutation' : isSubscription ? 'Subscription' : 'Query';
-      const hookInfo = operationName ? `${hookType}: ${operationName}` : `${hookType}: unknown`;
+      // IMPORTANT: Only classify as GraphQL if we can verify it has GraphQL arguments
+      // This prevents false positives like useQueryParams, useQueryClient, etc.
+      const hasGraphQLArgument = this.hasGraphQLArgument(
+        call,
+        content,
+        documentImports,
+        variableOperationMap
+      );
 
-      if (!seenHooks.has(hookInfo)) {
-        seenHooks.add(hookInfo);
-        hooks.push(hookInfo);
+      if (hasGraphQLArgument) {
+        const operationName = this.extractOperationNameFromCall(
+          call,
+          content,
+          documentImports,
+          variableOperationMap
+        );
+        const hookType = isMutation ? 'Mutation' : isSubscription ? 'Subscription' : 'Query';
+        const hookInfo = operationName ? `${hookType}: ${operationName}` : `${hookType}: unknown`;
+
+        if (!seenHooks.has(hookInfo)) {
+          seenHooks.add(hookInfo);
+          hooks.push(hookInfo);
+        }
+        return;
       }
-      return;
+      // If no GraphQL argument found, fall through to treat as regular hook
     }
 
     // Handle useContext
@@ -433,6 +566,91 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       seenHooks.add(calleeName);
       hooks.push(calleeName);
     }
+  }
+
+  /**
+   * Check if a hook call has GraphQL-related arguments
+   * This verifies the hook is actually used for GraphQL, not just has a similar name
+   */
+  private hasGraphQLArgument(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    call: any,
+    content: string,
+    documentImports: Map<string, string>,
+    variableOperationMap: Map<string, string>
+  ): boolean {
+    // No arguments = not a GraphQL hook (e.g., useQueryClient())
+    if (!call.arguments?.length) return false;
+
+    const firstArgRaw = call.arguments[0];
+    const firstArg = firstArgRaw?.expression || firstArgRaw;
+    if (!firstArg) return false;
+
+    // Check for various GraphQL argument patterns:
+
+    // 1. Identifier that maps to a Document or gql() result
+    if (firstArg.type === 'Identifier') {
+      const argName = firstArg.value;
+
+      // Check if it's a known Document import
+      if (documentImports.has(argName)) return true;
+
+      // Check if it's a variable from gql() call
+      if (variableOperationMap.has(argName)) return true;
+
+      // Check if name ends with Document, Query (capitalized), or Mutation
+      if (
+        argName.endsWith('Document') ||
+        /[A-Z][a-z]*Query$/.test(argName) ||
+        /[A-Z][a-z]*Mutation$/.test(argName)
+      ) {
+        return true;
+      }
+    }
+
+    // 2. Tagged template expression: gql`...` or graphql`...`
+    if (firstArg.type === 'TaggedTemplateExpression') {
+      const tagName = this.getCalleeNameFromNode(firstArg.tag);
+      if (tagName === 'gql' || tagName === 'graphql') return true;
+    }
+
+    // 3. Call expression: graphql(...) or gql(...)
+    if (firstArg.type === 'CallExpression') {
+      const calleeName = this.getCalleeNameFromNode(firstArg.callee);
+      if (calleeName === 'gql' || calleeName === 'graphql') return true;
+    }
+
+    // 4. Template literal containing GraphQL syntax
+    if (firstArg.type === 'TemplateLiteral' && firstArg.quasis?.[0]?.raw) {
+      const templateContent = firstArg.quasis[0].raw;
+      if (/(?:query|mutation|subscription)\s+\w+/i.test(templateContent)) return true;
+    }
+
+    // 5. MemberExpression like Component.Query or queries.GetUser
+    if (firstArg.type === 'MemberExpression') {
+      const propName = firstArg.property?.value;
+      if (propName && /Query$|Mutation$|Document$/.test(propName)) return true;
+    }
+
+    // 6. Check source content around the call for GraphQL indicators
+    if (call.span) {
+      const callContent = content.slice(
+        call.span.start,
+        Math.min(call.span.end, call.span.start + 500)
+      );
+      // Look for strong GraphQL indicators in the call
+      if (
+        callContent.includes('Document') ||
+        /\bgql\s*[`(]/.test(callContent) ||
+        /\bgraphql\s*[`(]/.test(callContent) ||
+        /query\s+\w+\s*[({]/.test(callContent) ||
+        /mutation\s+\w+\s*[({]/.test(callContent)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -462,7 +680,8 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     call: any,
     content: string,
-    documentImports: Map<string, string>
+    documentImports: Map<string, string>,
+    variableOperationMap: Map<string, string>
   ): string | null {
     // Method 1: Extract from type generic - useQuery<GetUserQuery>
     if (call.typeArguments?.params?.length > 0) {
@@ -477,10 +696,13 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     }
 
     // Method 2: Extract from span position (fallback for type generics)
-    if (call.callee?.span) {
+    if (call.callee?.span && call.span) {
       const start = call.callee.span.end;
-      const searchRegion = content.slice(start, start + 100);
-      const genericMatch = searchRegion.match(/^<(\w+)(?:Query|Mutation|Variables)?[,>]/);
+      const end = Math.min(start + 150, call.span.end);
+      const searchRegion = content.slice(start, end);
+      const genericMatch = searchRegion.match(
+        /^<\s*(\w+)(?:Query|Mutation|Variables|Subscription)?[\s,>]/
+      );
       if (genericMatch) {
         return cleanOperationName(genericMatch[1]);
       }
@@ -488,15 +710,21 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
 
     // Method 3: Extract from first argument
     if (call.arguments?.length > 0) {
-      const firstArg = call.arguments[0].expression;
+      // SWC arguments can be either { expression } or direct expression
+      const firstArgRaw = call.arguments[0];
+      const firstArg = firstArgRaw?.expression || firstArgRaw;
 
-      // Identifier: useQuery(GetUserDocument)
-      if (firstArg?.type === 'Identifier') {
+      if (!firstArg) return null;
+
+      // Identifier: useQuery(GetUserDocument) or useQuery(Query)
+      if (firstArg.type === 'Identifier') {
         const argName = firstArg.value;
 
-        // Skip generic patterns
-        if (/^(Query|Mutation|QUERY|MUTATION)$/i.test(argName)) {
-          return null;
+        // Check variable -> operation name mapping first (from gql() calls)
+        // This handles: const Query = gql(`query GetFollowPage { ... }`); useQuery(Query)
+        const mappedOpName = variableOperationMap.get(argName);
+        if (mappedOpName) {
+          return mappedOpName;
         }
 
         // Check Document imports
@@ -505,16 +733,21 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
           return importedName;
         }
 
+        // Skip generic patterns only if no mapping found
+        if (/^(Query|Mutation|QUERY|MUTATION)$/i.test(argName)) {
+          return null;
+        }
+
         return cleanOperationName(argName);
       }
 
       // MemberExpression: useQuery(queries.GetUser)
-      if (firstArg?.type === 'MemberExpression' && firstArg.property?.type === 'Identifier') {
+      if (firstArg.type === 'MemberExpression' && firstArg.property?.type === 'Identifier') {
         return cleanOperationName(firstArg.property.value);
       }
 
       // TaggedTemplateExpression: useQuery(gql`query GetUser { ... }`)
-      if (firstArg?.type === 'TaggedTemplateExpression') {
+      if (firstArg.type === 'TaggedTemplateExpression') {
         if (firstArg.template?.quasis?.[0]?.raw) {
           const templateContent = firstArg.template.quasis[0].raw;
           const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
@@ -522,6 +755,49 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
             return opMatch[1];
           }
         }
+      }
+
+      // CallExpression: useQuery(graphql(`query GetUser { ... }`))
+      if (firstArg.type === 'CallExpression') {
+        const nestedCallee = this.getCalleeNameFromNode(firstArg.callee);
+        if (nestedCallee === 'graphql' || nestedCallee === 'gql') {
+          // Extract from nested template literal
+          if (firstArg.arguments?.length > 0) {
+            const nestedArgRaw = firstArg.arguments[0];
+            const nestedArg = nestedArgRaw?.expression || nestedArgRaw;
+            if (nestedArg?.type === 'TemplateLiteral' && nestedArg.quasis?.[0]?.raw) {
+              const templateContent = nestedArg.quasis[0].raw;
+              const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+              if (opMatch) {
+                return opMatch[1];
+              }
+            }
+          }
+        }
+      }
+
+      // TemplateLiteral directly: useQuery(`query GetUser { ... }`)
+      if (firstArg.type === 'TemplateLiteral' && firstArg.quasis?.[0]?.raw) {
+        const templateContent = firstArg.quasis[0].raw;
+        const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+        if (opMatch) {
+          return opMatch[1];
+        }
+      }
+    }
+
+    // Method 4: Fallback - extract from source content around the call
+    if (call.span) {
+      const callContent = content.slice(call.span.start, call.span.end);
+      // Match Document name pattern
+      const docMatch = callContent.match(/\b([A-Z][a-zA-Z0-9]*Document)\b/);
+      if (docMatch) {
+        return cleanOperationName(docMatch[1]);
+      }
+      // Match query/mutation in inline graphql
+      const inlineMatch = callContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+      if (inlineMatch) {
+        return inlineMatch[1];
       }
     }
 

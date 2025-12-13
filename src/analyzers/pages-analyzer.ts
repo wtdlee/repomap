@@ -12,7 +12,20 @@ import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
 import { parallelMapSafe } from '../utils/parallel.js';
-import { ALL_GRAPHQL_HOOKS, isQueryHook, isMutationHook, getHookType } from './constants.js';
+import {
+  ALL_GRAPHQL_HOOKS,
+  isQueryHook,
+  isMutationHook,
+  getHookType,
+  extractGraphQLContext,
+  resolveOperationName,
+  hasGraphQLArgument,
+  getCalleeName,
+  traverseAst,
+  isGraphQLHook,
+  cleanOperationName,
+  type GraphQLFileContext,
+} from './graphql-utils.js';
 import type {
   AnalysisResult,
   PageInfo,
@@ -467,6 +480,13 @@ export class PagesAnalyzer extends BaseAnalyzer {
    * Find page component name from AST
    */
   private findPageComponent(ast: Module, content: string): string | null {
+    // First, try to find the main component used in JSX
+    // This is more accurate than the default export name
+    const jsxComponent = this.findMainJsxComponent(ast, content);
+    if (jsxComponent && jsxComponent !== 'Page' && jsxComponent !== 'default') {
+      return jsxComponent;
+    }
+
     // Look for default export
     for (const item of ast.body) {
       // export default function ComponentName() {}
@@ -474,13 +494,17 @@ export class PagesAnalyzer extends BaseAnalyzer {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const decl = item.decl as any;
         if (decl?.type === 'FunctionExpression' && decl.identifier?.value) {
-          return decl.identifier.value;
+          const name = decl.identifier.value;
+          // If it's a generic name, try to find JSX component instead
+          if (name !== 'Page') return name;
         }
         if (decl?.type === 'Identifier') {
-          return decl.value;
+          const name = decl.value;
+          if (name !== 'Page') return name;
         }
-        // Arrow function or anonymous - try to find from variable
+        // Arrow function or anonymous - use JSX component if found
         if (decl?.type === 'ArrowFunctionExpression') {
+          if (jsxComponent) return jsxComponent;
           return 'default';
         }
       }
@@ -490,12 +514,18 @@ export class PagesAnalyzer extends BaseAnalyzer {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const expr = (item as any).expression;
         if (expr?.type === 'Identifier') {
-          return expr.value;
+          const name = expr.value;
+          if (name !== 'Page') return name;
         }
       }
     }
 
-    // Look for Page variable
+    // If we found a JSX component, use it
+    if (jsxComponent) {
+      return jsxComponent;
+    }
+
+    // Look for Page variable (last resort)
     for (const item of ast.body) {
       if (item.type === 'VariableDeclaration') {
         for (const d of item.declarations) {
@@ -539,6 +569,60 @@ export class PagesAnalyzer extends BaseAnalyzer {
           }
         }
       }
+    }
+
+    return null;
+  }
+
+  /**
+   * Find the main component used in the page's JSX
+   * This is more accurate than using the default export name like "Page"
+   */
+  private findMainJsxComponent(ast: Module, content: string): string | null {
+    const imports = this.extractImports(ast);
+    const importedComponents = new Set<string>();
+
+    // Collect imported components (PascalCase from feature/component directories)
+    for (const [name, source] of imports) {
+      if (
+        /^[A-Z]/.test(name) &&
+        (source.includes('features') ||
+          source.includes('components') ||
+          source.includes('containers'))
+      ) {
+        importedComponents.add(name);
+      }
+    }
+
+    // Find JSX elements that match imported components
+    const jsxMatches: Array<{ name: string; index: number }> = [];
+
+    for (const compName of importedComponents) {
+      // Match <ComponentName or <ComponentName> patterns
+      const regex = new RegExp(`<${compName}[\\s/>]`, 'g');
+      let match;
+      while ((match = regex.exec(content)) !== null) {
+        jsxMatches.push({ name: compName, index: match.index });
+      }
+    }
+
+    // Prefer Container/Page components
+    const containerMatch = jsxMatches.find(
+      (m) =>
+        m.name.includes('Container') ||
+        m.name.includes('Page') ||
+        m.name.includes('View') ||
+        m.name.includes('Screen')
+    );
+    if (containerMatch) {
+      return containerMatch.name;
+    }
+
+    // Otherwise return the first match (likely the main component)
+    if (jsxMatches.length > 0) {
+      // Sort by position in file (earlier = likely more important)
+      jsxMatches.sort((a, b) => a.index - b.index);
+      return jsxMatches[0].name;
     }
 
     return null;
@@ -666,8 +750,8 @@ export class PagesAnalyzer extends BaseAnalyzer {
   }
 
   /**
-   * Extract data fetching operations using comprehensive AST analysis
-   * Import tracking, type generic extraction, and variable assignment tracking
+   * Extract data fetching operations using unified GraphQL context extraction
+   * Uses shared utilities for consistent operation name resolution
    */
   private extractDataFetching(
     ast: Module,
@@ -677,34 +761,68 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const dataFetching: DataFetchingInfo[] = [];
     const seenOperations = new Set<string>();
 
-    // 1. Build Document import map (import { GetUserDocument } from '...')
-    const documentImports = this.extractDocumentImports(ast);
+    // Convert codegenMap to the expected format
+    const codegenMapConverted = new Map<string, { operationName: string; type: string }>();
+    for (const [key, value] of this.codegenMap) {
+      codegenMapConverted.set(key, {
+        operationName: value.operationName,
+        type: value.operationType,
+      });
+    }
 
-    // 2. Build variable assignment map (const doc = GetUserDocument)
-    const variableAssignments = this.extractVariableAssignments(ast);
+    // Use unified GraphQL context extraction
+    const graphqlContext = extractGraphQLContext(ast, content, codegenMapConverted);
 
-    // 3. Find all hook calls using AST traversal
-    this.traverseNode(ast, (node) => {
+    // Find all hook calls using AST traversal
+    traverseAst(ast, (node) => {
       if (node.type === 'CallExpression') {
         const call = node as CallExpression;
-        const result = this.analyzeGraphQLHookCall(
-          call,
-          content,
-          documentImports,
-          variableAssignments
-        );
+        const calleeName = getCalleeName(call.callee);
 
-        if (result && !seenOperations.has(`${result.type}:${result.operationName}`)) {
-          seenOperations.add(`${result.type}:${result.operationName}`);
-          dataFetching.push(result);
+        if (!calleeName) return;
+
+        // Check for GraphQL hooks - MUST verify it has actual GraphQL arguments
+        // This prevents false positives like useQueryParams, useQueryClient, etc.
+        if (isGraphQLHook(calleeName) && hasGraphQLArgument(call, content, graphqlContext)) {
+          const operationName = resolveOperationName(call, content, graphqlContext);
+          const type = getHookType(calleeName);
+
+          const result: DataFetchingInfo = {
+            type,
+            operationName: operationName || 'unknown',
+          };
+
+          // Extract variables
+          const variables = this.extractVariablesFromCall(call);
+          if (Object.keys(variables).length > 0) {
+            result.variables = variables;
+          }
+
+          const key = `${result.type}:${result.operationName}`;
+          if (!seenOperations.has(key)) {
+            seenOperations.add(key);
+            dataFetching.push(result);
+          }
+        }
+
+        // Check for Apollo client direct calls: client.query({ query: ... })
+        if (calleeName === 'query' || calleeName === 'mutate') {
+          const result = this.analyzeClientDirectCall(call, content, graphqlContext);
+          if (result) {
+            const key = `${result.type}:${result.operationName}`;
+            if (!seenOperations.has(key)) {
+              seenOperations.add(key);
+              dataFetching.push(result);
+            }
+          }
         }
       }
     });
 
-    // 4. Check for getServerSideProps
+    // Check for getServerSideProps
     this.extractSSRDataFetching(ast, content, dataFetching, seenOperations);
 
-    // 5. Check for getStaticProps
+    // Check for getStaticProps
     if (content.includes('getStaticProps')) {
       const key = 'getStaticProps:getStaticProps';
       if (!seenOperations.has(key)) {
@@ -717,6 +835,68 @@ export class PagesAnalyzer extends BaseAnalyzer {
     }
 
     return dataFetching;
+  }
+
+  /**
+   * Analyze Apollo client direct calls: client.query({ query: MyQuery })
+   */
+  private analyzeClientDirectCall(
+    call: CallExpression,
+    _content: string,
+    graphqlContext: GraphQLFileContext
+  ): DataFetchingInfo | null {
+    if (!call.arguments?.length) return null;
+
+    const firstArgRaw = call.arguments[0];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const firstArg = (firstArgRaw as any)?.expression || firstArgRaw;
+
+    if (firstArg?.type !== 'ObjectExpression') return null;
+
+    // Look for { query: ... } property
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const prop of (firstArg as any).properties || []) {
+      if (
+        prop.type === 'KeyValueProperty' &&
+        prop.key?.type === 'Identifier' &&
+        prop.key.value === 'query'
+      ) {
+        const queryValue = prop.value;
+        let operationName: string | null = null;
+
+        // Identifier: { query: MyQuery }
+        if (queryValue?.type === 'Identifier') {
+          const varName = queryValue.value;
+          // Check variable operations mapping
+          operationName =
+            graphqlContext.variableOperations.get(varName) ||
+            graphqlContext.documentImports.get(varName) ||
+            cleanOperationName(varName);
+        }
+
+        // MemberExpression: { query: Component.Query }
+        if (queryValue?.type === 'MemberExpression') {
+          const objName = queryValue.object?.type === 'Identifier' ? queryValue.object.value : null;
+          const propName =
+            queryValue.property?.type === 'Identifier' ? queryValue.property.value : null;
+          if (objName && propName) {
+            const key = `${objName}.${propName}`;
+            operationName =
+              graphqlContext.staticPropertyOperations.get(key) || cleanOperationName(propName);
+          }
+        }
+
+        if (operationName) {
+          const calleeName = getCalleeName(call.callee);
+          return {
+            type: calleeName === 'mutate' ? 'useMutation' : 'useQuery',
+            operationName,
+          };
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -764,10 +944,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
   }
 
   /**
-   * Extract variable assignments that reference Documents
+   * Extract variable assignments that reference Documents or gql() calls
    * Tracks: const doc = GetUserDocument
+   * Tracks: const Query = gql(`query GetFollowPage { ... }`)
    */
-  private extractVariableAssignments(ast: Module): Map<string, string> {
+  private extractVariableAssignments(ast: Module, content: string): Map<string, string> {
     const assignments = new Map<string, string>();
 
     this.traverseNode(ast, (node) => {
@@ -775,16 +956,79 @@ export class PagesAnalyzer extends BaseAnalyzer {
         const varName = node.id.value;
         const init = node.init;
 
-        if (init?.type === 'Identifier') {
+        if (!init) return;
+
+        // Handle: const doc = GetUserDocument
+        if (init.type === 'Identifier') {
           const initName = init.value;
           if (initName.endsWith('Document') || initName.endsWith('Query')) {
             assignments.set(varName, initName);
+          }
+        }
+
+        // Handle: const Query = gql(`query GetFollowPage { ... }`)
+        if (init.type === 'CallExpression') {
+          const calleeName = this.getCalleeName(init.callee);
+          if (calleeName === 'gql' || calleeName === 'graphql') {
+            const opName = this.extractOperationNameFromGqlCall(init, content);
+            if (opName) {
+              assignments.set(varName, opName);
+            }
+          }
+        }
+
+        // Handle: const Query = gql`query GetFollowPage { ... }`
+        if (init.type === 'TaggedTemplateExpression') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const tagName = this.getCalleeName((init as any).tag);
+          if (tagName === 'gql' || tagName === 'graphql') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const template = (init as any).template;
+            if (template?.quasis?.[0]?.raw) {
+              const templateContent = template.quasis[0].raw;
+              const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+              if (opMatch) {
+                assignments.set(varName, opMatch[1]);
+              }
+            }
           }
         }
       }
     });
 
     return assignments;
+  }
+
+  /**
+   * Extract operation name from gql() function call
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractOperationNameFromGqlCall(call: any, content: string): string | null {
+    if (!call.arguments?.length) return null;
+
+    const firstArgRaw = call.arguments[0];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const firstArg = (firstArgRaw as any)?.expression || firstArgRaw;
+
+    // Template literal: gql(`query GetUser { ... }`)
+    if (firstArg?.type === 'TemplateLiteral' && firstArg.quasis?.[0]?.raw) {
+      const templateContent = firstArg.quasis[0].raw;
+      const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+      if (opMatch) {
+        return opMatch[1];
+      }
+    }
+
+    // Fallback: extract from source span
+    if (call.span) {
+      const callContent = content.slice(call.span.start, call.span.end);
+      const opMatch = callContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+      if (opMatch) {
+        return opMatch[1];
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -823,7 +1067,9 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     // Method 2: Extract from first argument
     if (call.arguments && call.arguments.length > 0) {
-      const firstArg = call.arguments[0].expression;
+      // SWC arguments can be either { expression } or direct expression
+      const firstArgRaw = call.arguments[0];
+      const firstArg = firstArgRaw?.expression || firstArgRaw;
       const argOperationName = this.extractOperationFromArgument(
         firstArg,
         documentImports,
@@ -871,7 +1117,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
   /**
    * Extract operation name from function argument
-   * Supports: Identifier, MemberExpression, variable references
+   * Supports: Identifier, MemberExpression, variable references, graphql() calls
    */
   private extractOperationFromArgument(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -881,7 +1127,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
   ): string | null {
     if (!arg) return null;
 
-    // Direct identifier: useQuery(GetUserDocument)
+    // Direct identifier: useQuery(GetUserDocument) or useQuery(Query)
     if (arg.type === 'Identifier') {
       const argName = arg.value;
 
@@ -890,22 +1136,33 @@ export class PagesAnalyzer extends BaseAnalyzer {
         return null;
       }
 
+      // Check if it's a variable assignment (e.g., const Query = gql(`query GetFollowPage`))
+      // This handles cases where variable name is generic like "Query" but maps to real operation
+      const mappedOpName = variableAssignments.get(argName);
+      if (mappedOpName) {
+        // If mapped name looks like an operation name (not a Document reference), return it directly
+        if (!mappedOpName.endsWith('Document') && !mappedOpName.endsWith('Query')) {
+          return mappedOpName;
+        }
+        // Otherwise, check if it's a reference to another Document
+        return documentImports.get(mappedOpName) || mappedOpName.replace(/Document$/, '');
+      }
+
       // Check if it's a known Document import
       const importedName = documentImports.get(argName);
       if (importedName) {
         return importedName;
       }
 
-      // Check if it's a variable assignment
-      const originalName = variableAssignments.get(argName);
-      if (originalName) {
-        return documentImports.get(originalName) || originalName.replace(/Document$/, '');
-      }
-
       // Check codegen map
       const codegenEntry = this.codegenMap.get(argName);
       if (codegenEntry) {
         return codegenEntry.operationName;
+      }
+
+      // Skip generic patterns only if no mapping found
+      if (/^(Query|Mutation|QUERY|MUTATION)$/i.test(argName)) {
+        return null;
       }
 
       // Default: clean up the name
@@ -922,13 +1179,40 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     // Tagged template: useQuery(gql`...`)
     if (arg.type === 'TaggedTemplateExpression') {
-      // Try to extract operation name from the template content
       if (arg.template?.quasis?.[0]?.raw) {
         const templateContent = arg.template.quasis[0].raw;
         const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
         if (opMatch) {
           return opMatch[1];
         }
+      }
+    }
+
+    // CallExpression: useQuery(graphql(`query GetUser { ... }`))
+    if (arg.type === 'CallExpression') {
+      const calleeName = this.getCalleeName(arg.callee);
+      if (calleeName === 'graphql' || calleeName === 'gql') {
+        // Extract from nested template literal
+        if (arg.arguments?.length > 0) {
+          const nestedArgRaw = arg.arguments[0];
+          const nestedArg = nestedArgRaw?.expression || nestedArgRaw;
+          if (nestedArg?.type === 'TemplateLiteral' && nestedArg.quasis?.[0]?.raw) {
+            const templateContent = nestedArg.quasis[0].raw;
+            const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+            if (opMatch) {
+              return opMatch[1];
+            }
+          }
+        }
+      }
+    }
+
+    // TemplateLiteral directly
+    if (arg.type === 'TemplateLiteral' && arg.quasis?.[0]?.raw) {
+      const templateContent = arg.quasis[0].raw;
+      const opMatch = templateContent.match(/(?:query|mutation|subscription)\s+(\w+)/i);
+      if (opMatch) {
+        return opMatch[1];
       }
     }
 
@@ -942,7 +1226,10 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const variables: string[] = [];
 
     if (call.arguments && call.arguments.length > 1) {
-      const optionsArg = call.arguments[1].expression;
+      // SWC arguments can be either { expression } or direct expression
+      const optionsArgRaw = call.arguments[1];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const optionsArg: any = (optionsArgRaw as any)?.expression || optionsArgRaw;
       if (optionsArg?.type === 'ObjectExpression') {
         for (const prop of optionsArg.properties || []) {
           if (
@@ -978,26 +1265,25 @@ export class PagesAnalyzer extends BaseAnalyzer {
     dataFetching: DataFetchingInfo[],
     seenOperations: Set<string>
   ): void {
+    // Build import map for SSR query resolution
+    const imports = this.extractImports(ast);
+    const documentImports = this.extractDocumentImports(ast);
+
     for (const item of ast.body) {
       if (item.type === 'ExportDeclaration') {
         const decl = (item as ExportDeclaration).declaration;
         if (decl?.type === 'VariableDeclaration') {
           for (const d of decl.declarations) {
             if (d.id?.type === 'Identifier' && d.id.value === 'getServerSideProps') {
-              // Find Documents used in SSR
-              const ssrContent = content.slice(d.span?.start || 0, d.span?.end || content.length);
-              for (const [docName, info] of this.codegenMap) {
-                if (ssrContent.includes(docName)) {
-                  const key = `getServerSideProps:→ ${info.operationName}`;
-                  if (!seenOperations.has(key)) {
-                    seenOperations.add(key);
-                    dataFetching.push({
-                      type: 'getServerSideProps',
-                      operationName: `→ ${info.operationName}`,
-                    });
-                  }
-                }
-              }
+              // Find all .query() calls within getServerSideProps
+              this.extractSSRQueriesFromNode(
+                d,
+                content,
+                imports,
+                documentImports,
+                dataFetching,
+                seenOperations
+              );
             }
           }
         }
@@ -1005,17 +1291,128 @@ export class PagesAnalyzer extends BaseAnalyzer {
           decl?.type === 'FunctionDeclaration' &&
           decl.identifier?.value === 'getServerSideProps'
         ) {
-          const key = 'getServerSideProps:getServerSideProps';
+          // Find all .query() calls within getServerSideProps function
+          this.extractSSRQueriesFromNode(
+            decl,
+            content,
+            imports,
+            documentImports,
+            dataFetching,
+            seenOperations
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Extract SSR queries from a node (getServerSideProps body)
+   */
+  private extractSSRQueriesFromNode(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    node: any,
+    content: string,
+    imports: Map<string, string>,
+    documentImports: Map<string, string>,
+    dataFetching: DataFetchingInfo[],
+    seenOperations: Set<string>
+  ): void {
+    traverseAst(node, (child) => {
+      if (child.type !== 'CallExpression') return;
+
+      const calleeName = getCalleeName(child.callee);
+
+      // Check for client.query() or graphqlGatewayClient.query() pattern
+      if (calleeName === 'query' || calleeName === 'mutate') {
+        const operationName = this.extractQueryFromClientCall(
+          child,
+          content,
+          imports,
+          documentImports
+        );
+        if (operationName) {
+          const key = `getServerSideProps:→ ${operationName}`;
           if (!seenOperations.has(key)) {
             seenOperations.add(key);
             dataFetching.push({
               type: 'getServerSideProps',
-              operationName: 'getServerSideProps',
+              operationName: `→ ${operationName}`,
             });
           }
         }
       }
+    });
+  }
+
+  /**
+   * Extract operation name from client.query({ query: ... }) call
+   */
+  private extractQueryFromClientCall(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    call: any,
+    content: string,
+    imports: Map<string, string>,
+    documentImports: Map<string, string>
+  ): string | null {
+    if (!call.arguments?.length) return null;
+
+    const firstArgRaw = call.arguments[0];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const firstArg = (firstArgRaw as any)?.expression || firstArgRaw;
+
+    if (firstArg?.type !== 'ObjectExpression') return null;
+
+    // Look for { query: ... } property
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const prop of (firstArg as any).properties || []) {
+      if (
+        prop.type === 'KeyValueProperty' &&
+        prop.key?.type === 'Identifier' &&
+        prop.key.value === 'query'
+      ) {
+        const queryValue = prop.value;
+
+        // Identifier: { query: MeetupPostsPageQuery }
+        if (queryValue?.type === 'Identifier') {
+          const varName = queryValue.value;
+
+          // Check imports first
+          if (documentImports.has(varName)) {
+            return documentImports.get(varName)!;
+          }
+
+          // Check codegen map
+          const codegenEntry = this.codegenMap.get(varName);
+          if (codegenEntry) {
+            return codegenEntry.operationName;
+          }
+
+          // Try to resolve from import source (e.g., pages.graphql)
+          const importSource = imports.get(varName);
+          if (importSource) {
+            // Clean up the name
+            return cleanOperationName(varName);
+          }
+
+          return cleanOperationName(varName);
+        }
+
+        // MemberExpression: { query: Component.Query } or { query: Container.NonIdempotentQuery }
+        if (queryValue?.type === 'MemberExpression') {
+          const objName = queryValue.object?.type === 'Identifier' ? queryValue.object.value : null;
+          const propName =
+            queryValue.property?.type === 'Identifier' ? queryValue.property.value : null;
+
+          if (objName && propName) {
+            // Return as ComponentName.PropertyName format
+            // The actual query name will be resolved when analyzing the component
+            return `${objName}.${propName}`;
+          }
+        }
+      }
     }
+
+    return null;
   }
 
   /**
