@@ -207,8 +207,8 @@ export class MarkdownGenerator {
           }
         }
 
-        // Show first 2 unique queries
-        for (const q of uniqueQueries.slice(0, 2)) {
+        // Show all unique queries
+        for (const q of uniqueQueries) {
           if (q.isRef) {
             dataOps.push(
               `<span class="gql-ref" data-ref="${q.cleanName}" title="Component">${q.cleanName}</span>`
@@ -218,8 +218,8 @@ export class MarkdownGenerator {
           }
         }
 
-        // Show first 2 unique mutations
-        for (const m of uniqueMutations.slice(0, 2)) {
+        // Show all unique mutations
+        for (const m of uniqueMutations) {
           if (m.isRef) {
             dataOps.push(
               `<span class="gql-ref mutation" data-ref="${m.cleanName}" title="Component">${m.cleanName}</span>`
@@ -229,18 +229,6 @@ export class MarkdownGenerator {
               `<span class="gql-op mutation" data-op="${m.cleanName}">${m.cleanName}</span>`
             );
           }
-        }
-
-        // Calculate remaining based on deduplicated counts
-        const remaining =
-          uniqueQueries.length +
-          uniqueMutations.length -
-          Math.min(uniqueQueries.length, 2) -
-          Math.min(uniqueMutations.length, 2);
-        if (remaining > 0) {
-          dataOps.push(
-            `<span class="gql-more" data-type="all" data-page="${page.path}">+${remaining} more</span>`
-          );
         }
         const data = dataOps.length > 0 ? dataOps.join(' ') : '-';
 
@@ -428,7 +416,7 @@ export class MarkdownGenerator {
         const sectionId = `more-ui-${pagePath.replace(/[^a-zA-Z0-9]/g, '-')}`;
         lines.push(`<details id="${sectionId}">`);
         lines.push(
-          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">▸ Show ${remainingComps.length} more UI components</summary>`
+          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">Show ${remainingComps.length} more UI components</summary>`
         );
         lines.push('');
         lines.push('| Component | Type | Data |');
@@ -466,7 +454,7 @@ export class MarkdownGenerator {
         const sectionId = `more-${type}-components`;
         lines.push(`<details id="${sectionId}">`);
         lines.push(
-          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">▸ Show ${remainingComps.length} more ${type} components</summary>`
+          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">Show ${remainingComps.length} more ${type} components</summary>`
         );
         lines.push('');
         lines.push('| Name | File | Data |');
@@ -527,33 +515,15 @@ export class MarkdownGenerator {
     }
 
     const ops: string[] = [];
-    const maxShowQueries = 2;
-    const maxShowMutations = 2;
 
-    // Show first N queries - use original name for consistency
-    const shownQueries = validQueries.slice(0, maxShowQueries);
-    for (const name of shownQueries) {
+    // Show all queries
+    for (const name of validQueries) {
       ops.push(`<span class="gql-op" data-op="${name}">${name}</span>`);
     }
 
-    // Show first N mutations - use original name for consistency
-    const shownMutations = validMutations.slice(0, maxShowMutations);
-    for (const name of shownMutations) {
+    // Show all mutations
+    for (const name of validMutations) {
       ops.push(`<span class="gql-op mutation" data-op="${name}">${name}</span>`);
-    }
-
-    // Calculate remaining correctly
-    const hiddenQueries = validQueries.slice(maxShowQueries);
-    const hiddenMutations = validMutations.slice(maxShowMutations);
-    const remaining = hiddenQueries.length + hiddenMutations.length;
-
-    if (remaining > 0) {
-      // Store all hidden operations in data attributes for accurate display
-      const allQueries = JSON.stringify(validQueries).replace(/"/g, '&quot;');
-      const allMutations = JSON.stringify(validMutations).replace(/"/g, '&quot;');
-      ops.push(
-        `<span class="gql-ref" data-ref="${comp.name}" data-queries="${allQueries}" data-mutations="${allMutations}" title="View all ${validQueries.length} queries and ${validMutations.length} mutations">+${remaining} more</span>`
-      );
     }
 
     return `<div class="gql-ops-inline">${ops.join(' ')}</div>`;

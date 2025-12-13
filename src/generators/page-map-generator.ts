@@ -2151,61 +2151,12 @@ export class PageMapGenerator {
         stepsHtml += '</div></div>';
       }
 
-      // Data operations - show grouped by source path, sorted by depth
-      // Also include GraphQL from related components (including their dependencies)
+      // Data operations - use page.dataFetching from engine.ts only
+      // (engine.ts already enriches pages with GraphQL from components via enrichPagesWithHookGraphQL)
       let dataHtml = '';
       
-      // Recursively extract GraphQL from component and its dependencies
-      function extractComponentGraphQL(comp, visited = new Set(), depth = 0) {
-        const results = [];
-        if (!comp || visited.has(comp.name) || depth > 10) return results;
-        visited.add(comp.name);
-        
-        // Extract GraphQL from this component's hooks
-        if (comp.hooks) {
-          comp.hooks.forEach(hook => {
-            // Only match hooks with "Query: " or "Mutation: " prefix (from dataflow analyzer)
-            // This avoids matching unrelated hooks like useQueryParams
-            if (hook.startsWith('Query: ') || hook.startsWith('Mutation: ') || hook.startsWith('Subscription: ')) {
-              let queryName = hook.replace('Query: ', '').replace('Mutation: ', '').replace('Subscription: ', '').trim();
-              // Skip empty names or hooks without actual operation names
-              if (!queryName) {
-                return;
-              }
-              const isM = hook.includes('Mutation');
-              const depthArrows = '→ '.repeat(depth + 1);
-              results.push({
-                type: isM ? 'useMutation' : 'useQuery',
-                operationName: depthArrows + queryName + ' (via ' + comp.name + ')',
-                variables: []
-              });
-            }
-          });
-        }
-        
-        // Recursively check dependencies
-        if (comp.dependencies) {
-          comp.dependencies.forEach(depName => {
-            const depComp = componentByName.get(depName);
-            if (depComp) {
-              results.push(...extractComponentGraphQL(depComp, visited, depth + 1));
-            }
-          });
-        }
-        
-        return results;
-      }
-      
-      // Get GraphQL from page's components (including dependencies)
-      const pageComps = getPageComponents(page);
-      const componentGraphQL = [];
-      const visited = new Set();
-      pageComps.forEach(comp => {
-        componentGraphQL.push(...extractComponentGraphQL(comp, visited, 0));
-      });
-      
-      // Combine direct dataFetching with component GraphQL
-      const allDataFetching = [...(page.dataFetching || []), ...componentGraphQL];
+      // Use dataFetching directly from engine.ts analysis
+      const allDataFetching = [...(page.dataFetching || [])];
       
       if (allDataFetching.length > 0) {
         // Separate actual GraphQL operations from component references
@@ -2223,6 +2174,7 @@ export class PageMapGenerator {
           // Extract query name - remove arrows and (via xxx) pattern
           let queryName = rawName.replace(/^[→\\s]+/, '').trim();
           let sourcePath = 'Direct';
+          let sourceDetail = '';
           let depth = 0;
 
           // Method 1: Extract from (via xxx) pattern in operationName (from extractComponentGraphQL)
@@ -2232,12 +2184,34 @@ export class PageMapGenerator {
             queryName = queryName.replace(viaMatch[0], '').trim();
             depth = arrowCount || 1;
           }
-          // Method 2: Use df.source field (from engine.ts enrichPagesWithHookGraphQL)
+          // Method 2: Use df.source field
           else if (source.startsWith('component:')) {
             sourcePath = source.replace('component:', '');
             depth = 1;
           } else if (source.startsWith('hook:')) {
             sourcePath = source.replace('hook:', '');
+            depth = 1;
+          } else if (source.startsWith('usedIn:')) {
+            // Evidence-based source (file where the operation reference was found)
+            sourcePath = 'Indirect';
+            // Keep detail for modal
+            sourceDetail = source.replace('usedIn:', '');
+            depth = 1;
+          } else if (source.startsWith('import:')) {
+            sourcePath = 'Import';
+            sourceDetail = source.replace('import:', '');
+            depth = 1;
+          } else if (source.startsWith('common:')) {
+            sourcePath = 'Common (shared)';
+            sourceDetail = source.replace('common:', '');
+            depth = 1;
+          } else if (source.startsWith('close:')) {
+            sourcePath = 'Close (related)';
+            sourceDetail = source.replace('close:', '');
+            depth = 1;
+          } else if (source.startsWith('indirect:')) {
+            sourcePath = 'Indirect';
+            sourceDetail = source.replace('indirect:', '');
             depth = 1;
           }
           // "import:xxx" or no source stays as Direct
@@ -2246,15 +2220,27 @@ export class PageMapGenerator {
             ...df,
             queryName,
             sourcePath,
-            depth
+            sourceDetail: sourceDetail || undefined,
+            depth,
           };
         });
 
-        // Sort by depth (lower first) then by source path
+        // Sort by depth (lower first) then by source category priority
+        const sourcePriority = (src) => {
+          if (src === 'Direct') return 0;
+          if (src === 'Close (related)') return 1;
+          if (src === 'Import') return 2;
+          if (src === 'Indirect') return 3;
+          if (src === 'Common (shared)') return 4;
+          return 5;
+        };
         parsedOps.sort((a, b) => {
           if (a.depth !== b.depth) return a.depth - b.depth;
           if (a.sourcePath === 'Direct') return -1;
           if (b.sourcePath === 'Direct') return 1;
+          const ap = sourcePriority(a.sourcePath);
+          const bp = sourcePriority(b.sourcePath);
+          if (ap !== bp) return ap - bp;
           return a.sourcePath.localeCompare(b.sourcePath);
         });
 
@@ -2333,20 +2319,28 @@ export class PageMapGenerator {
             const totalPadding = 10 + uiIndent;
 
             // Group container, header aligned with detail-item content
-            dataHtml += '<div class="data-path-group" style="margin:8px 0">' +
-              '<div class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+totalPadding+'px">' +
+            // Non-direct groups are collapsed by default to reduce noise from shared/common operations.
+            const isClose = pathName === 'Close (related)';
+            const isCollapsedByDefault = !(isDirect || isClose);
+            const detailsOpenAttr = isCollapsedByDefault ? '' : ' open';
+
+            dataHtml += '<details class="data-path-group" style="margin:8px 0"' + detailsOpenAttr + '>' +
+              '<summary class="data-path-header" style="font-size:11px;color:var(--text2);margin-bottom:4px;padding-left:'+totalPadding+'px;cursor:pointer">' +
               depthIndicator + '<span class="text-accent">' + pathLabel + '</span> (' + ops.length + ')' +
-              '</div>';
+              '</summary>';
 
             ops.forEach(op => {
               const isQ = !op.type?.includes('Mutation');
-              const srcArg = op.sourcePath !== 'Direct' ? ",\\'"+op.sourcePath.replace(/'/g, "\\\\'")+"\\'": '';
+              const sourceForModal = op.sourceDetail || op.sourcePath;
+              const srcArg = op.sourcePath !== 'Direct' && sourceForModal
+                ? ",\\'"+sourceForModal.replace(/'/g, "\\\\'")+"\\'"
+                : '';
               // detail-item keeps base padding, adds indent
               dataHtml += '<div class="detail-item data-op" style="padding:8px 10px 8px '+totalPadding+'px" onclick="showDataDetail(\\''+op.queryName.replace(/'/g, "\\\\'")+"\\'"+srcArg+')">' +
                 '<span class="tag '+(isQ?'tag-query':'tag-mutation')+'" style="font-size:10px">'+(isQ?'Q':'M')+'</span> '+op.queryName+'</div>';
             });
 
-            dataHtml += '</div>';
+            dataHtml += '</details>';
           });
 
           dataHtml += '</div>';
@@ -2423,75 +2417,7 @@ export class PageMapGenerator {
       if (c.name) componentByName.set(c.name, c);
     });
 
-    // Check if a component (or its dependencies) uses GraphQL
-    function componentUsesGraphQL(comp, visited = new Set()) {
-      if (!comp || visited.has(comp.name)) return false;
-      visited.add(comp.name);
-      
-      // Check hooks for GraphQL queries (only match "Query: X" or "Mutation: X" format)
-      if (comp.hooks && comp.hooks.some(h => 
-        h.startsWith('Query: ') || h.startsWith('Mutation: ') || h.startsWith('Subscription: ')
-      )) {
-        return true;
-      }
-      
-      // Check dependencies recursively (limit depth to avoid infinite loops)
-      if (comp.dependencies && visited.size < 20) {
-        for (const dep of comp.dependencies) {
-          const depComp = componentByName.get(dep);
-          if (depComp && componentUsesGraphQL(depComp, visited)) {
-            return true;
-          }
-        }
-      }
-      
-      return false;
-    }
-
-    // Find components related to a page (strict matching only)
-    function getPageComponents(page) {
-      const relatedComps = [];
-      
-      // 1. Find by page file path (exact match)
-      if (page.filePath) {
-        const pageComp = componentByFile.get(page.filePath);
-        if (pageComp) relatedComps.push(pageComp);
-        
-        // Check for PageContainer pattern based on file name
-        const baseName = page.filePath.split('/').pop()?.replace(/\\.(tsx?|jsx?)$/, '') || '';
-        const containerName = baseName.charAt(0).toUpperCase() + baseName.slice(1) + 'PageContainer';
-        const container = componentByName.get(containerName);
-        if (container) relatedComps.push(container);
-        
-        // Check for feature-based container: /pages/app/agencies → AgenciesPageContainer
-        const pathParts = page.filePath.split('/');
-        const pageIndex = pathParts.indexOf('pages');
-        if (pageIndex >= 0 && pathParts.length > pageIndex + 2) {
-          // Get the main feature segment (e.g., 'agencies' from '/pages/app/agencies/...')
-          const featureSegment = pathParts[pageIndex + 2];
-          if (featureSegment && !featureSegment.startsWith('[')) {
-            const featurePascal = featureSegment.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
-            const featureContainer = componentByName.get(featurePascal + 'PageContainer');
-            if (featureContainer) relatedComps.push(featureContainer);
-          }
-        }
-      }
-      
-      // 2. Find by component name from page data
-      if (page.component) {
-        const comp = componentByName.get(page.component);
-        if (comp) relatedComps.push(comp);
-        
-        // Also check for Container pattern
-        const containerName = page.component + 'Container';
-        const container = componentByName.get(containerName);
-        if (container) relatedComps.push(container);
-      }
-      
-      return relatedComps;
-    }
-
-    // Include pages with direct GraphQL usage OR pages whose components use GraphQL
+    // Include pages with direct GraphQL usage (from engine.ts enrichPagesWithHookGraphQL)
     const pagesWithGraphQL = new Set([
       // Pages with direct dataFetching
       ...pages.filter(p =>
@@ -2500,11 +2426,6 @@ export class PageMapGenerator {
           df.type === 'getServerSideProps' || df.type === 'getStaticProps'
         )
       ).map(p => p.path),
-      // Pages whose components (or dependencies) use GraphQL
-      ...pages.filter(p => {
-        const pageComps = getPageComponents(p);
-        return pageComps.some(comp => componentUsesGraphQL(comp));
-      }).map(p => p.path),
       // Pages whose files are referenced in GraphQL operation usedIn
       ...pages.filter(p => {
         if (!p.filePath) return false;
@@ -2997,8 +2918,15 @@ export class PageMapGenerator {
 
         // Source info
         if (sourcePath) {
-          const isHook = sourcePath.startsWith('use');
-          html += '<div class="detail-section"><h4>Source</h4><div class="detail-item" style="font-size:12px">via '+(isHook?'Hook':'Component')+': <span class="text-accent">'+sourcePath+'</span></div></div>';
+          const looksLikeFile =
+            sourcePath.includes('/') ||
+            sourcePath.endsWith('.ts') ||
+            sourcePath.endsWith('.tsx') ||
+            sourcePath.endsWith('.js') ||
+            sourcePath.endsWith('.jsx');
+          const isHook = !looksLikeFile && sourcePath.startsWith('use');
+          const label = looksLikeFile ? 'File' : isHook ? 'Hook' : 'Component';
+          html += '<div class="detail-section"><h4>Source</h4><div class="detail-item" style="font-size:12px">via '+label+': <span class="text-accent">'+sourcePath+'</span></div></div>';
         }
 
         // Operation Name with copy button
@@ -3789,29 +3717,16 @@ export class PageMapGenerator {
         const page = pageMap.get(pagePath);
         if (!page) return;
 
-        // Get page's components and calculate total GraphQL
-        const pageComps = getPageComponents(page);
-        const visited = new Set();
+        // Count GraphQL from dataFetching only (already enriched by engine.ts)
         let queries = 0;
         let mutations = 0;
 
-        // Count from direct dataFetching
         (page.dataFetching || []).forEach(df => {
           if (df.type?.includes('Mutation')) {
             mutations++;
           } else if (df.type && !df.type.includes('component')) {
             queries++;
           }
-        });
-
-        // Count from component hooks (simplified - just count hooks)
-        pageComps.forEach(comp => {
-          if (!comp || visited.has(comp.name)) return;
-          visited.add(comp.name);
-          (comp.hooks || []).forEach(hook => {
-            if (hook.includes('Mutation:')) mutations++;
-            else if (hook.includes('Query:')) queries++;
-          });
         });
 
         // Update Q tag

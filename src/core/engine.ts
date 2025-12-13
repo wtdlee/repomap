@@ -1,6 +1,7 @@
 import { simpleGit } from 'simple-git';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { parseSync } from '@swc/core';
 import type {
   DocGeneratorConfig,
   RepositoryConfig,
@@ -96,8 +97,8 @@ export class DocGeneratorEngine {
       commitHash
     );
 
-    // Enrich pages with GraphQL operations from custom hooks
-    this.enrichPagesWithHookGraphQL(analysis);
+    // Enrich pages with GraphQL operations (evidence-based, import-graph aware)
+    await this.enrichPagesWithHookGraphQL(analysis, repoConfig.path);
 
     // Calculate summary
     const summary = {
@@ -296,251 +297,656 @@ export class DocGeneratorEngine {
   }
 
   /**
-   * Enrich pages with GraphQL operations from custom hooks and imported variables
-   * Links GraphQL operations to pages via custom hooks and imported variables
+   * Enrich pages with GraphQL operations using evidence-based linking.
    *
-   * Strategy:
-   * 1. Build hookName → GraphQL operations mapping from:
-   *    - graphqlOperations.filePath (hook files contain GraphQL definitions)
-   *    - components with type='hook' and their hooks array
-   * 2. Build variableName → GraphQL operations mapping from:
-   *    - graphqlOperations.variableNames (e.g., "Query" → "GetNewProfile")
-   * 3. For each page/component, add matched GraphQL operations to dataFetching
+   * We avoid name/heuristic matching (unstable) and instead use:
+   * - GraphQLOperation.usedIn: files where each operation is referenced
+   * - Import graph (from DataFlowAnalyzer component.imports) starting at the page entry file
+   *
+   * This yields:
+   * - Accuracy: only operations referenced in the page import closure
+   * - Completeness: includes indirect usage via components/hooks
+   * - Stability: independent of component naming conventions ("Page", etc.)
    */
-  private enrichPagesWithHookGraphQL(analysis: AnalysisResult): void {
-    // Step 1: Build hook → GraphQL mapping from graphqlOperations.filePath
-    const hookToGraphQL = new Map<string, Set<string>>();
+  private async enrichPagesWithHookGraphQL(
+    analysis: AnalysisResult,
+    repoPath: string
+  ): Promise<void> {
+    type OpType = 'query' | 'mutation' | 'subscription';
+    type RuntimeOp = (typeof analysis.graphqlOperations)[number] & { type: OpType };
+    const ops = analysis.graphqlOperations.filter((op): op is RuntimeOp => {
+      return op.type === 'query' || op.type === 'mutation' || op.type === 'subscription';
+    });
 
-    for (const op of analysis.graphqlOperations) {
-      if (!op.filePath) continue;
+    const extRe = /\.(ts|tsx|js|jsx)$/;
+    const normalizeRel = (p: string) => path.normalize(p).replace(/\\/g, '/');
 
-      // Extract hook name from file path (e.g., "useInternalPostPermission.ts" → "useInternalPostPermission")
-      const fileName = op.filePath.split('/').pop() || '';
-      const baseName = fileName.replace(/\.(ts|tsx|js|jsx)$/, '');
+    // Build a file universe from repository scan (slow but robust).
+    // This is required to resolve imports through non-component modules.
+    const includePatterns = (this.config.analysis?.include || ['**/*.ts', '**/*.tsx']).map(String);
+    const excludePatterns = (this.config.analysis?.exclude || []).map(String);
 
-      // Only process if it looks like a hook file
-      if (baseName.startsWith('use')) {
-        if (!hookToGraphQL.has(baseName)) {
-          hookToGraphQL.set(baseName, new Set());
-        }
-        hookToGraphQL.get(baseName)!.add(op.name);
+    // Fast-glob is already a dependency; use it to list files.
+    const fg = (await import('fast-glob')).default;
+    const allSourceFiles = await fg(includePatterns, {
+      cwd: repoPath,
+      ignore: [
+        '**/node_modules/**',
+        '**/.next/**',
+        '**/dist/**',
+        '**/build/**',
+        '**/coverage/**',
+        ...excludePatterns,
+      ],
+      onlyFiles: true,
+      unique: true,
+      dot: false,
+    });
+
+    const knownFiles = new Set<string>(allSourceFiles.map(normalizeRel));
+    const normalizedToFile = new Map<string, string>(); // "path/without/ext" -> "path/with/ext"
+    for (const f of knownFiles) {
+      const normalized = f.replace(extRe, '');
+      if (!normalizedToFile.has(normalized)) normalizedToFile.set(normalized, f);
+    }
+
+    // Infer alias bases for "@/..." imports from the repo structure.
+    // Default is "src/", but many Rails+React repos use "frontend/src/" etc.
+    const aliasBases = new Set<string>(['src/']);
+    for (const f of knownFiles) {
+      const idx = f.indexOf('/src/');
+      if (idx !== -1) {
+        aliasBases.add(f.slice(0, idx + 5)); // includes trailing "/src/"
       }
     }
 
-    // Step 2: Build hook → GraphQL mapping from components with type='hook'
-    for (const comp of analysis.components) {
-      if (comp.type !== 'hook') continue;
+    const resolveToKnownFile = (candidate: string): string | null => {
+      const normalized = normalizeRel(candidate).replace(extRe, '');
+      const exact = normalizedToFile.get(normalized);
+      if (exact) return exact;
+      const idx = normalizedToFile.get(normalized + '/index');
+      if (idx) return idx;
+      return null;
+    };
 
-      // Extract GraphQL operations from hooks array (e.g., "Query: GetProduct")
-      const graphqlOps: string[] = [];
-      for (const hook of comp.hooks) {
-        const match = hook.match(/^(Query|Mutation|Subscription):\s*(.+)$/);
-        if (match) {
-          graphqlOps.push(match[2]);
+    // Try to read tsconfig/jsconfig paths for accurate alias resolution.
+    type TsPaths = Record<string, string[]>;
+    const loadTsConfig = async (): Promise<{
+      baseUrl?: string;
+      paths?: TsPaths;
+    }> => {
+      const candidates = ['tsconfig.json', 'jsconfig.json'];
+      for (const c of candidates) {
+        try {
+          const raw = await fs.readFile(path.join(repoPath, c), 'utf-8');
+          const json = JSON.parse(raw);
+          const co = json?.compilerOptions || {};
+          const baseUrl = typeof co.baseUrl === 'string' ? co.baseUrl : undefined;
+          const paths =
+            typeof co.paths === 'object' && co.paths ? (co.paths as TsPaths) : undefined;
+          return { baseUrl, paths };
+        } catch {
+          // ignore
+        }
+      }
+      return {};
+    };
+
+    const { baseUrl, paths: tsPaths } = await loadTsConfig();
+
+    const matchTsPath = (spec: string): string[] => {
+      if (!tsPaths) return [];
+      const out: string[] = [];
+      for (const [k, targets] of Object.entries(tsPaths)) {
+        if (!k.includes('*')) {
+          if (spec === k) out.push(...targets);
+          continue;
+        }
+        const [pre, post] = k.split('*');
+        if (!spec.startsWith(pre) || !spec.endsWith(post)) continue;
+        const mid = spec.slice(pre.length, spec.length - post.length);
+        for (const t of targets) {
+          if (!t.includes('*')) {
+            out.push(t);
+          } else {
+            out.push(t.replace('*', mid));
+          }
+        }
+      }
+      return out;
+    };
+
+    const resolveImport = (fromFile: string, importPath: string): string | null => {
+      if (!importPath) return null;
+
+      // Relative imports
+      if (importPath.startsWith('.')) {
+        const fromDir = path.dirname(fromFile);
+        return resolveToKnownFile(path.join(fromDir, importPath));
+      }
+
+      // Alias imports "@/..."
+      if (importPath.startsWith('@/')) {
+        const sub = importPath.replace('@/', '');
+        // 1) tsconfig baseUrl
+        if (baseUrl) {
+          const resolved = resolveToKnownFile(path.join(baseUrl, sub));
+          if (resolved) return resolved;
+        }
+        // 2) repo structure inferred bases
+        for (const base of aliasBases) {
+          const resolved = resolveToKnownFile(base + sub);
+          if (resolved) return resolved;
+        }
+        return null;
+      }
+
+      // tsconfig paths
+      const mapped = matchTsPath(importPath);
+      if (mapped.length > 0) {
+        for (const m of mapped) {
+          const resolved = resolveToKnownFile(baseUrl ? path.join(baseUrl, m) : m);
+          if (resolved) return resolved;
         }
       }
 
-      if (graphqlOps.length > 0) {
-        if (!hookToGraphQL.has(comp.name)) {
-          hookToGraphQL.set(comp.name, new Set());
-        }
-        for (const op of graphqlOps) {
-          hookToGraphQL.get(comp.name)!.add(op);
-        }
+      // baseUrl absolute-like imports (e.g., "features/foo")
+      if (baseUrl) {
+        const resolved = resolveToKnownFile(path.join(baseUrl, importPath));
+        if (resolved) return resolved;
       }
-    }
 
-    // Step 3: Build filePath → GraphQL operations mapping
-    // This is the key for accurate matching: match by file path, not variable name
-    const filePathToGraphQL = new Map<
+      // Ignore bare module imports
+      return null;
+    };
+
+    // Lazy import extraction cache (AST-based; slower but accurate).
+    const importCache = new Map<string, string[]>();
+    const fileContentCache = new Map<string, string>();
+
+    const readRelFile = async (rel: string): Promise<string | null> => {
+      const key = normalizeRel(rel);
+      const cached = fileContentCache.get(key);
+      if (cached !== undefined) return cached;
+      try {
+        const abs = path.join(repoPath, key);
+        const content = await fs.readFile(abs, 'utf-8');
+        fileContentCache.set(key, content);
+        return content;
+      } catch {
+        fileContentCache.set(key, '');
+        return null;
+      }
+    };
+
+    type ImportEdge = { spec: string; names: string[] | null };
+
+    const extractImportsFromFile = async (rel: string): Promise<ImportEdge[]> => {
+      const key = normalizeRel(rel);
+      const cached = importCache.get(key);
+      if (cached) return cached.map((spec) => ({ spec, names: null }));
+
+      const content = await readRelFile(key);
+      if (!content) {
+        importCache.set(key, []);
+        return [];
+      }
+
+      // Parse as TS/TSX by default (works for JS too in most cases)
+      let ast: unknown;
+      try {
+        const isTs = key.endsWith('.ts') || key.endsWith('.tsx');
+        const isTsx = key.endsWith('.tsx') || key.endsWith('.jsx');
+        ast = parseSync(content, {
+          syntax: isTs ? 'typescript' : 'ecmascript',
+          tsx: isTsx,
+          jsx: isTsx,
+          comments: false,
+        });
+      } catch {
+        importCache.set(key, []);
+        return [];
+      }
+
+      const found = new Set<string>();
+      const edges: ImportEdge[] = [];
+
+      const pushSpec = (spec: unknown, names: string[] | null) => {
+        if (typeof spec !== 'string' || spec.length === 0) return;
+        found.add(spec);
+        edges.push({ spec, names });
+      };
+
+      // swc AST typing is large; keep traversal with minimal "unknown" narrowing.
+      const walk = (node: unknown) => {
+        if (!node || typeof node !== 'object') return;
+        const n = node as Record<string, unknown>;
+
+        // swc module items
+        const nAny = n as Record<string, unknown> & {
+          type?: string;
+          typeOnly?: boolean;
+          source?: { value?: string };
+          callee?: { type?: string; value?: string };
+          arguments?: Array<{ expression?: { type?: string; value?: string } }>;
+          specifiers?: Array<Record<string, unknown>>;
+        };
+
+        if (nAny.type === 'ImportDeclaration') {
+          // Skip type-only imports (they should not affect runtime reachability)
+          if (nAny.typeOnly) {
+            // no-op
+          } else {
+            const spec = nAny.source?.value;
+            let names: string[] | null = [];
+            const specs = nAny.specifiers || [];
+            for (const s of specs) {
+              const sAny = s as {
+                type?: string;
+                imported?: { value?: string };
+                local?: { value?: string };
+              };
+              const st = sAny.type;
+              if (st === 'ImportDefaultSpecifier' || st === 'ImportNamespaceSpecifier') {
+                names = null;
+                break;
+              }
+              if (st === 'ImportSpecifier') {
+                const imported = sAny.imported?.value;
+                const local = sAny.local?.value;
+                const n = imported || local;
+                if (n) (names as string[]).push(n);
+              }
+            }
+            if (Array.isArray(names) && names.length === 0) names = null;
+            pushSpec(spec, names);
+          }
+        } else if (nAny.type === 'ExportAllDeclaration') {
+          // Re-export all (treated as unknown runtime dependency if we ever import this module as unknown)
+          pushSpec(nAny.source?.value, null);
+        } else if (nAny.type === 'ExportNamedDeclaration') {
+          // Re-export named. Capture exported names when possible.
+          const spec = nAny.source?.value;
+          const specs = nAny.specifiers || [];
+          const names: string[] = [];
+          for (const s of specs) {
+            const sAny = s as {
+              type?: string;
+              exported?: { value?: string };
+              orig?: { value?: string };
+            };
+            const st = sAny.type;
+            if (st === 'ExportSpecifier') {
+              const exported = sAny.exported?.value;
+              const orig = sAny.orig?.value;
+              const n = exported || orig;
+              if (n) names.push(n);
+            }
+          }
+          pushSpec(spec, names.length > 0 ? names : null);
+        } else if (nAny.type === 'CallExpression') {
+          // require('x')
+          const callee = nAny.callee || null;
+          if (callee?.type === 'Identifier' && callee.value === 'require') {
+            const a0 = nAny.arguments?.[0]?.expression;
+            if (a0?.type === 'StringLiteral') pushSpec(a0.value, null);
+          }
+          // import('x')
+          if (callee?.type === 'Import') {
+            const a0 = nAny.arguments?.[0]?.expression;
+            if (a0?.type === 'StringLiteral') pushSpec(a0.value, null);
+          }
+        }
+
+        for (const k of Object.keys(n)) {
+          const v = (n as Record<string, unknown>)[k];
+          if (Array.isArray(v)) {
+            for (const it of v) walk(it);
+          } else if (v && typeof v === 'object') {
+            walk(v);
+          }
+        }
+      };
+
+      walk(ast);
+
+      const list = Array.from(found);
+      importCache.set(key, list);
+      return edges.filter((e) => typeof e.spec === 'string' && e.spec.length > 0);
+    };
+
+    // Export map cache for barrel resolution: module file -> exportName -> source spec, plus export * sources.
+    const exportMapCache = new Map<
+      string,
+      { named: Map<string, string>; stars: string[]; isBarrel: boolean }
+    >();
+
+    const getExportInfo = async (
+      rel: string
+    ): Promise<{ named: Map<string, string>; stars: string[]; isBarrel: boolean }> => {
+      const key = normalizeRel(rel);
+      const cached = exportMapCache.get(key);
+      if (cached) return cached;
+
+      const content = await readRelFile(key);
+      if (!content) {
+        const empty = { named: new Map<string, string>(), stars: [], isBarrel: false };
+        exportMapCache.set(key, empty);
+        return empty;
+      }
+
+      let ast: unknown;
+      try {
+        const isTs = key.endsWith('.ts') || key.endsWith('.tsx');
+        const isTsx = key.endsWith('.tsx') || key.endsWith('.jsx');
+        ast = parseSync(content, {
+          syntax: isTs ? 'typescript' : 'ecmascript',
+          tsx: isTsx,
+          jsx: isTsx,
+          comments: false,
+        });
+      } catch {
+        const empty = { named: new Map<string, string>(), stars: [], isBarrel: false };
+        exportMapCache.set(key, empty);
+        return empty;
+      }
+
+      const named = new Map<string, string>();
+      const stars: string[] = [];
+      let isBarrel = true;
+
+      const body = (ast as { body?: unknown[] } | null)?.body;
+      if (Array.isArray(body)) {
+        for (const item of body) {
+          const itemAny = item as {
+            type?: string;
+            source?: { value?: string };
+            specifiers?: unknown[];
+          };
+          const t = itemAny.type;
+          if (!t) continue;
+          if (t === 'ImportDeclaration') continue;
+          if (t === 'ExportAllDeclaration') {
+            const spec = itemAny.source?.value;
+            if (typeof spec === 'string') stars.push(spec);
+            continue;
+          }
+          if (t === 'ExportNamedDeclaration') {
+            const spec = itemAny.source?.value;
+            const specs = itemAny.specifiers || [];
+            if (typeof spec === 'string' && Array.isArray(specs)) {
+              for (const s of specs) {
+                const sAny = s as {
+                  type?: string;
+                  exported?: { value?: string };
+                  orig?: { value?: string };
+                };
+                const st = sAny.type;
+                if (st !== 'ExportSpecifier') continue;
+                const exported = sAny.exported?.value;
+                const orig = sAny.orig?.value;
+                const name = exported || orig;
+                if (name) named.set(name, spec);
+              }
+            }
+            continue;
+          }
+          // Any other top-level item means it's not a pure barrel.
+          isBarrel = false;
+        }
+      } else {
+        isBarrel = false;
+      }
+
+      const info = { named, stars, isBarrel };
+      exportMapCache.set(key, info);
+      return info;
+    };
+
+    const resolveExportFromBarrel = async (
+      barrelFile: string,
+      exportName: string,
+      seen: Set<string>
+    ): Promise<string | null> => {
+      const key = normalizeRel(barrelFile);
+      if (seen.has(key)) return null;
+      seen.add(key);
+
+      const info = await getExportInfo(key);
+      const directSpec = info.named.get(exportName);
+      if (directSpec) {
+        return resolveImport(key, directSpec);
+      }
+
+      // Search export * sources
+      for (const star of info.stars) {
+        const starFile = resolveImport(key, star);
+        if (!starFile) continue;
+        const found = await resolveExportFromBarrel(starFile, exportName, seen);
+        if (found) return found;
+      }
+
+      return null;
+    };
+
+    // Build usage index: file -> operations referenced in that file.
+    const fileToOps = new Map<
       string,
       { opName: string; opType: 'query' | 'mutation' | 'subscription' }[]
     >();
+    for (const op of ops) {
+      const files = new Set<string>();
+      if (op.filePath) files.add(op.filePath);
+      for (const u of op.usedIn || []) files.add(u);
 
-    for (const op of analysis.graphqlOperations) {
-      if (op.type !== 'query' && op.type !== 'mutation' && op.type !== 'subscription') continue;
-      if (!op.filePath) continue;
-
-      // Normalize file path (remove extension for matching)
-      const normalizedPath = op.filePath.replace(/\.(ts|tsx|js|jsx)$/, '');
-
-      if (!filePathToGraphQL.has(normalizedPath)) {
-        filePathToGraphQL.set(normalizedPath, []);
-      }
-      filePathToGraphQL.get(normalizedPath)!.push({ opName: op.name, opType: op.type });
-    }
-
-    // Step 4: Build operation type lookup (exclude fragments)
-    const opTypeMap = new Map<string, 'query' | 'mutation' | 'subscription'>();
-    for (const op of analysis.graphqlOperations) {
-      if (op.type === 'query' || op.type === 'mutation' || op.type === 'subscription') {
-        opTypeMap.set(op.name, op.type);
+      for (const f of files) {
+        const arr = fileToOps.get(f) || [];
+        arr.push({ opName: op.name, opType: op.type });
+        fileToOps.set(f, arr);
       }
     }
 
-    // Step 5: Enrich pages dataFetching
+    const findPageEntryFile = (pageFilePath: string): string | null => {
+      if (!pageFilePath) return null;
+
+      // First try canonical Next.js locations using exact relative paths.
+      const canonicalCandidates = [
+        `src/pages/${pageFilePath}`,
+        `pages/${pageFilePath}`,
+        `src/app/${pageFilePath}`,
+        `app/${pageFilePath}`,
+        `frontend/src/pages/${pageFilePath}`,
+        `frontend/src/app/${pageFilePath}`,
+        `app/javascript/pages/${pageFilePath}`,
+        `app/javascript/app/${pageFilePath}`,
+      ];
+      for (const c of canonicalCandidates) {
+        if (knownFiles.has(c)) return c;
+        const resolved = resolveToKnownFile(c);
+        if (resolved) return resolved;
+      }
+
+      // Fallback: Prefer matches under "/pages/" or "/app/" to avoid over-matching.
+      const candidates: string[] = [];
+      const suffixes = [`/pages/${pageFilePath}`, `/app/${pageFilePath}`, `/${pageFilePath}`];
+
+      for (const f of knownFiles) {
+        for (const s of suffixes) {
+          if (!f.endsWith(s)) continue;
+          if (s.startsWith('/pages/') && !f.includes('/pages/')) continue;
+          if (s.startsWith('/app/') && !f.includes('/app/')) continue;
+          candidates.push(f);
+          break;
+        }
+      }
+
+      if (candidates.length === 0) return null;
+      // Choose the most specific path (shortest prefix / shortest overall length)
+      candidates.sort((a, b) => a.length - b.length);
+      return candidates[0];
+    };
+
+    // (closure builder is implemented inline per-page to keep it async)
+
+    // 1) Collect per-page closest references (distance) and aggregate stats to identify "common" ops.
+    const perPageBest = new Map<
+      string,
+      {
+        page: AnalysisResult['pages'][number];
+        entryFile: string;
+        bestByOp: Map<
+          string,
+          {
+            opName: string;
+            opType: 'query' | 'mutation' | 'subscription';
+            sourceFile: string;
+            distance: number;
+          }
+        >;
+      }
+    >();
+
+    // File reachability: how many distinct page entries can reach each file (via import graph).
+    // This is the most stable "common/shared" signal across different repo structures.
+    const fileReachCount = new Map<string, number>();
+
     for (const page of analysis.pages) {
-      // Get existing operation names
-      const existingOps = new Set(
-        page.dataFetching.map((df) => df.operationName?.replace(/^[→\->\s]+/, '') || '')
-      );
+      const entryFile = findPageEntryFile(page.filePath);
+      if (!entryFile) continue;
 
-      // Check components (containers) that this page uses
-      const pageComponent = analysis.components.find(
-        (c) => c.filePath === `src/pages/${page.filePath}`
-      );
+      const bestByOp = new Map<
+        string,
+        {
+          opName: string;
+          opType: 'query' | 'mutation' | 'subscription';
+          sourceFile: string;
+          distance: number;
+        }
+      >();
 
-      if (!pageComponent) continue;
+      const visited = new Set<string>();
+      const queue: { f: string; depth: number }[] = [{ f: entryFile, depth: 0 }];
+      const maxDepth = 30;
+      const maxNodes = 20000;
 
-      // Collect hooks from page component and its dependencies
-      const hooksToCheck: string[] = [];
-      hooksToCheck.push(...pageComponent.hooks.filter((h) => h.startsWith('use')));
-      // Also check dependencies that are hooks
-      for (const dep of pageComponent.dependencies) {
-        if (dep.startsWith('use')) {
-          hooksToCheck.push(dep);
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        if (!cur) break;
+        if (visited.has(cur.f)) continue;
+        visited.add(cur.f);
+        if (visited.size >= maxNodes) break;
+
+        const opsInFile = fileToOps.get(cur.f);
+        if (opsInFile) {
+          for (const o of opsInFile) {
+            const prev = bestByOp.get(o.opName);
+            if (!prev || cur.depth < prev.distance) {
+              bestByOp.set(o.opName, {
+                opName: o.opName,
+                opType: o.opType,
+                sourceFile: cur.f,
+                distance: cur.depth,
+              });
+            }
+          }
+        }
+
+        if (cur.depth >= maxDepth) continue;
+
+        const importEdges = await extractImportsFromFile(cur.f);
+        for (const e of importEdges) {
+          const to = resolveImport(cur.f, e.spec);
+          if (!to) continue;
+          if (!visited.has(to)) queue.push({ f: to, depth: cur.depth + 1 });
+
+          // If importing named exports from a barrel, resolve only those exports instead of expanding the whole barrel.
+          if (Array.isArray(e.names) && e.names.length > 0) {
+            const expInfo = await getExportInfo(to);
+            if (expInfo.isBarrel) {
+              for (const n of e.names) {
+                const resolved = await resolveExportFromBarrel(to, n, new Set<string>());
+                if (resolved && !visited.has(resolved)) {
+                  queue.push({ f: resolved, depth: cur.depth + 2 });
+                }
+              }
+            }
+          } else if (e.names === null) {
+            // Unknown import shape: conservatively include barrel re-export dependencies.
+            const expInfo = await getExportInfo(to);
+            if (expInfo.isBarrel) {
+              for (const spec of expInfo.stars) {
+                const rf = resolveImport(to, spec);
+                if (rf && !visited.has(rf)) queue.push({ f: rf, depth: cur.depth + 2 });
+              }
+              for (const spec of expInfo.named.values()) {
+                const rf = resolveImport(to, spec);
+                if (rf && !visited.has(rf)) queue.push({ f: rf, depth: cur.depth + 2 });
+              }
+            }
+          }
         }
       }
 
-      // Add GraphQL operations from hooks
-      for (const hookName of hooksToCheck) {
-        const graphqlOps = hookToGraphQL.get(hookName);
-        if (!graphqlOps) continue;
+      perPageBest.set(page.path, { page, entryFile, bestByOp });
 
-        for (const opName of graphqlOps) {
-          if (existingOps.has(opName)) continue;
-          existingOps.add(opName);
-
-          const opType = opTypeMap.get(opName) || 'query';
-          page.dataFetching.push({
-            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
-            operationName: opName,
-            source: `hook:${hookName}`,
-          });
-        }
-      }
-
-      // Add GraphQL operations from imported files (file path based matching)
-      if (pageComponent.imports) {
-        for (const imp of pageComponent.imports) {
-          // Resolve relative import path to absolute path from page's directory
-          const pageDir = path.dirname(pageComponent.filePath);
-          let resolvedPath = imp.path;
-
-          if (imp.path.startsWith('.')) {
-            // Resolve relative path
-            resolvedPath = path.join(pageDir, imp.path);
-            // Normalize (remove .., .)
-            resolvedPath = path.normalize(resolvedPath);
-          } else if (imp.path.startsWith('@/')) {
-            // Handle @/ alias (common in Next.js projects)
-            resolvedPath = imp.path.replace('@/', 'src/');
-          }
-
-          // Remove extension for matching
-          resolvedPath = resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, '');
-
-          // Check if this file contains GraphQL operations
-          const graphqlOps = filePathToGraphQL.get(resolvedPath);
-          if (!graphqlOps) continue;
-
-          for (const op of graphqlOps) {
-            if (existingOps.has(op.opName)) continue;
-            existingOps.add(op.opName);
-
-            page.dataFetching.push({
-              type: op.opType === 'mutation' ? 'useMutation' : 'useQuery',
-              operationName: op.opName,
-              source: `import:${imp.path}`,
-            });
-          }
-        }
+      // Update reachability counts once per page.
+      for (const f of visited) {
+        fileReachCount.set(f, (fileReachCount.get(f) || 0) + 1);
       }
     }
 
-    // Step 6: Also enrich components with container type
-    for (const comp of analysis.components) {
-      if (comp.type !== 'container' && comp.type !== 'page') continue;
+    const totalPages = perPageBest.size;
+    // Derive an adaptive "common file" threshold from the distribution of reach counts.
+    // Use p90 so we only call "common" the files reached by many pages.
+    const reachCounts = Array.from(fileReachCount.values()).sort((a, b) => a - b);
+    const percentile = (arr: number[], p: number): number => {
+      if (arr.length === 0) return 0;
+      const idx = Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * p)));
+      return arr[idx];
+    };
+    const p90 = percentile(reachCounts, 0.9);
+    const commonFileThreshold = Math.max(10, p90);
+    const localFileThreshold = Math.max(2, Math.floor(totalPages * 0.05)); // feature-local-ish
 
-      // Find matching page to add dataFetching
-      const matchingPage = analysis.pages.find(
-        (p) => p.component === comp.name || p.filePath?.includes(comp.name)
-      );
-      if (!matchingPage) continue;
-
-      // Get existing operation names from page
+    // 2) Apply enrichment with priority/grouping:
+    // - Direct: distance 0 (entry file)
+    // - Close: distance 1-2 (page/component-adjacent)
+    // - Indirect: distance >= 3
+    // - Common: common ops (distance > 0) collapsed in UI
+    for (const { page, bestByOp } of perPageBest.values()) {
       const existingOps = new Set(
-        matchingPage.dataFetching.map((df) => df.operationName?.replace(/^[→\->\s]+/, '') || '')
+        (page.dataFetching || []).map((df) => df.operationName?.replace(/^[→\->\s]+/, '') || '')
       );
 
-      // Check hooks in this component
-      for (const hookName of comp.hooks) {
-        if (!hookName.startsWith('use')) continue;
+      for (const { opName, opType, sourceFile, distance } of bestByOp.values()) {
+        if (existingOps.has(opName)) continue;
+        existingOps.add(opName);
 
-        const graphqlOps = hookToGraphQL.get(hookName);
-        if (!graphqlOps) continue;
+        const reach = fileReachCount.get(sourceFile) || 0;
 
-        for (const opName of graphqlOps) {
-          if (existingOps.has(opName)) continue;
-          existingOps.add(opName);
-
-          const opType = opTypeMap.get(opName) || 'query';
-          matchingPage.dataFetching.push({
-            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
-            operationName: opName,
-            source: `component:${comp.name}`,
-          });
+        let source: string | undefined;
+        if (distance === 0) {
+          source = undefined;
+        } else if (reach >= commonFileThreshold) {
+          // Reached by many pages => common/shared (objective, repo-agnostic signal)
+          source = `common:${sourceFile}`;
+        } else if (distance <= 2 || reach <= localFileThreshold) {
+          // Close either by import distance or by low reachability (feature-local)
+          source = `close:${sourceFile}`;
+        } else {
+          source = `indirect:${sourceFile}`;
         }
-      }
 
-      // Also check dependencies that are hooks
-      for (const dep of comp.dependencies) {
-        if (!dep.startsWith('use')) continue;
-
-        const graphqlOps = hookToGraphQL.get(dep);
-        if (!graphqlOps) continue;
-
-        for (const opName of graphqlOps) {
-          if (existingOps.has(opName)) continue;
-          existingOps.add(opName);
-
-          const opType = opTypeMap.get(opName) || 'query';
-          matchingPage.dataFetching.push({
-            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
-            operationName: opName,
-            source: `component:${comp.name}`,
-          });
-        }
-      }
-
-      // Also check imported files for GraphQL operations
-      if (comp.imports) {
-        for (const imp of comp.imports) {
-          const compDir = path.dirname(comp.filePath);
-          let resolvedPath = imp.path;
-
-          if (imp.path.startsWith('.')) {
-            resolvedPath = path.normalize(path.join(compDir, imp.path));
-          } else if (imp.path.startsWith('@/')) {
-            resolvedPath = imp.path.replace('@/', 'src/');
-          }
-
-          resolvedPath = resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, '');
-
-          const graphqlOps = filePathToGraphQL.get(resolvedPath);
-          if (!graphqlOps) continue;
-
-          for (const op of graphqlOps) {
-            if (existingOps.has(op.opName)) continue;
-            existingOps.add(op.opName);
-
-            matchingPage.dataFetching.push({
-              type: op.opType === 'mutation' ? 'useMutation' : 'useQuery',
-              operationName: op.opName,
-              source: `component:${comp.name}`,
-            });
-          }
-        }
+        page.dataFetching.push({
+          type:
+            opType === 'mutation'
+              ? 'useMutation'
+              : opType === 'subscription'
+                ? 'useSubscription'
+                : 'useQuery',
+          operationName: opName,
+          source,
+        });
       }
     }
   }
