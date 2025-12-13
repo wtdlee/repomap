@@ -20,3 +20,8 @@
 - **Favicon**: Added favicon support for all pages (page-map, rails-map, docs)
 - **Web manifest**: PWA-ready with app icons
 - **README logo**: New centered logo with badge layout
+
+### Performance
+
+- **Removed unused dependencies**: @babel/parser, @babel/traverse, ts-morph
+- **Faster install**: ~50MB less dependencies to download
