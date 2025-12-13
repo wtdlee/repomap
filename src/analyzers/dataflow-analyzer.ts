@@ -206,7 +206,6 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     return components;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractImports(ast: Module): Map<string, string> {
     const imports = new Map<string, string>();
 
