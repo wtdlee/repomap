@@ -2429,7 +2429,7 @@ export class PageMapGenerator {
       visited.add(comp.name);
       
       // Check hooks for GraphQL queries (only match "Query: X" or "Mutation: X" format)
-      if (comp.hooks && comp.hooks.some(h =>
+      if (comp.hooks && comp.hooks.some(h => 
         h.startsWith('Query: ') || h.startsWith('Mutation: ') || h.startsWith('Subscription: ')
       )) {
         return true;
@@ -2515,9 +2515,9 @@ export class PageMapGenerator {
     ]);
 
     // Debug: log pagesWithGraphQL count
-    console.log('📊 GraphQL Stats: totalComponents=' + components.length +
+    console.log('📊 GraphQL Stats: totalComponents=' + components.length + 
       ', componentsWithGraphQL=' + components.filter(c => c.hooks && c.hooks.some(h => h.startsWith('Query: ') || h.startsWith('Mutation: '))).length +
-      ', pagesWithGraphQL=' + pagesWithGraphQL.size +
+      ', pagesWithGraphQL=' + pagesWithGraphQL.size + 
       ', totalPages=' + pages.length);
 
     const pagesWithRestApi = new Set(pages.filter(p => {
