@@ -265,10 +265,16 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     // Extract hooks used (using regex for speed)
     const hooks = this.extractHooksUsed(content);
 
-    // Extract dependencies from imports
+    // Extract dependencies from imports (names only for backward compatibility)
     const dependencies = Array.from(imports.keys()).filter(
-      (name) => this.isComponentName(name) || name.startsWith('use')
+      (depName) => this.isComponentName(depName) || depName.startsWith('use')
     );
+
+    // Extract import info with paths (for accurate GraphQL mapping)
+    const importInfos: { name: string; path: string }[] = [];
+    for (const [importName, importPath] of imports) {
+      importInfos.push({ name: importName, path: importPath });
+    }
 
     // Extract state management patterns
     const stateManagement = this.extractStateManagement(content);
@@ -282,6 +288,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       dependents: [], // Will be filled later
       hooks,
       stateManagement,
+      imports: importInfos,
     };
   }
 

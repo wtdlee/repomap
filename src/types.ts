@@ -210,6 +210,18 @@ export interface ComponentInfo {
   dependents: string[];
   hooks: string[];
   stateManagement: string[];
+  /**
+   * Import information with resolved paths
+   * Used for accurate GraphQL operation mapping
+   */
+  imports?: ImportInfo[];
+}
+
+export interface ImportInfo {
+  /** Imported name (e.g., "Query", "useUserHook") */
+  name: string;
+  /** Import path (e.g., "../../features/profile/NewProfilePage") */
+  path: string;
 }
 
 export interface PropInfo {

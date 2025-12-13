@@ -153,6 +153,9 @@ export class DocGeneratorEngine {
       commitHash
     );
 
+    // Enrich pages with GraphQL operations from custom hooks
+    this.enrichPagesWithHookGraphQL(analysis);
+
     // Save to cache
     cache.set(cacheKey, contentHash, analysis);
     await cache.save();
@@ -352,6 +355,256 @@ export class DocGeneratorEngine {
     }
 
     return links;
+  }
+
+  /**
+   * Enrich pages with GraphQL operations from custom hooks and imported variables
+   * 커스텀 훅 및 import된 변수에서 GraphQL 작업을 페이지에 연결
+   *
+   * Strategy:
+   * 1. Build hookName → GraphQL operations mapping from:
+   *    - graphqlOperations.filePath (hook files contain GraphQL definitions)
+   *    - components with type='hook' and their hooks array
+   * 2. Build variableName → GraphQL operations mapping from:
+   *    - graphqlOperations.variableNames (e.g., "Query" → "GetNewProfile")
+   * 3. For each page/component, add matched GraphQL operations to dataFetching
+   */
+  private enrichPagesWithHookGraphQL(analysis: AnalysisResult): void {
+    // Step 1: Build hook → GraphQL mapping from graphqlOperations.filePath
+    const hookToGraphQL = new Map<string, Set<string>>();
+
+    for (const op of analysis.graphqlOperations) {
+      if (!op.filePath) continue;
+
+      // Extract hook name from file path (e.g., "useInternalPostPermission.ts" → "useInternalPostPermission")
+      const fileName = op.filePath.split('/').pop() || '';
+      const baseName = fileName.replace(/\.(ts|tsx|js|jsx)$/, '');
+
+      // Only process if it looks like a hook file
+      if (baseName.startsWith('use')) {
+        if (!hookToGraphQL.has(baseName)) {
+          hookToGraphQL.set(baseName, new Set());
+        }
+        hookToGraphQL.get(baseName)!.add(op.name);
+      }
+    }
+
+    // Step 2: Build hook → GraphQL mapping from components with type='hook'
+    for (const comp of analysis.components) {
+      if (comp.type !== 'hook') continue;
+
+      // Extract GraphQL operations from hooks array (e.g., "Query: GetProduct")
+      const graphqlOps: string[] = [];
+      for (const hook of comp.hooks) {
+        const match = hook.match(/^(Query|Mutation|Subscription):\s*(.+)$/);
+        if (match) {
+          graphqlOps.push(match[2]);
+        }
+      }
+
+      if (graphqlOps.length > 0) {
+        if (!hookToGraphQL.has(comp.name)) {
+          hookToGraphQL.set(comp.name, new Set());
+        }
+        for (const op of graphqlOps) {
+          hookToGraphQL.get(comp.name)!.add(op);
+        }
+      }
+    }
+
+    // Step 3: Build filePath → GraphQL operations mapping
+    // This is the key for accurate matching: match by file path, not variable name
+    const filePathToGraphQL = new Map<
+      string,
+      { opName: string; opType: 'query' | 'mutation' | 'subscription' }[]
+    >();
+
+    for (const op of analysis.graphqlOperations) {
+      if (op.type !== 'query' && op.type !== 'mutation' && op.type !== 'subscription') continue;
+      if (!op.filePath) continue;
+
+      // Normalize file path (remove extension for matching)
+      const normalizedPath = op.filePath.replace(/\.(ts|tsx|js|jsx)$/, '');
+
+      if (!filePathToGraphQL.has(normalizedPath)) {
+        filePathToGraphQL.set(normalizedPath, []);
+      }
+      filePathToGraphQL.get(normalizedPath)!.push({ opName: op.name, opType: op.type });
+    }
+
+    // Step 4: Build operation type lookup (exclude fragments)
+    const opTypeMap = new Map<string, 'query' | 'mutation' | 'subscription'>();
+    for (const op of analysis.graphqlOperations) {
+      if (op.type === 'query' || op.type === 'mutation' || op.type === 'subscription') {
+        opTypeMap.set(op.name, op.type);
+      }
+    }
+
+    // Step 5: Enrich pages dataFetching
+    for (const page of analysis.pages) {
+      // Get existing operation names
+      const existingOps = new Set(
+        page.dataFetching.map((df) => df.operationName?.replace(/^[→\->\s]+/, '') || '')
+      );
+
+      // Check components (containers) that this page uses
+      const pageComponent = analysis.components.find(
+        (c) => c.filePath === `src/pages/${page.filePath}`
+      );
+
+      if (!pageComponent) continue;
+
+      // Collect hooks from page component and its dependencies
+      const hooksToCheck: string[] = [];
+      hooksToCheck.push(...pageComponent.hooks.filter((h) => h.startsWith('use')));
+      // Also check dependencies that are hooks
+      for (const dep of pageComponent.dependencies) {
+        if (dep.startsWith('use')) {
+          hooksToCheck.push(dep);
+        }
+      }
+
+      // Add GraphQL operations from hooks
+      for (const hookName of hooksToCheck) {
+        const graphqlOps = hookToGraphQL.get(hookName);
+        if (!graphqlOps) continue;
+
+        for (const opName of graphqlOps) {
+          if (existingOps.has(opName)) continue;
+          existingOps.add(opName);
+
+          const opType = opTypeMap.get(opName) || 'query';
+          page.dataFetching.push({
+            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
+            operationName: `→ ${opName}`,
+            source: `hook:${hookName}`,
+          });
+        }
+      }
+
+      // Add GraphQL operations from imported files (file path based matching)
+      if (pageComponent.imports) {
+        for (const imp of pageComponent.imports) {
+          // Resolve relative import path to absolute path from page's directory
+          const pageDir = path.dirname(pageComponent.filePath);
+          let resolvedPath = imp.path;
+
+          if (imp.path.startsWith('.')) {
+            // Resolve relative path
+            resolvedPath = path.join(pageDir, imp.path);
+            // Normalize (remove .., .)
+            resolvedPath = path.normalize(resolvedPath);
+          } else if (imp.path.startsWith('@/')) {
+            // Handle @/ alias (common in Next.js projects)
+            resolvedPath = imp.path.replace('@/', 'src/');
+          }
+
+          // Remove extension for matching
+          resolvedPath = resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, '');
+
+          // Check if this file contains GraphQL operations
+          const graphqlOps = filePathToGraphQL.get(resolvedPath);
+          if (!graphqlOps) continue;
+
+          for (const op of graphqlOps) {
+            if (existingOps.has(op.opName)) continue;
+            existingOps.add(op.opName);
+
+            page.dataFetching.push({
+              type: op.opType === 'mutation' ? 'useMutation' : 'useQuery',
+              operationName: `→ ${op.opName}`,
+              source: `import:${imp.path}`,
+            });
+          }
+        }
+      }
+    }
+
+    // Step 6: Also enrich components with container type
+    for (const comp of analysis.components) {
+      if (comp.type !== 'container' && comp.type !== 'page') continue;
+
+      // Find matching page to add dataFetching
+      const matchingPage = analysis.pages.find(
+        (p) => p.component === comp.name || p.filePath?.includes(comp.name)
+      );
+      if (!matchingPage) continue;
+
+      // Get existing operation names from page
+      const existingOps = new Set(
+        matchingPage.dataFetching.map((df) => df.operationName?.replace(/^[→\->\s]+/, '') || '')
+      );
+
+      // Check hooks in this component
+      for (const hookName of comp.hooks) {
+        if (!hookName.startsWith('use')) continue;
+
+        const graphqlOps = hookToGraphQL.get(hookName);
+        if (!graphqlOps) continue;
+
+        for (const opName of graphqlOps) {
+          if (existingOps.has(opName)) continue;
+          existingOps.add(opName);
+
+          const opType = opTypeMap.get(opName) || 'query';
+          matchingPage.dataFetching.push({
+            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
+            operationName: `→ ${opName}`,
+            source: `component:${comp.name}`,
+          });
+        }
+      }
+
+      // Also check dependencies that are hooks
+      for (const dep of comp.dependencies) {
+        if (!dep.startsWith('use')) continue;
+
+        const graphqlOps = hookToGraphQL.get(dep);
+        if (!graphqlOps) continue;
+
+        for (const opName of graphqlOps) {
+          if (existingOps.has(opName)) continue;
+          existingOps.add(opName);
+
+          const opType = opTypeMap.get(opName) || 'query';
+          matchingPage.dataFetching.push({
+            type: opType === 'mutation' ? 'useMutation' : 'useQuery',
+            operationName: `→ ${opName}`,
+            source: `component:${comp.name}`,
+          });
+        }
+      }
+
+      // Also check imported files for GraphQL operations
+      if (comp.imports) {
+        for (const imp of comp.imports) {
+          const compDir = path.dirname(comp.filePath);
+          let resolvedPath = imp.path;
+
+          if (imp.path.startsWith('.')) {
+            resolvedPath = path.normalize(path.join(compDir, imp.path));
+          } else if (imp.path.startsWith('@/')) {
+            resolvedPath = imp.path.replace('@/', 'src/');
+          }
+
+          resolvedPath = resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, '');
+
+          const graphqlOps = filePathToGraphQL.get(resolvedPath);
+          if (!graphqlOps) continue;
+
+          for (const op of graphqlOps) {
+            if (existingOps.has(op.opName)) continue;
+            existingOps.add(op.opName);
+
+            matchingPage.dataFetching.push({
+              type: op.opType === 'mutation' ? 'useMutation' : 'useQuery',
+              operationName: `→ ${op.opName}`,
+              source: `component:${comp.name}`,
+            });
+          }
+        }
+      }
+    }
   }
 
   /**
