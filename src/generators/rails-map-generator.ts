@@ -576,10 +576,112 @@ export class RailsMapGenerator {
       detailPanel.classList.add('open');
     };
 
-    function renderDiagramView() {
-      const topModels = [...models]
+    // Diagram state
+    let diagramModelCount = 15;
+    let diagramNamespace = 'all';
+    let diagramFocusModel = '';
+    let diagramDepth = 2;
+
+    function getNamespaces() {
+      const ns = new Set();
+      const prefixes = new Map(); // Count common prefixes
+
+      models.forEach(m => {
+        const name = m.name || m.className || '';
+        // Check for Ruby namespace (::)
+        if (name.includes('::')) {
+          ns.add(name.split('::')[0]);
+        }
+        // Also try to find common prefixes (e.g., User, UserProfile, UserSetting -> User)
+        const match = name.match(/^([A-Z][a-z]+)/);
+        if (match) {
+          const prefix = match[1];
+          prefixes.set(prefix, (prefixes.get(prefix) || 0) + 1);
+        }
+      });
+
+      // Add prefixes that have 3+ models as pseudo-namespaces
+      prefixes.forEach((count, prefix) => {
+        if (count >= 3 && !ns.has(prefix)) {
+          ns.add(prefix + '*'); // Mark as prefix-based filter
+        }
+      });
+
+      return ['all', ...Array.from(ns).sort()];
+    }
+
+    function getModelNames() {
+      return models.map(m => m.name || m.className).sort();
+    }
+
+    // Get related models up to specified depth
+    function getRelatedModels(centerModel, depth) {
+      const related = new Set([centerModel]);
+      const modelMap = new Map();
+      models.forEach(m => {
+        const name = m.name || m.className;
+        modelMap.set(name, m);
+      });
+
+      for (let d = 0; d < depth; d++) {
+        const currentModels = [...related];
+        currentModels.forEach(modelName => {
+          const model = modelMap.get(modelName);
+          if (!model) return;
+
+          model.associations.forEach(assoc => {
+            const targetName = assoc.className || capitalize(singularize(assoc.name));
+            if (modelMap.has(targetName)) {
+              related.add(targetName);
+            }
+          });
+
+          // Also find models that reference this model
+          models.forEach(m => {
+            const mName = m.name || m.className;
+            m.associations.forEach(assoc => {
+              const targetName = assoc.className || capitalize(singularize(assoc.name));
+              if (targetName === modelName) {
+                related.add(mName);
+              }
+            });
+          });
+        });
+      }
+
+      return related;
+    }
+
+    function generateMermaidCode(modelCount, namespace, focusModel, depth) {
+      let filteredModels = [...models];
+
+      // Filter by focus model (takes priority)
+      if (focusModel && focusModel !== '') {
+        const relatedNames = getRelatedModels(focusModel, depth);
+        filteredModels = filteredModels.filter(m => {
+          const name = m.name || m.className;
+          return relatedNames.has(name);
+        });
+      }
+      // Filter by namespace
+      else if (namespace !== 'all') {
+        filteredModels = filteredModels.filter(m => {
+          const name = m.name || m.className || '';
+          // Handle prefix-based filter (ends with *)
+          if (namespace.endsWith('*')) {
+            const prefix = namespace.slice(0, -1);
+            return name.startsWith(prefix);
+          }
+          // Handle Ruby namespace (::)
+          return name.startsWith(namespace + '::') || name === namespace;
+        });
+      }
+
+      // Sort and limit
+      const count = modelCount === 'all' ? filteredModels.length : parseInt(modelCount) || 15;
+      const topModels = filteredModels
         .sort((a, b) => b.associations.length - a.associations.length)
-        .slice(0, 15);
+        .slice(0, count);
 
       const modelNames = new Set(topModels.map(m => m.name || m.className));
       let mermaidCode = 'erDiagram\\n';
@@ -612,12 +714,163 @@ export class RailsMapGenerator {
         });
       }
 
+      return { mermaidCode, modelCount: topModels.length, totalModels: filteredModels.length };
+    }
+
+    window.toggleCustomInput = function() {
+      const countSelect = document.getElementById('model-count-select');
+      const customWrapper = document.getElementById('custom-input-wrapper');
+      if (countSelect.value === 'custom') {
+        customWrapper.style.display = 'flex';
+        document.getElementById('model-count-input').focus();
+      } else {
+        customWrapper.style.display = 'none';
+        document.getElementById('model-count-input').value = '';
+        updateDiagram();
+      }
+    };
+
+    window.clearFocusModel = function() {
+      document.getElementById('focus-model-select').value = '';
+      diagramFocusModel = '';
+      updateDiagram();
+    };
+
+    window.updateDiagram = function() {
+      const countInput = document.getElementById('model-count-input');
+      const countSelect = document.getElementById('model-count-select');
+      const nsSelect = document.getElementById('namespace-select');
+      const focusSelect = document.getElementById('focus-model-select');
+      const depthSelect = document.getElementById('depth-select');
+
+      // Get count from input or select
+      let count;
+      if (countSelect && countSelect.value === 'custom') {
+        count = countInput ? countInput.value.trim() || '15' : '15';
+      } else {
+        count = countSelect ? countSelect.value : '15';
+      }
+      diagramModelCount = count;
+      diagramNamespace = nsSelect ? nsSelect.value : 'all';
+      diagramFocusModel = focusSelect ? focusSelect.value : '';
+      diagramDepth = depthSelect ? parseInt(depthSelect.value) || 2 : 2;
+
+      // If focus model is set, disable namespace filter and enable depth
+      if (nsSelect) {
+        nsSelect.disabled = diagramFocusModel !== '';
+        nsSelect.style.opacity = diagramFocusModel !== '' ? '0.5' : '1';
+      }
+      if (depthSelect) {
+        depthSelect.disabled = diagramFocusModel === '';
+        depthSelect.style.opacity = diagramFocusModel !== '' ? '1' : '0.5';
+        const depthLabel = depthSelect.parentElement?.querySelector('span');
+        if (depthLabel) {
+          depthLabel.style.opacity = diagramFocusModel !== '' ? '1' : '0.5';
+        }
+      }
+
+      const { mermaidCode, modelCount, totalModels } = generateMermaidCode(count, diagramNamespace, diagramFocusModel, diagramDepth);
+
+      // Update diagram - need to recreate SVG
+      const container = document.getElementById('mermaid-container');
+      const diagram = document.getElementById('mermaid-diagram');
+      if (diagram && window.mermaid) {
+        // Remove old SVG
+        const oldSvg = container.querySelector('svg');
+        if (oldSvg) oldSvg.remove();
+
+        // Update mermaid code
+        diagram.textContent = mermaidCode;
+        diagram.removeAttribute('data-processed');
+        diagram.style.display = 'block';
+
+        // Re-render
+        window.mermaid.init(undefined, diagram);
+        setTimeout(() => {
+          initDiagramPanZoom();
+        }, 200);
+      }
+
+      // Update title
+      const title = document.querySelector('.diagram-title-text');
+      if (title) {
+        let filterText = '';
+        if (diagramFocusModel) {
+          filterText = \` around \${diagramFocusModel} (depth \${diagramDepth})\`;
+        } else if (diagramNamespace !== 'all') {
+          filterText = \` in \${diagramNamespace}\`;
+        }
+        title.textContent = \`Model Relationships (\${modelCount}/\${totalModels} models\${filterText})\`;
+      }
+    };
+
+    function renderDiagramView() {
+      const namespaces = getNamespaces();
+      const modelNames = getModelNames();
+      const { mermaidCode, modelCount, totalModels } = generateMermaidCode(diagramModelCount, diagramNamespace, diagramFocusModel, diagramDepth);
+
+      let filterText = '';
+      if (diagramFocusModel) {
+        filterText = \` around \${diagramFocusModel} (depth \${diagramDepth})\`;
+      } else if (diagramNamespace !== 'all') {
+        filterText = \` in \${diagramNamespace}\`;
+      }
+
+      const isCustom = !['15', '30', '50', '100', 'all'].includes(String(diagramModelCount));
+
       return \`
-        <div class="panel-header">
-          <div class="panel-title">Model Relationships (Top 15 by associations)</div>
-        </div>
-        <div class="mermaid-container" id="mermaid-container">
-          <pre class="mermaid" id="mermaid-diagram">\${mermaidCode}</pre>
+        <div class="diagram-view-wrapper" style="display:flex;flex-direction:column;height:100%;min-height:0;">
+          <div class="panel-header" style="flex-wrap:wrap;gap:8px;flex-shrink:0;">
+            <div class="panel-title diagram-title-text">Model Relationships (\${modelCount}/\${totalModels} models\${filterText})</div>
+            <div class="diagram-filters" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;">
+              <label style="display:flex;align-items:center;gap:6px;">
+                <span>Limit:</span>
+                <select id="model-count-select" onchange="toggleCustomInput()" style="padding:6px 10px;border-radius:4px;background:#2d2d2d;color:#fff;border:1px solid #444;min-width:80px;">
+                  <option value="15" \${diagramModelCount == 15 ? 'selected' : ''}>15</option>
+                  <option value="30" \${diagramModelCount == 30 ? 'selected' : ''}>30</option>
+                  <option value="50" \${diagramModelCount == 50 ? 'selected' : ''}>50</option>
+                  <option value="100" \${diagramModelCount == 100 ? 'selected' : ''}>100</option>
+                  <option value="all" \${diagramModelCount === 'all' ? 'selected' : ''}>All (\${models.length})</option>
+                  <option value="custom" \${isCustom ? 'selected' : ''}>Custom...</option>
+                </select>
+                <div id="custom-input-wrapper" style="display:\${isCustom ? 'flex' : 'none'};align-items:center;gap:4px;">
+                  <input type="number" id="model-count-input" placeholder="Enter number" min="1" max="\${models.length}"
+                    value="\${isCustom ? diagramModelCount : ''}"
+                    style="width:100px;padding:6px 10px;border-radius:4px;background:#2d2d2d;color:#fff;border:1px solid #444;"
+                    onchange="updateDiagram()" onkeyup="if(event.key==='Enter')updateDiagram()">
+                  <button onclick="updateDiagram()" style="padding:6px 12px;border-radius:4px;background:#3b82f6;color:#fff;border:none;cursor:pointer;">Apply</button>
+                </div>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;">
+                <span>Namespace:</span>
+                <select id="namespace-select" onchange="updateDiagram()" style="padding:6px 10px;border-radius:4px;background:#2d2d2d;color:#fff;border:1px solid #444;\${diagramFocusModel ? 'opacity:0.5;' : ''}" \${diagramFocusModel ? 'disabled' : ''}>
+                  <option value="all" \${diagramNamespace === 'all' ? 'selected' : ''}>All</option>
+                  \${namespaces.filter(ns => ns !== 'all').map(ns => \`<option value="\${ns}" \${diagramNamespace === ns ? 'selected' : ''}>\${ns}</option>\`).join('')}
+                </select>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;">
+                <span>Focus:</span>
+                <select id="focus-model-select" onchange="updateDiagram()" style="padding:6px 10px;border-radius:4px;background:#2d2d2d;color:#fff;border:1px solid #444;max-width:150px;">
+                  <option value="">None</option>
+                  \${modelNames.map(name => \`<option value="\${name}" \${diagramFocusModel === name ? 'selected' : ''}>\${name}</option>\`).join('')}
+                </select>
+                \${diagramFocusModel ? \`<button onclick="clearFocusModel()" style="padding:4px 8px;border-radius:4px;background:#666;color:#fff;border:none;cursor:pointer;" title="Clear focus">✕</button>\` : ''}
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;">
+                <span style="opacity:\${diagramFocusModel ? 1 : 0.5}">Depth:</span>
+                <select id="depth-select" onchange="updateDiagram()" \${diagramFocusModel ? '' : 'disabled'} style="padding:6px 10px;border-radius:4px;background:#2d2d2d;color:#fff;border:1px solid #444;opacity:\${diagramFocusModel ? 1 : 0.5}">
+                  <option value="1" \${diagramDepth === 1 ? 'selected' : ''}>1</option>
+                  <option value="2" \${diagramDepth === 2 ? 'selected' : ''}>2</option>
+                  <option value="3" \${diagramDepth === 3 ? 'selected' : ''}>3</option>
+                  <option value="4" \${diagramDepth === 4 ? 'selected' : ''}>4</option>
+                  <option value="5" \${diagramDepth === 5 ? 'selected' : ''}>5</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="mermaid-container" id="mermaid-container" style="flex:1;min-height:0;">
+            <pre class="mermaid" id="mermaid-diagram">\${mermaidCode}</pre>
+          </div>
         </div>
       \`;
     }
@@ -660,6 +913,20 @@ export class RailsMapGenerator {
       const container = document.getElementById('mermaid-container');
       const svg = container?.querySelector('svg');
       if (!svg) return;
+
+      // Calculate dynamic max zoom based on SVG size
+      const svgRect = svg.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const svgWidth = svgRect.width || 1000;
+      const svgHeight = svgRect.height || 500;
+
+      // Max zoom: allow reading small text clearly
+      // For very wide diagrams (many models), need much higher zoom
+      const minZoom = 0.01;
+      const maxZoom = Math.max(100, Math.ceil(svgWidth / 20)); // Very aggressive zoom
+      window.diagramMaxZoom = maxZoom;
+      window.diagramMinZoom = minZoom;
+      console.log('Diagram zoom range:', minZoom, '-', maxZoom, 'x (SVG width:', svgWidth, 'px)');
 
       let scale = 1;
       let translateX = 0;
@@ -855,11 +1122,13 @@ export class RailsMapGenerator {
         svg.style.transform = \`translate(\${translateX}px, \${translateY}px) scale(\${scale})\`;
       }
 
-      // Mouse wheel zoom
+      // Mouse wheel zoom (extended range: 0.3x to 10x)
       container.addEventListener('wheel', (e) => {
         e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        scale = Math.max(0.3, Math.min(3, scale + delta));
+        // Dynamic step: larger steps at higher zoom levels for faster navigation
+        const step = Math.max(0.1, scale * 0.15);
+        const delta = e.deltaY > 0 ? -step : step;
+        scale = Math.max(minZoom, Math.min(maxZoom, scale + delta));
         updateTransform();
       }, { passive: false });
 
@@ -886,7 +1155,7 @@ export class RailsMapGenerator {
             e.touches[0].clientY - e.touches[1].clientY
           );
           const delta = (dist - lastTouchDist) * 0.01;
-          scale = Math.max(0.3, Math.min(3, scale + delta));
+          scale = Math.max(minZoom, Math.min(maxZoom, scale + delta));
           lastTouchDist = dist;
           updateTransform();
         } else if (e.touches.length === 1 && isDragging) {
@@ -925,7 +1194,10 @@ export class RailsMapGenerator {
 
       // Global functions for controls
       window.diagramZoom = (delta) => {
-        scale = Math.max(0.3, Math.min(3, scale + delta));
+        // Dynamic step based on current scale
+        const step = Math.max(0.2, scale * 0.2);
+        const actualDelta = delta > 0 ? step : -step;
+        scale = Math.max(minZoom, Math.min(maxZoom, scale + actualDelta));
         updateTransform();
       };
 
