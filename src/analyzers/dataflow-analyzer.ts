@@ -69,7 +69,8 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     const dirs = [...new Set([...configuredDirs, ...commonDirs])];
 
     // Search all directories at once using glob patterns
-    const patterns = dirs.map((dir) => `${dir}/**/*.tsx`);
+    // Include both .tsx and .ts files to analyze custom hooks with GraphQL
+    const patterns = dirs.flatMap((dir) => [`${dir}/**/*.tsx`, `${dir}/**/*.ts`]);
     const files = await fg(patterns, {
       cwd: this.basePath,
       ignore: [
@@ -599,10 +600,13 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
       if (variableOperationMap.has(argName)) return true;
 
       // Check if name ends with Document, Query (capitalized), or Mutation
+      // Supports both PascalCase (GetUserQuery) and UPPER_SNAKE_CASE (GET_USER_QUERY)
       if (
         argName.endsWith('Document') ||
         /[A-Z][a-z]*Query$/.test(argName) ||
-        /[A-Z][a-z]*Mutation$/.test(argName)
+        /[A-Z][a-z]*Mutation$/.test(argName) ||
+        /^[A-Z][A-Z0-9_]*_QUERY$/.test(argName) ||
+        /^[A-Z][A-Z0-9_]*_MUTATION$/.test(argName)
       ) {
         return true;
       }

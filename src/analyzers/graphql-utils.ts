@@ -512,10 +512,13 @@ export function hasGraphQLArgument(
     if (context.variableOperations.has(argName)) return true;
 
     // Check if name ends with Document, or looks like a GraphQL query name
+    // Supports both PascalCase (GetUserQuery) and UPPER_SNAKE_CASE (GET_USER_QUERY)
     if (
       argName.endsWith('Document') ||
       /^[A-Z][a-zA-Z0-9]*Query$/.test(argName) ||
-      /^[A-Z][a-zA-Z0-9]*Mutation$/.test(argName)
+      /^[A-Z][a-zA-Z0-9]*Mutation$/.test(argName) ||
+      /^[A-Z][A-Z0-9_]*_QUERY$/.test(argName) ||
+      /^[A-Z][A-Z0-9_]*_MUTATION$/.test(argName)
     ) {
       return true;
     }

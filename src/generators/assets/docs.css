@@ -173,6 +173,7 @@ body {
 .content td {
   max-width: 500px;
   vertical-align: middle;
+  word-break: break-all;
 }
 
 .content th {
