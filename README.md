@@ -101,13 +101,16 @@ npx @wtdlee/repomap serve
 repomap serve [options]
   -p, --port <number>  Server port (default: 3030)
   -c, --config <path>  Path to config file
+  -o, --output <path>  Output directory (default: .repomap)
   --path <path>        Path to repository to analyze
+  --temp               Use OS temp directory (no files in repository)
   --no-open            Don't open browser automatically
 
 # generate command options
 repomap generate [options]
   -c, --config <path>  Path to config file
-  -o, --output <path>  Output directory
+  -o, --output <path>  Output directory (default: .repomap)
+  --temp               Use OS temp directory (no files in repository)
   --repo <name>        Analyze specific repository only
   --watch              Watch for changes and regenerate
   --static             Generate standalone HTML files (for GitHub Pages)
@@ -118,6 +121,19 @@ repomap generate [options]
 repomap rails [options]
   --path <path>        Path to Rails application
   -o, --output <path>  Output HTML file path
+```
+
+### Output Directory Options
+
+```bash
+# Default: creates .repomap in current directory
+repomap serve
+
+# Custom output directory
+repomap serve -o ./docs
+
+# Temporary directory (auto-cleaned on exit)
+repomap serve --temp
 ```
 
 ## CI/CD Integration

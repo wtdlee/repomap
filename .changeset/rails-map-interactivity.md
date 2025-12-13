@@ -2,6 +2,13 @@
 "@wtdlee/repomap": minor
 ---
 
+### New Features
+
+- **`--temp` option**: Use OS temp directory to avoid creating files in repository
+  - Auto-cleanup on server exit (Ctrl+C)
+  - Works with both `serve` and `generate` commands
+- **`-o, --output` for serve**: Specify custom output directory for serve command
+
 ### Rails Map Enhancements
 
 - **Fullscreen mode**: View ER diagrams in fullscreen with the ⛶ button

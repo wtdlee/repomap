@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import { DocGeneratorEngine } from './core/engine.js';
 import { DocServer } from './server/doc-server.js';
 import type {
@@ -12,6 +13,32 @@ import type {
   DocumentationReport,
   AnalyzerType,
 } from './types.js';
+
+/**
+ * Create temporary output directory
+ */
+function createTempOutputDir(): string {
+  const tempBase = os.tmpdir();
+  const tempDir = path.join(tempBase, `repomap-${Date.now()}`);
+  return tempDir;
+}
+
+/**
+ * Setup cleanup handler for temp directory
+ */
+function setupTempCleanup(tempDir: string): void {
+  const cleanup = async () => {
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors - temp files will be cleaned by OS eventually
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+}
 
 const program = new Command();
 
@@ -212,6 +239,7 @@ program
   .description('Generate documentation from source code')
   .option('-c, --config <path>', 'Path to config file')
   .option('-o, --output <path>', 'Output directory')
+  .option('--temp', 'Use temporary directory (no files in repository)')
   .option('--repo <name>', 'Analyze specific repository only')
   .option('--watch', 'Watch for changes and regenerate')
   .option('--format <type>', 'Output format: json, html, markdown (default: all)', 'all')
@@ -228,7 +256,15 @@ program
       const cwd = process.cwd();
       const config = await loadConfig(options.config, cwd);
 
-      // Override output if specified
+      // Use temp directory if specified
+      if (options.temp) {
+        config.outputDir = createTempOutputDir();
+        if (!isCI) {
+          console.log(chalk.cyan(`📁 Using temp directory: ${config.outputDir}\n`));
+        }
+      }
+
+      // Override output if specified (takes precedence over --temp)
       if (options.output) {
         config.outputDir = options.output;
       }
@@ -355,7 +391,9 @@ program
   .description('Start local documentation server with live reload')
   .option('-c, --config <path>', 'Path to config file')
   .option('--path <path>', 'Path to repository to analyze (auto-detect if no config)')
+  .option('-o, --output <path>', 'Output directory (default: .repomap in target path)')
   .option('-p, --port <number>', 'Server port', '3030')
+  .option('--temp', 'Use temporary directory (no files in repository)')
   .option('--no-open', "Don't open browser automatically")
   .action(async (options) => {
     console.log(chalk.blue.bold('\n🌐 Repomap\n'));
@@ -363,6 +401,18 @@ program
     try {
       const targetPath = options.path || process.cwd();
       const config = await loadConfig(options.config, targetPath);
+
+      // Use temp directory if specified
+      if (options.temp) {
+        config.outputDir = createTempOutputDir();
+        console.log(chalk.cyan(`📁 Using temp directory: ${config.outputDir}\n`));
+        setupTempCleanup(config.outputDir);
+      }
+
+      // Override output if specified (takes precedence over --temp)
+      if (options.output) {
+        config.outputDir = path.resolve(options.output);
+      }
 
       const server = new DocServer(config, parseInt(options.port));
       await server.start(!options.open);
