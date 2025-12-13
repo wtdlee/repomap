@@ -74,7 +74,8 @@ body {
   padding: 32px;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  overflow-x: auto;
+  /* Keep vertical scrolling on .content-area so sticky works correctly */
+  overflow-x: visible;
   max-width: 100%;
 }
 
@@ -139,6 +140,23 @@ body {
   margin: 12px 0;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.content pre.mermaid {
+  /* Mermaid is rendered into SVG; don't treat it like a code block */
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  overflow: visible;
+  margin: 0;
+}
+
+.content pre.mermaid code {
+  background: none;
+  padding: 0;
+  border: none;
+  color: inherit;
 }
 
 .content pre code {
@@ -306,6 +324,9 @@ body {
 }
 
 /* Toggle filters for operation groups */
+.dataflow-page-flows {
+  position: relative;
+}
 .ops-filters {
   display: flex;
   flex-wrap: wrap;
@@ -316,7 +337,7 @@ body {
   background: rgba(148, 163, 184, 0.12);
   border-radius: 10px;
   position: sticky;
-  top: 10px;
+  top: 0;
   z-index: 6;
   backdrop-filter: blur(6px);
 }

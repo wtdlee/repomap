@@ -671,6 +671,8 @@ export class MarkdownGenerator {
     // Page-based data flow
     lines.push('## Page Data Flows');
     lines.push('');
+    // Wrap this whole section so the sticky filter is bounded to it (not "fixed" for the entire doc).
+    lines.push('<div class="dataflow-page-flows">');
     lines.push(
       [
         '<div class="ops-filters" data-filter-scope="dataflow">',
@@ -812,6 +814,8 @@ export class MarkdownGenerator {
       lines.push('---');
       lines.push('');
     }
+
+    lines.push('</div>');
 
     // Context providers
     const providers = new Set<string>();

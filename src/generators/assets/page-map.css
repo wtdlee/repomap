@@ -306,98 +306,59 @@ body {
   margin-bottom: 8px;
 }
 
-/* Data operation grouping (modern, readable) */
-.detail details.data-path-group,
-.detail details.data-source-group {
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(148, 163, 184, 0.06);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.detail details.data-path-group[open],
-.detail details.data-source-group[open] {
-  background: rgba(148, 163, 184, 0.08);
-}
-
-.detail summary.data-path-header,
-.detail summary.data-source-header {
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  padding-left: var(--pad-left, 12px);
-  cursor: pointer;
-  user-select: none;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.detail summary.data-source-header {
-  padding: 8px 12px;
-  padding-left: var(--pad-left, 12px);
-}
-
-.detail summary.data-path-header::-webkit-details-marker,
-.detail summary.data-source-header::-webkit-details-marker {
-  display: none;
-}
-.detail summary.data-path-header::marker,
-.detail summary.data-source-header::marker {
-  content: '';
-}
-
-/* Subtle chevron (no '↳' text) */
-.detail details.data-path-group > summary::before {
-  content: '';
-  /* Slightly smaller chevron for top group */
-  width: 7px;
-  height: 7px;
-  border-right: 2px solid rgba(148, 163, 184, 0.9);
-  border-bottom: 2px solid rgba(148, 163, 184, 0.9);
-  transform: rotate(-45deg);
-  transform-origin: 50% 50%;
-  transition: transform 0.15s ease;
-  flex: 0 0 auto;
-}
-.detail details.data-source-group > summary::before {
-  content: '';
-  /* Nested group: a bit smaller */
-  width: 6px;
-  height: 6px;
-  border-right: 2px solid rgba(148, 163, 184, 0.85);
-  border-bottom: 2px solid rgba(148, 163, 184, 0.85);
-  transform: rotate(-45deg);
-  transform-origin: 50% 50%;
-  transition: transform 0.15s ease;
-  flex: 0 0 auto;
-}
-.detail details[open].data-path-group > summary::before,
-.detail details[open].data-source-group > summary::before {
-  transform: rotate(45deg);
+/* Data operation grouping (simple / readable) */
+.detail details.data-path-group {
+  border: none;
+  background: transparent;
+  border-radius: 0;
 }
 
 .detail summary.data-path-header {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  /* Outdent header one level vs items */
+  padding-left: max(0px, calc(var(--pad-left, 12px) - 4px));
+  cursor: pointer;
+  user-select: none;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--accent);
 }
-.detail summary.data-source-header {
+
+.detail summary.data-path-header::-webkit-details-marker {
+  display: none;
+}
+.detail summary.data-path-header::marker {
+  content: '';
+}
+
+/* Small chevron for path groups only */
+.detail details.data-path-group > summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 2px solid rgba(59, 130, 246, 0.85);
+  border-bottom: 2px solid rgba(59, 130, 246, 0.85);
+  transform: rotate(-45deg);
+  transform-origin: 50% 50%;
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+.detail details[open].data-path-group > summary::before {
+  transform: rotate(45deg);
+}
+
+/* Source header inside the group (not collapsible) */
+.detail .data-source-header {
+  padding: 6px 0 2px;
+  color: var(--accent);
+  opacity: 0.9;
+  word-break: break-all;
   font-size: 11px;
   font-weight: 500;
-  color: var(--text2);
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-    monospace;
-}
-
-.detail summary.data-path-header:hover,
-.detail summary.data-source-header:hover {
-  background: rgba(148, 163, 184, 0.08);
-}
-
-.detail summary.data-path-header .text-accent {
-  color: #e2e8f0;
 }
 
 .detail .data-path-group .detail-item.data-op:hover {
@@ -407,6 +368,7 @@ body {
   background: var(--bg3);
   padding: 8px 10px;
   border-radius: 4px;
+  margin-bottom: 4px;
   font-size: 12px;
   display: flex;
   align-items: center;

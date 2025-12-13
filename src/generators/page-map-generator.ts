@@ -2350,10 +2350,11 @@ export class PageMapGenerator {
               const hasSourceHeader = !!sourceKey && sourceKeys.length > 1;
 
               if (hasSourceHeader) {
-                dataHtml += '<details class="data-source-group" style="margin:6px" open>' +
-                  '<summary class="data-source-header" style="--pad-left:'+totalPadding+'px">' +
-                  '<span style="opacity:0.9">' + sourceKey + '</span> (' + sourceOps.length + ')' +
-                  '</summary>';
+                const sourceFileName = String(sourceKey).split(/[\\/]/).pop() || String(sourceKey);
+                dataHtml += '<div class="data-source-group" style="margin:6px 0">' +
+                  '<div class="data-source-header" style="padding-left:'+totalPadding+'px">' +
+                  '<span style="opacity:0.9">' + sourceFileName + '</span> (' + sourceOps.length + ')' +
+                  '</div>';
               }
 
               sourceOps.forEach(op => {
@@ -2368,7 +2369,7 @@ export class PageMapGenerator {
               });
 
               if (hasSourceHeader) {
-                dataHtml += '</details>';
+                dataHtml += '</div>';
               }
             });
 
