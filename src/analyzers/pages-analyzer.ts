@@ -50,7 +50,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
     this.log(`Found ${pageFiles.length} page files`);
 
     // Read all files in parallel batches for better I/O performance
-    const batchSize = 100;
+    const batchSize = 50;
     const fileContents = new Map<string, string>();
 
     for (let i = 0; i < pageFiles.length; i += batchSize) {

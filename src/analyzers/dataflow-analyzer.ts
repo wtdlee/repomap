@@ -87,7 +87,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     this.log(`[DataFlowAnalyzer] Found ${files.length} component files to analyze`);
 
     // Process files in batches to avoid overwhelming I/O
-    const batchSize = 100;
+    const batchSize = 50;
     for (let i = 0; i < files.length; i += batchSize) {
       const batch = files.slice(i, i + batchSize);
 

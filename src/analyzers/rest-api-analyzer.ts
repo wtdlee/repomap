@@ -42,7 +42,7 @@ export class RestApiAnalyzer extends BaseAnalyzer {
     });
 
     // Read and parse files in parallel batches
-    const batchSize = 100;
+    const batchSize = 50;
     const allCalls: APICall[] = [];
 
     for (let i = 0; i < tsFiles.length; i += batchSize) {

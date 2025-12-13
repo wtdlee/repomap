@@ -302,7 +302,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     });
 
     // Process files in parallel batches
-    const batchSize = 100;
+    const batchSize = 50;
     for (let i = 0; i < tsFiles.length; i += batchSize) {
       const batch = tsFiles.slice(i, i + batchSize);
       const results = await parallelMapSafe(
@@ -725,7 +725,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     }
 
     // Process files in parallel batches
-    const batchSize = 100;
+    const batchSize = 50;
     for (let i = 0; i < tsFiles.length; i += batchSize) {
       const batch = tsFiles.slice(i, i + batchSize);
       await Promise.all(
