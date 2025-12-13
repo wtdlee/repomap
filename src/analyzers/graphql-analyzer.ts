@@ -673,6 +673,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
 
   private async findOperationUsage(operations: GraphQLOperation[]): Promise<void> {
     if (operations.length === 0) return;
+    const extraHookPatterns = this.getGraphQLHookPatterns();
 
     const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
@@ -785,7 +786,8 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               filePath,
               relativePath,
               operationByName,
-              operationByQueryType
+              operationByQueryType,
+              extraHookPatterns
             );
           } catch {
             // Skip unreadable files
@@ -803,7 +805,8 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     filePath: string,
     relativePath: string,
     operationByName: Map<string, GraphQLOperation>,
-    operationByQueryType: Map<string, GraphQLOperation>
+    operationByQueryType: Map<string, GraphQLOperation>,
+    extraHookPatterns: string[]
   ): Promise<void> {
     try {
       const isTsx = filePath.endsWith('.tsx') || filePath.endsWith('.jsx');
@@ -820,7 +823,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
           const calleeName = this.getCalleeNameForUsage(node.callee);
 
           // Check if it's a GraphQL hook
-          if (calleeName && isGraphQLHook(calleeName)) {
+          if (calleeName && isGraphQLHook(calleeName, extraHookPatterns)) {
             // Extract type generic: useQuery<GetUserQuery>
             const typeName = this.extractTypeGenericFromCall(node, content);
             if (typeName) {

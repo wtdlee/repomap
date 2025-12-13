@@ -865,7 +865,7 @@ export class RailsMapGenerator {
         <div class="panel-header">
           <div class="panel-title">gRPC Services <span class="panel-count">(\${Math.min(grpcDisplayCount, filteredGrpc.length)} / \${filteredGrpc.length})</span></div>
         </div>
-        <div style="display:grid;gap:12px">
+        <div class="model-card-grid">
           \${displayedGrpc.map((svc, idx) => \`
             <div class="model-card" onclick="showGrpcDetail(\${idx})">
               <div class="model-name">

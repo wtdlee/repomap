@@ -208,11 +208,13 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
 
   private extractImports(ast: Module): Map<string, string> {
     const imports = new Map<string, string>();
+    const aliasPrefixes = this.getListSetting('aliasPrefixes', ['@/', '~/', '#/']);
 
     for (const item of ast.body) {
       if (item.type === 'ImportDeclaration') {
         const source = item.source?.value || '';
-        if (source.startsWith('.') || source.startsWith('@/')) {
+        const isAlias = aliasPrefixes.some((p) => source.startsWith(p));
+        if (source.startsWith('.') || isAlias) {
           for (const spec of item.specifiers || []) {
             if (spec.type === 'ImportSpecifier' && spec.local?.value) {
               imports.set(spec.local.value, source);

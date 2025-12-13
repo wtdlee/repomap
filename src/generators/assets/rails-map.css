@@ -475,6 +475,15 @@ header h1 {
 }
 
 /* Model Card */
+.model-card-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.model-card-grid .model-card {
+  margin-bottom: 0;
+}
+
 .model-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
