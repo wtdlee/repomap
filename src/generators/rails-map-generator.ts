@@ -155,6 +155,11 @@ export class RailsMapGenerator {
     let currentView = 'routes';
     let selectedNamespaces = new Set(['all']);
     let selectedMethods = new Set(['all']);
+    let selectedControllerFlags = new Set(['all']);
+    let selectedModelNamespaces = new Set(['all']);
+    let selectedModelFlags = new Set(['all']);
+    let selectedGrpcNamespaces = new Set(['all']);
+    let selectedGrpcFlags = new Set(['all']);
     let searchQuery = '';
     let routesDisplayCount = 200;
     let controllersDisplayCount = 50;
@@ -229,68 +234,83 @@ export class RailsMapGenerator {
       });
     });
 
-    // Namespace filter (multi-select with Ctrl/Cmd)
-    document.querySelectorAll('.namespace-item[data-namespace]').forEach(item => {
-      item.addEventListener('click', (e) => {
-        const ns = item.dataset.namespace;
-        if (e.ctrlKey || e.metaKey) {
-          // Multi-select
-          if (ns === 'all') {
-            selectedNamespaces = new Set(['all']);
-          } else {
-            selectedNamespaces.delete('all');
-            if (selectedNamespaces.has(ns)) {
-              selectedNamespaces.delete(ns);
-              if (selectedNamespaces.size === 0) selectedNamespaces.add('all');
-            } else {
-              selectedNamespaces.add(ns);
-            }
-          }
-        } else {
-          // Single select
-          selectedNamespaces = new Set([ns]);
-        }
-        updateFilterUI();
-        routesDisplayCount = 200;
-        saveStateToUrl();
-        renderMainPanel();
-      });
-    });
+    // Sidebar filter click handler (works even after sidebar re-render)
+    document.addEventListener('click', (e) => {
+      const target = e.target instanceof Element ? e.target : e.target?.parentElement;
+      if (!target) return;
+      const item = target.closest('.namespace-item');
+      if (!item) return;
 
-    // Method filter (multi-select with Ctrl/Cmd)
-    document.querySelectorAll('.namespace-item[data-method]').forEach(item => {
-      item.addEventListener('click', (e) => {
-        const method = item.dataset.method;
-        if (e.ctrlKey || e.metaKey) {
-          if (selectedMethods.has('all')) {
-            selectedMethods = new Set([method]);
-          } else if (selectedMethods.has(method)) {
-            selectedMethods.delete(method);
-            if (selectedMethods.size === 0) selectedMethods.add('all');
-          } else {
-            selectedMethods.add(method);
-          }
-        } else {
-          if (selectedMethods.has(method) && selectedMethods.size === 1) {
-            selectedMethods = new Set(['all']);
-          } else {
-            selectedMethods = new Set([method]);
-          }
-        }
-        updateFilterUI();
+      const filterType = item.dataset.filterType;
+      const value = item.dataset.filterValue;
+      if (!filterType || value === undefined) return;
+
+      const multi = e.ctrlKey || e.metaKey;
+
+      function toggleMulti(setRef, v) {
+        if (v === 'all') return new Set(['all']);
+        const next = new Set(setRef);
+        next.delete('all');
+        if (next.has(v)) next.delete(v);
+        else next.add(v);
+        if (next.size === 0) next.add('all');
+        return next;
+      }
+
+      function toggleSingle(v) {
+        return new Set([v]);
+      }
+
+      if (filterType === 'routeNamespace') {
+        selectedNamespaces = multi ? toggleMulti(selectedNamespaces, value) : toggleSingle(value);
         routesDisplayCount = 200;
         saveStateToUrl();
-        renderMainPanel();
-      });
+      } else if (filterType === 'routeMethod') {
+        // Methods behave similarly to namespaces
+        selectedMethods = multi ? toggleMulti(selectedMethods, value) : toggleSingle(value);
+        routesDisplayCount = 200;
+        saveStateToUrl();
+      } else if (filterType === 'controllerFlag') {
+        selectedControllerFlags = multi
+          ? toggleMulti(selectedControllerFlags, value)
+          : toggleSingle(value);
+        controllersDisplayCount = 50;
+      } else if (filterType === 'modelNamespace') {
+        selectedModelNamespaces = multi
+          ? toggleMulti(selectedModelNamespaces, value)
+          : toggleSingle(value);
+        modelsDisplayCount = 50;
+      } else if (filterType === 'modelFlag') {
+        selectedModelFlags = multi ? toggleMulti(selectedModelFlags, value) : toggleSingle(value);
+        modelsDisplayCount = 50;
+      } else if (filterType === 'grpcNamespace') {
+        selectedGrpcNamespaces = multi ? toggleMulti(selectedGrpcNamespaces, value) : toggleSingle(value);
+        grpcDisplayCount = 50;
+      } else if (filterType === 'grpcFlag') {
+        selectedGrpcFlags = multi ? toggleMulti(selectedGrpcFlags, value) : toggleSingle(value);
+        grpcDisplayCount = 50;
+      }
+
+      updateFilterUI();
+      renderMainPanel();
     });
 
     function updateFilterUI() {
-      document.querySelectorAll('.namespace-item[data-namespace]').forEach(item => {
-        item.classList.toggle('active', selectedNamespaces.has(item.dataset.namespace));
-      });
-      document.querySelectorAll('.namespace-item[data-method]').forEach(item => {
-        // Only highlight selected methods, not all when 'all' is selected
-        item.classList.toggle('active', selectedMethods.has(item.dataset.method));
+      document.querySelectorAll('.namespace-item[data-filter-type][data-filter-value]').forEach(item => {
+        const t = item.dataset.filterType;
+        const v = item.dataset.filterValue;
+        if (!t || v === undefined) return;
+
+        let active = false;
+        if (t === 'routeNamespace') active = selectedNamespaces.has(v);
+        else if (t === 'routeMethod') active = selectedMethods.has(v);
+        else if (t === 'controllerFlag') active = selectedControllerFlags.has(v);
+        else if (t === 'modelNamespace') active = selectedModelNamespaces.has(v);
+        else if (t === 'modelFlag') active = selectedModelFlags.has(v);
+        else if (t === 'grpcNamespace') active = selectedGrpcNamespaces.has(v);
+        else if (t === 'grpcFlag') active = selectedGrpcFlags.has(v);
+
+        item.classList.toggle('active', active);
       });
     }
 
@@ -302,19 +322,10 @@ export class RailsMapGenerator {
 
     // Render Functions
     function renderMainPanel() {
-      // Disable filters for models/diagram tabs
+      // Update sidebar filters per view (routes/controllers vs models vs grpc)
       const namespaceFilter = document.getElementById('namespaceFilter');
       const methodFilter = document.getElementById('methodFilter');
-      const filtersDisabled = currentView === 'models' || currentView === 'diagram';
-
-      if (namespaceFilter) {
-        namespaceFilter.style.opacity = filtersDisabled ? '0.4' : '1';
-        namespaceFilter.style.pointerEvents = filtersDisabled ? 'none' : 'auto';
-      }
-      if (methodFilter) {
-        methodFilter.style.opacity = filtersDisabled ? '0.4' : '1';
-        methodFilter.style.pointerEvents = filtersDisabled ? 'none' : 'auto';
-      }
+      renderSidebarFilters(namespaceFilter, methodFilter);
 
       switch (currentView) {
         case 'routes':
@@ -335,6 +346,289 @@ export class RailsMapGenerator {
           break;
       }
       attachEventListeners();
+    }
+
+    function renderSidebarFilters(namespaceFilter, methodFilter) {
+      if (!namespaceFilter || !methodFilter) return;
+
+      function sectionHtml(title, listClass, inner) {
+        return (
+          '<div class="sidebar-title">' +
+          title +
+          '</div>' +
+          '<div class="' +
+          listClass +
+          '">' +
+          inner +
+          '</div>'
+        );
+      }
+
+      if (currentView === 'routes') {
+        namespaceFilter.style.opacity = '1';
+        namespaceFilter.style.pointerEvents = 'auto';
+        methodFilter.style.opacity = '1';
+        methodFilter.style.pointerEvents = 'auto';
+
+        namespaceFilter.innerHTML = sectionHtml(
+          'Namespaces',
+          'namespace-list',
+          renderRouteNamespaceFilters()
+        );
+        methodFilter.innerHTML = sectionHtml(
+          'HTTP Methods',
+          'namespace-list methods-list',
+          renderRouteMethodFilters()
+        );
+        return;
+      }
+
+      if (currentView === 'controllers') {
+        namespaceFilter.style.opacity = '1';
+        namespaceFilter.style.pointerEvents = 'auto';
+        methodFilter.style.opacity = '1';
+        methodFilter.style.pointerEvents = 'auto';
+
+        namespaceFilter.innerHTML = sectionHtml(
+          'Controller Namespaces',
+          'namespace-list',
+          renderControllerNamespaceFilters()
+        );
+        methodFilter.innerHTML = sectionHtml(
+          'Controller Filters',
+          'namespace-list methods-list',
+          renderControllerFlagFilters()
+        );
+        return;
+      }
+
+      if (currentView === 'models') {
+        namespaceFilter.style.opacity = '1';
+        namespaceFilter.style.pointerEvents = 'auto';
+        methodFilter.style.opacity = '1';
+        methodFilter.style.pointerEvents = 'auto';
+
+        namespaceFilter.innerHTML = sectionHtml(
+          'Model Namespaces',
+          'namespace-list',
+          renderModelNamespaceFilters()
+        );
+        methodFilter.innerHTML = sectionHtml(
+          'Model Filters',
+          'namespace-list methods-list',
+          renderModelFlagFilters()
+        );
+        return;
+      }
+
+      if (currentView === 'grpc') {
+        namespaceFilter.style.opacity = '1';
+        namespaceFilter.style.pointerEvents = 'auto';
+        methodFilter.style.opacity = '1';
+        methodFilter.style.pointerEvents = 'auto';
+
+        namespaceFilter.innerHTML = sectionHtml(
+          'gRPC Namespaces',
+          'namespace-list',
+          renderGrpcNamespaceFilters()
+        );
+        methodFilter.innerHTML = sectionHtml(
+          'gRPC Filters',
+          'namespace-list methods-list',
+          renderGrpcFlagFilters()
+        );
+        return;
+      }
+
+      // diagram: keep disabled (no meaningful sidebar filters)
+      namespaceFilter.style.opacity = '0.4';
+      namespaceFilter.style.pointerEvents = 'none';
+      methodFilter.style.opacity = '0.4';
+      methodFilter.style.pointerEvents = 'none';
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function renderFilterItem(label, count, filterType, filterValue, isActive) {
+      const safeLabel = escapeHtml(label);
+      const safeType = escapeHtml(filterType);
+      const safeValue = escapeHtml(filterValue);
+      return (
+        '<div class="namespace-item ' +
+        (isActive ? 'active' : '') +
+        '" data-filter-type="' +
+        safeType +
+        '" data-filter-value="' +
+        safeValue +
+        '">' +
+        '<span>' +
+        safeLabel +
+        '</span>' +
+        '<span class="namespace-count">' +
+        count +
+        '</span>' +
+        '</div>'
+      );
+    }
+
+    function renderRouteNamespaceFilters() {
+      const counts = new Map();
+      routes.forEach(r => {
+        const ns = r.namespace || '';
+        counts.set(ns, (counts.get(ns) || 0) + 1);
+      });
+      const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+      const allCount = routes.length;
+      return [
+        renderFilterItem('All', allCount, 'routeNamespace', 'all', selectedNamespaces.has('all')),
+        ...entries.map(([ns, count]) =>
+          renderFilterItem(ns || 'root', count, 'routeNamespace', ns, selectedNamespaces.has(ns))
+        ),
+      ].join('');
+    }
+
+    function renderControllerNamespaceFilters() {
+      const counts = new Map();
+      controllers.forEach(c => {
+        const ns = c.namespace || '';
+        counts.set(ns, (counts.get(ns) || 0) + 1);
+      });
+      const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+      const allCount = controllers.length;
+      return [
+        renderFilterItem('All', allCount, 'routeNamespace', 'all', selectedNamespaces.has('all')),
+        ...entries.map(([ns, count]) =>
+          renderFilterItem(ns || 'root', count, 'routeNamespace', ns, selectedNamespaces.has(ns))
+        ),
+      ].join('');
+    }
+
+    function renderRouteMethodFilters() {
+      const counts = new Map();
+      routes.forEach(r => {
+        const m = r.method || 'ALL';
+        counts.set(m, (counts.get(m) || 0) + 1);
+      });
+      const methods = ['ALL', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+      const allCount = routes.length;
+      return methods.map(m => {
+        const label = m === 'ALL' ? 'All' : m;
+        const value = m === 'ALL' ? 'all' : m;
+        const count = m === 'ALL' ? allCount : (counts.get(m) || 0);
+        const active = selectedMethods.has(value);
+        return renderFilterItem(label, count, 'routeMethod', value, active);
+      }).join('');
+    }
+
+    function renderControllerFlagFilters() {
+      const flags = [
+        {
+          key: 'json',
+          label: 'Renders JSON',
+          test: (c) => (c.actions || []).some((a) => a.rendersJson),
+        },
+        {
+          key: 'redirect',
+          label: 'Has Redirect',
+          test: (c) => (c.actions || []).some((a) => a.redirectsTo),
+        },
+        {
+          key: 'private',
+          label: 'Has Private Actions',
+          test: (c) => (c.actions || []).some((a) => a.visibility === 'private'),
+        },
+      ];
+      const allCount = controllers.length;
+      const items = [
+        renderFilterItem('All', allCount, 'controllerFlag', 'all', selectedControllerFlags.has('all')),
+      ];
+      flags.forEach(f => {
+        const count = controllers.filter(f.test).length;
+        items.push(renderFilterItem(f.label, count, 'controllerFlag', f.key, selectedControllerFlags.has(f.key)));
+      });
+      return items.join('');
+    }
+
+    function getModelNamespace(model) {
+      const p = (model.filePath || '').split('/');
+      if (p.length <= 1) return '';
+      return p.slice(0, -1).join('/');
+    }
+
+    function renderModelNamespaceFilters() {
+      const counts = new Map();
+      models.forEach(m => {
+        const ns = getModelNamespace(m);
+        counts.set(ns, (counts.get(ns) || 0) + 1);
+      });
+      const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+      const allCount = models.length;
+      return [
+        renderFilterItem('All', allCount, 'modelNamespace', 'all', selectedModelNamespaces.has('all')),
+        ...entries.map(([ns, count]) =>
+          renderFilterItem(ns || 'root', count, 'modelNamespace', ns, selectedModelNamespaces.has(ns))
+        ),
+      ].join('');
+    }
+
+    function renderModelFlagFilters() {
+      const flags = [
+        { key: 'assoc', label: 'Has associations', test: (m) => (m.associations || []).length > 0 },
+        { key: 'valid', label: 'Has validations', test: (m) => (m.validations || []).length > 0 },
+        { key: 'cb', label: 'Has callbacks', test: (m) => (m.callbacks || []).length > 0 },
+        { key: 'concern', label: 'Includes concerns', test: (m) => (m.concerns || []).length > 0 },
+        { key: 'enum', label: 'Has enums', test: (m) => (m.enums || []).length > 0 },
+      ];
+      const allCount = models.length;
+      const items = [
+        renderFilterItem('All', allCount, 'modelFlag', 'all', selectedModelFlags.has('all')),
+      ];
+      flags.forEach(f => {
+        const count = models.filter(f.test).length;
+        items.push(renderFilterItem(f.label, count, 'modelFlag', f.key, selectedModelFlags.has(f.key)));
+      });
+      return items.join('');
+    }
+
+    function renderGrpcNamespaceFilters() {
+      const counts = new Map();
+      grpcServices.forEach(s => {
+        const ns = s.namespace || '';
+        counts.set(ns, (counts.get(ns) || 0) + 1);
+      });
+      const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+      const allCount = grpcServices.length;
+      return [
+        renderFilterItem('All', allCount, 'grpcNamespace', 'all', selectedGrpcNamespaces.has('all')),
+        ...entries.map(([ns, count]) =>
+          renderFilterItem(ns || 'root', count, 'grpcNamespace', ns, selectedGrpcNamespaces.has(ns))
+        ),
+      ].join('');
+    }
+
+    function renderGrpcFlagFilters() {
+      const flags = [
+        { key: 'policies', label: 'Has policies', test: (s) => (s.policies || []).length > 0 },
+        { key: 'serializers', label: 'Has serializers', test: (s) => (s.serializers || []).length > 0 },
+        { key: 'concerns', label: 'Includes concerns', test: (s) => (s.concerns || []).length > 0 },
+        { key: 'modelsUsed', label: 'RPC uses models', test: (s) => (s.rpcs || []).some(r => (r.modelsUsed || []).length > 0) },
+        { key: 'servicesUsed', label: 'RPC uses services', test: (s) => (s.rpcs || []).some(r => (r.servicesUsed || []).length > 0) },
+      ];
+      const allCount = grpcServices.length;
+      const items = [
+        renderFilterItem('All', allCount, 'grpcFlag', 'all', selectedGrpcFlags.has('all')),
+      ];
+      flags.forEach(f => {
+        const count = grpcServices.filter(f.test).length;
+        items.push(renderFilterItem(f.label, count, 'grpcFlag', f.key, selectedGrpcFlags.has(f.key)));
+      });
+      return items.join('');
     }
 
     function filterRoutes() {
@@ -407,6 +701,18 @@ export class RailsMapGenerator {
       if (!selectedNamespaces.has('all')) {
         filteredControllers = filteredControllers.filter(c => selectedNamespaces.has(c.namespace || ''));
       }
+      if (!selectedControllerFlags.has('all')) {
+        filteredControllers = filteredControllers.filter((c) => {
+          const rendersJson = (c.actions || []).some((a) => a.rendersJson);
+          const hasRedirect = (c.actions || []).some((a) => a.redirectsTo);
+          const hasPrivate = (c.actions || []).some((a) => a.visibility === 'private');
+
+          if (selectedControllerFlags.has('json') && !rendersJson) return false;
+          if (selectedControllerFlags.has('redirect') && !hasRedirect) return false;
+          if (selectedControllerFlags.has('private') && !hasPrivate) return false;
+          return true;
+        });
+      }
       const displayed = filteredControllers.slice(0, controllersDisplayCount);
       const hasMore = filteredControllers.length > controllersDisplayCount;
 
@@ -458,6 +764,27 @@ export class RailsMapGenerator {
           m.className.toLowerCase().includes(searchQuery)
         );
       }
+      // Model namespace filter
+      if (!selectedModelNamespaces.has('all')) {
+        filteredModels = filteredModels.filter(m => selectedModelNamespaces.has(getModelNamespace(m)));
+      }
+      // Model flag filter
+      if (!selectedModelFlags.has('all')) {
+        filteredModels = filteredModels.filter(m => {
+          const hasAssoc = (m.associations || []).length > 0;
+          const hasValid = (m.validations || []).length > 0;
+          const hasCb = (m.callbacks || []).length > 0;
+          const hasConcern = (m.concerns || []).length > 0;
+          const hasEnum = (m.enums || []).length > 0;
+
+          if (selectedModelFlags.has('assoc') && !hasAssoc) return false;
+          if (selectedModelFlags.has('valid') && !hasValid) return false;
+          if (selectedModelFlags.has('cb') && !hasCb) return false;
+          if (selectedModelFlags.has('concern') && !hasConcern) return false;
+          if (selectedModelFlags.has('enum') && !hasEnum) return false;
+          return true;
+        });
+      }
       const displayed = filteredModels.slice(0, modelsDisplayCount);
       const hasMore = filteredModels.length > modelsDisplayCount;
 
@@ -483,6 +810,7 @@ export class RailsMapGenerator {
         \${hasMore ? \`
           <div class="show-more-container">
             <button class="show-more-btn" onclick="loadMoreModels()">Show More (+50)</button>
+            <button class="show-more-btn" onclick="showAllModels()">Show All</button>
             <span class="show-more-count">\${modelsDisplayCount} / \${filteredModels.length}</span>
           </div>
         \` : ''}
@@ -491,6 +819,11 @@ export class RailsMapGenerator {
 
     window.loadMoreModels = function() {
       modelsDisplayCount += 50;
+      renderMainPanel();
+    };
+
+    window.showAllModels = function() {
+      modelsDisplayCount = filteredModels.length;
       renderMainPanel();
     };
 
@@ -505,6 +838,25 @@ export class RailsMapGenerator {
           (svc.namespace && svc.namespace.toLowerCase().includes(searchQuery)) ||
           (svc.rpcs && svc.rpcs.some(rpc => rpc.name && rpc.name.toLowerCase().includes(searchQuery)))
         );
+      }
+      if (!selectedGrpcNamespaces.has('all')) {
+        filteredGrpc = filteredGrpc.filter(svc => selectedGrpcNamespaces.has(svc.namespace || ''));
+      }
+      if (!selectedGrpcFlags.has('all')) {
+        filteredGrpc = filteredGrpc.filter(svc => {
+          const hasPolicies = (svc.policies || []).length > 0;
+          const hasSerializers = (svc.serializers || []).length > 0;
+          const hasConcerns = (svc.concerns || []).length > 0;
+          const usesModels = (svc.rpcs || []).some(r => (r.modelsUsed || []).length > 0);
+          const usesServices = (svc.rpcs || []).some(r => (r.servicesUsed || []).length > 0);
+
+          if (selectedGrpcFlags.has('policies') && !hasPolicies) return false;
+          if (selectedGrpcFlags.has('serializers') && !hasSerializers) return false;
+          if (selectedGrpcFlags.has('concerns') && !hasConcerns) return false;
+          if (selectedGrpcFlags.has('modelsUsed') && !usesModels) return false;
+          if (selectedGrpcFlags.has('servicesUsed') && !usesServices) return false;
+          return true;
+        });
       }
 
       const displayedGrpc = filteredGrpc.slice(0, grpcDisplayCount);

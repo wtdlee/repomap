@@ -305,6 +305,65 @@ body {
   color: var(--text2);
   margin-bottom: 8px;
 }
+
+/* Data operation grouping (simple / readable) */
+.detail details.data-path-group {
+  border: none;
+  background: transparent;
+  border-radius: 0;
+}
+
+.detail summary.data-path-header {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  /* Outdent header one level vs items */
+  padding-left: max(0px, calc(var(--pad-left, 12px) - 4px));
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.detail summary.data-path-header::-webkit-details-marker {
+  display: none;
+}
+.detail summary.data-path-header::marker {
+  content: '';
+}
+
+/* Small chevron for path groups only */
+.detail details.data-path-group > summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 2px solid rgba(59, 130, 246, 0.85);
+  border-bottom: 2px solid rgba(59, 130, 246, 0.85);
+  transform: rotate(-45deg);
+  transform-origin: 50% 50%;
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+.detail details[open].data-path-group > summary::before {
+  transform: rotate(45deg);
+}
+
+/* Source header inside the group (not collapsible) */
+.detail .data-source-header {
+  padding: 6px 0 2px;
+  color: var(--accent);
+  opacity: 0.9;
+  word-break: break-all;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.detail .data-path-group .detail-item.data-op:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
 .detail-item {
   background: var(--bg3);
   padding: 8px 10px;

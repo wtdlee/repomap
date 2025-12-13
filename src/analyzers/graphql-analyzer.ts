@@ -776,13 +776,16 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               }
               namesPattern.lastIndex = 0;
 
-              // Map found names to operations
+              // Map found names to operations (conservative)
+              //
+              // Important:
+              // - Do NOT use operationByQueryType / operationByName here.
+              //   Query/Mutation type names can appear in many files (type-only imports),
+              //   which causes massive false positives in usedIn.
+              // - Prefer Document references here, and rely on AST-based
+              //   usage analysis below for accurate hook/generic detection.
               for (const name of foundNames) {
-                const operation =
-                  operationByDocument.get(name) ||
-                  operationByVariableName.get(name) ||
-                  operationByQueryType.get(name) ||
-                  operationByName.get(name);
+                const operation = operationByDocument.get(name);
 
                 if (operation && relativePath !== operation.filePath) {
                   if (!operation.usedIn.includes(relativePath)) {

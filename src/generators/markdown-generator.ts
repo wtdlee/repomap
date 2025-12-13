@@ -9,6 +9,12 @@ import type {
   GraphQLField,
 } from '../types.js';
 
+type PageOpGroupKey = 'direct' | 'close' | 'indirect' | 'common';
+
+type PageOpGroups = Record<PageOpGroupKey, { queries: string[]; mutations: string[] }>;
+
+type PageOpGroupSets = Record<PageOpGroupKey, { queries: Set<string>; mutations: Set<string> }>;
+
 /**
  * Markdown documentation generator
  */
@@ -147,202 +153,147 @@ export class MarkdownGenerator {
     for (const [category, pages] of byCategory) {
       lines.push(`## /${category}`);
       lines.push('');
-      lines.push('| Page | Auth | Layout | Data |');
-      lines.push('|------|------|--------|------|');
+      lines.push('| Page | Auth | Layout |');
+      lines.push('|------|------|--------|');
 
       for (const page of pages) {
         const pathDisplay = page.path.replace(`/${category}`, '') || '/';
         const auth = page.authentication.required ? 'Required' : 'Public';
         const layout = page.layout || '-';
-        const dataOps: string[] = [];
-        const seenNames = new Set<string>();
-
-        // Deduplicate queries and mutations by clean name, prioritize direct queries over refs
-        const allDf = page.dataFetching;
-        const queries = allDf.filter((df) => !df.type.includes('Mutation'));
-        const mutations = allDf.filter((df) => df.type.includes('Mutation'));
-
-        // Process queries - deduplicate by clean name, prefer direct over ref
-        const uniqueQueries: { cleanName: string; isRef: boolean }[] = [];
-        for (const q of queries) {
-          const rawName = q.operationName || '';
-          if (!rawName || rawName.trim().length < 2) continue;
-          const isRef = rawName.startsWith('→') || rawName.startsWith('->');
-          const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
-          if (!cleanName || cleanName.length < 2) continue;
-
-          // Skip if already seen, but update to direct if previously was ref
-          const existing = uniqueQueries.find((u) => u.cleanName === cleanName);
-          if (existing) {
-            if (!isRef && existing.isRef) {
-              existing.isRef = false; // Upgrade ref to direct
-            }
-            continue;
-          }
-          if (!seenNames.has(cleanName)) {
-            seenNames.add(cleanName);
-            uniqueQueries.push({ cleanName, isRef });
-          }
-        }
-
-        // Process mutations - deduplicate by clean name, prefer direct over ref
-        const uniqueMutations: { cleanName: string; isRef: boolean }[] = [];
-        for (const m of mutations) {
-          const rawName = m.operationName || '';
-          if (!rawName || rawName.trim().length < 2) continue;
-          const isRef = rawName.startsWith('→') || rawName.startsWith('->');
-          const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
-          if (!cleanName || cleanName.length < 2) continue;
-
-          const existing = uniqueMutations.find((u) => u.cleanName === cleanName);
-          if (existing) {
-            if (!isRef && existing.isRef) {
-              existing.isRef = false;
-            }
-            continue;
-          }
-          if (!seenNames.has(cleanName)) {
-            seenNames.add(cleanName);
-            uniqueMutations.push({ cleanName, isRef });
-          }
-        }
-
-        // Show first 2 unique queries
-        for (const q of uniqueQueries.slice(0, 2)) {
-          if (q.isRef) {
-            dataOps.push(
-              `<span class="gql-ref" data-ref="${q.cleanName}" title="Component">${q.cleanName}</span>`
-            );
-          } else {
-            dataOps.push(`<span class="gql-op" data-op="${q.cleanName}">${q.cleanName}</span>`);
-          }
-        }
-
-        // Show first 2 unique mutations
-        for (const m of uniqueMutations.slice(0, 2)) {
-          if (m.isRef) {
-            dataOps.push(
-              `<span class="gql-ref mutation" data-ref="${m.cleanName}" title="Component">${m.cleanName}</span>`
-            );
-          } else {
-            dataOps.push(
-              `<span class="gql-op mutation" data-op="${m.cleanName}">${m.cleanName}</span>`
-            );
-          }
-        }
-
-        // Calculate remaining based on deduplicated counts
-        const remaining =
-          uniqueQueries.length +
-          uniqueMutations.length -
-          Math.min(uniqueQueries.length, 2) -
-          Math.min(uniqueMutations.length, 2);
-        if (remaining > 0) {
-          dataOps.push(
-            `<span class="gql-more" data-type="all" data-page="${page.path}">+${remaining} more</span>`
-          );
-        }
-        const data = dataOps.length > 0 ? dataOps.join(' ') : '-';
-
-        lines.push(`| \`${pathDisplay}\` | ${auth} | ${layout} | ${data} |`);
+        lines.push(`| \`${pathDisplay}\` | ${auth} | ${layout} |`);
       }
       lines.push('');
 
       // Details for each page with GraphQL operations
       for (const page of pages) {
-        const queries = page.dataFetching.filter((df) => !df.type.includes('Mutation'));
-        const mutations = page.dataFetching.filter((df) => df.type.includes('Mutation'));
+        const allDf = page.dataFetching || [];
+        if (allDf.length === 0) continue;
 
-        if (queries.length > 0 || mutations.length > 0) {
-          // Deduplicate queries by clean name
-          const seenQueryNames = new Set<string>();
-          const uniqueQueries: { cleanName: string; isRef: boolean }[] = [];
-          for (const q of queries) {
-            const rawName = q.operationName || '';
-            if (!rawName || rawName.trim().length < 2) continue;
-            const isRef = rawName.startsWith('→') || rawName.startsWith('->');
-            const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
-            if (!cleanName || cleanName.length < 2) continue;
+        // Group data operations by relationship (similar to page-map)
+        const groups = new Map<
+          string,
+          { label: string; open: boolean; queries: Set<string>; mutations: Set<string> }
+        >();
 
-            const existing = uniqueQueries.find((u) => u.cleanName === cleanName);
-            if (existing) {
-              if (!isRef && existing.isRef) existing.isRef = false;
-              continue;
-            }
-            if (!seenQueryNames.has(cleanName)) {
-              seenQueryNames.add(cleanName);
-              uniqueQueries.push({ cleanName, isRef });
-            }
+        const ensureGroup = (key: string, label: string, open: boolean) => {
+          if (!groups.has(key)) {
+            groups.set(key, { label, open, queries: new Set(), mutations: new Set() });
+          }
+          const g = groups.get(key);
+          if (!g) {
+            // Should be unreachable, but keep it safe
+            const fallback = {
+              label,
+              open,
+              queries: new Set<string>(),
+              mutations: new Set<string>(),
+            };
+            groups.set(key, fallback);
+            return fallback;
+          }
+          return g;
+        };
+
+        for (const df of allDf) {
+          const rawName = df.operationName || '';
+          const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
+          if (!cleanName || cleanName.length < 2) continue;
+
+          const isMutation = df.type.includes('Mutation');
+          const src = df.source || '';
+
+          let key = 'direct';
+          let label = 'Direct (this page)';
+          let open = true;
+
+          if (src.startsWith('close:')) {
+            key = 'close';
+            label = 'Close (related)';
+            open = true;
+          } else if (
+            src.startsWith('indirect:') ||
+            src.startsWith('usedIn:') ||
+            src.startsWith('import:')
+          ) {
+            key = 'indirect';
+            label = 'Indirect';
+            open = false;
+          } else if (src.startsWith('common:')) {
+            key = 'common';
+            label = 'Common (shared)';
+            open = false;
+          } else if (src.startsWith('hook:')) {
+            key = 'hook';
+            label = 'Hook';
+            open = false;
+          } else if (src.startsWith('component:')) {
+            key = 'component';
+            label = 'Component';
+            open = false;
           }
 
-          // Deduplicate mutations by clean name
-          const seenMutNames = new Set<string>();
-          const uniqueMutations: { cleanName: string; isRef: boolean }[] = [];
-          for (const m of mutations) {
-            const rawName = m.operationName || '';
-            if (!rawName || rawName.trim().length < 2) continue;
-            const isRef = rawName.startsWith('→') || rawName.startsWith('->');
-            const cleanName = rawName.replace(/^[→\->\s]+/, '').trim();
-            if (!cleanName || cleanName.length < 2) continue;
+          const g = ensureGroup(key, label, open);
+          if (isMutation) g.mutations.add(cleanName);
+          else g.queries.add(cleanName);
+        }
 
-            const existing = uniqueMutations.find((u) => u.cleanName === cleanName);
-            if (existing) {
-              if (!isRef && existing.isRef) existing.isRef = false;
-              continue;
-            }
-            if (!seenMutNames.has(cleanName)) {
-              seenMutNames.add(cleanName);
-              uniqueMutations.push({ cleanName, isRef });
-            }
-          }
+        const totalOps = Array.from(groups.values()).reduce(
+          (acc, g) => acc + g.queries.size + g.mutations.size,
+          0
+        );
+        if (totalOps === 0) continue;
 
-          if (uniqueQueries.length === 0 && uniqueMutations.length === 0) continue;
+        const orderedKeys = ['direct', 'close', 'component', 'hook', 'indirect', 'common'];
 
-          lines.push(`### ${page.path}`);
+        lines.push(`### ${page.path}`);
+        lines.push('');
+        lines.push(`> ${page.filePath}`);
+        lines.push('');
+
+        lines.push(`**Data Operations (${totalOps})**`);
+        lines.push('');
+
+        for (const k of orderedKeys) {
+          const g = groups.get(k);
+          if (!g) continue;
+          const count = g.queries.size + g.mutations.size;
+          if (count === 0) continue;
+
+          lines.push(
+            `<details class="ops-group${g.open ? ' is-open' : ''}"${g.open ? ' open' : ''}>`
+          );
+          lines.push(
+            `<summary class="ops-group__summary"><span class="ops-group__title">${g.label}</span><span class="ops-group__count">${count}</span></summary>`
+          );
           lines.push('');
-          lines.push(`> ${page.filePath}`);
-          lines.push('');
 
-          // Queries section
-          if (uniqueQueries.length > 0) {
-            lines.push(`**Queries (${uniqueQueries.length})**`);
+          if (g.queries.size > 0) {
+            lines.push(`**Queries (${g.queries.size})**`);
             lines.push('');
             lines.push('<div class="gql-ops-list">');
-            for (const q of uniqueQueries) {
-              if (q.isRef) {
-                lines.push(
-                  `<span class="gql-ref" data-ref="${q.cleanName}" title="Component">${q.cleanName}</span>`
-                );
-              } else {
-                lines.push(`<span class="gql-op" data-op="${q.cleanName}">${q.cleanName}</span>`);
-              }
+            for (const name of Array.from(g.queries).sort()) {
+              lines.push(`<span class="gql-op" data-op="${name}">${name}</span>`);
             }
             lines.push('</div>');
             lines.push('');
           }
 
-          // Mutations section
-          if (uniqueMutations.length > 0) {
-            lines.push(`**Mutations (${uniqueMutations.length})**`);
+          if (g.mutations.size > 0) {
+            lines.push(`**Mutations (${g.mutations.size})**`);
             lines.push('');
             lines.push('<div class="gql-ops-list">');
-            for (const m of uniqueMutations) {
-              if (m.isRef) {
-                lines.push(
-                  `<span class="gql-ref mutation" data-ref="${m.cleanName}" title="Component">${m.cleanName}</span>`
-                );
-              } else {
-                lines.push(
-                  `<span class="gql-op mutation" data-op="${m.cleanName}">${m.cleanName}</span>`
-                );
-              }
+            for (const name of Array.from(g.mutations).sort()) {
+              lines.push(`<span class="gql-op mutation" data-op="${name}">${name}</span>`);
             }
             lines.push('</div>');
             lines.push('');
           }
 
+          lines.push('</details>');
           lines.push('');
         }
+
+        lines.push('');
       }
     }
 
@@ -405,19 +356,19 @@ export class MarkdownGenerator {
 
       // Container components
       for (const comp of containers) {
-        const dataOps = this.formatComponentDataOps(comp);
+        const dataOps = this.formatComponentDataOps(comp, repo.analysis.graphqlOperations);
         lines.push(`| ${comp.name} | Container | ${dataOps || '-'} |`);
       }
 
       // Presentational components (show all with data)
       for (const comp of presentationals.slice(0, 10)) {
-        const dataOps = this.formatComponentDataOps(comp);
+        const dataOps = this.formatComponentDataOps(comp, repo.analysis.graphqlOperations);
         lines.push(`| ${comp.name} | UI | ${dataOps || '-'} |`);
       }
 
       // Hook components (show all with data)
       for (const comp of hooks) {
-        const dataOps = this.formatComponentDataOps(comp);
+        const dataOps = this.formatComponentDataOps(comp, repo.analysis.graphqlOperations);
         lines.push(`| ${comp.name} | Hook | ${dataOps || '-'} |`);
       }
       lines.push('');
@@ -428,13 +379,13 @@ export class MarkdownGenerator {
         const sectionId = `more-ui-${pagePath.replace(/[^a-zA-Z0-9]/g, '-')}`;
         lines.push(`<details id="${sectionId}">`);
         lines.push(
-          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">▸ Show ${remainingComps.length} more UI components</summary>`
+          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">Show ${remainingComps.length} more UI components</summary>`
         );
         lines.push('');
         lines.push('| Component | Type | Data |');
         lines.push('|-----------|------|------|');
         for (const comp of remainingComps) {
-          const dataOps = this.formatComponentDataOps(comp);
+          const dataOps = this.formatComponentDataOps(comp, repo.analysis.graphqlOperations);
           lines.push(`| ${comp.name} | UI | ${dataOps || '-'} |`);
         }
         lines.push('');
@@ -455,7 +406,7 @@ export class MarkdownGenerator {
 
       for (const comp of components.slice(0, 25)) {
         const shortPath = comp.filePath.replace('src/features/', '').replace('src/', '');
-        const dataOps = this.formatComponentDataOps(comp);
+        const dataOps = this.formatComponentDataOps(comp, repo.analysis.graphqlOperations);
         lines.push(`| ${comp.name} | ${shortPath} | ${dataOps || '-'} |`);
       }
       lines.push('');
@@ -466,14 +417,14 @@ export class MarkdownGenerator {
         const sectionId = `more-${type}-components`;
         lines.push(`<details id="${sectionId}">`);
         lines.push(
-          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">▸ Show ${remainingComps.length} more ${type} components</summary>`
+          `<summary style="cursor:pointer;color:var(--accent);padding:8px 0">Show ${remainingComps.length} more ${type} components</summary>`
         );
         lines.push('');
         lines.push('| Name | File | Data |');
         lines.push('|------|------|------|');
         for (const comp of remainingComps) {
           const shortPath = comp.filePath.replace('src/features/', '').replace('src/', '');
-          const dataOps = this.formatComponentDataOps(comp);
+          const dataOps = this.formatComponentDataOps(comp, repo.analysis.graphqlOperations);
           lines.push(`| ${comp.name} | ${shortPath} | ${dataOps || '-'} |`);
         }
         lines.push('');
@@ -503,9 +454,24 @@ export class MarkdownGenerator {
     return null;
   }
 
-  private formatComponentDataOps(comp: ComponentInfo): string {
+  private formatComponentDataOps(
+    comp: ComponentInfo,
+    graphqlOperations?: GraphQLOperation[]
+  ): string {
     const queries: string[] = [];
     const mutations: string[] = [];
+
+    // Prefer GraphQL analyzer results by file path (more complete than hook regex)
+    if (graphqlOperations && comp.filePath) {
+      for (const op of graphqlOperations) {
+        if (op.type !== 'query' && op.type !== 'mutation') continue;
+        const referenced =
+          op.filePath === comp.filePath || (op.usedIn && op.usedIn.includes(comp.filePath));
+        if (!referenced) continue;
+        if (op.type === 'mutation') mutations.push(op.name);
+        else queries.push(op.name);
+      }
+    }
 
     for (const hook of comp.hooks) {
       const queryMatch = hook.match(/(?:useQuery|Query):\s*(\w+)/);
@@ -518,42 +484,24 @@ export class MarkdownGenerator {
       }
     }
 
-    // Filter out empty or invalid names
-    const validQueries = queries.filter((q) => q && q.trim().length >= 2);
-    const validMutations = mutations.filter((m) => m && m.trim().length >= 2);
+    // Filter out empty or invalid names + dedupe
+    const validQueries = Array.from(new Set(queries.filter((q) => q && q.trim().length >= 2)));
+    const validMutations = Array.from(new Set(mutations.filter((m) => m && m.trim().length >= 2)));
 
     if (validQueries.length === 0 && validMutations.length === 0) {
       return '';
     }
 
     const ops: string[] = [];
-    const maxShowQueries = 2;
-    const maxShowMutations = 2;
 
-    // Show first N queries - use original name for consistency
-    const shownQueries = validQueries.slice(0, maxShowQueries);
-    for (const name of shownQueries) {
+    // Show all queries
+    for (const name of validQueries.sort()) {
       ops.push(`<span class="gql-op" data-op="${name}">${name}</span>`);
     }
 
-    // Show first N mutations - use original name for consistency
-    const shownMutations = validMutations.slice(0, maxShowMutations);
-    for (const name of shownMutations) {
+    // Show all mutations
+    for (const name of validMutations.sort()) {
       ops.push(`<span class="gql-op mutation" data-op="${name}">${name}</span>`);
-    }
-
-    // Calculate remaining correctly
-    const hiddenQueries = validQueries.slice(maxShowQueries);
-    const hiddenMutations = validMutations.slice(maxShowMutations);
-    const remaining = hiddenQueries.length + hiddenMutations.length;
-
-    if (remaining > 0) {
-      // Store all hidden operations in data attributes for accurate display
-      const allQueries = JSON.stringify(validQueries).replace(/"/g, '&quot;');
-      const allMutations = JSON.stringify(validMutations).replace(/"/g, '&quot;');
-      ops.push(
-        `<span class="gql-ref" data-ref="${comp.name}" data-queries="${allQueries}" data-mutations="${allMutations}" title="View all ${validQueries.length} queries and ${validMutations.length} mutations">+${remaining} more</span>`
-      );
     }
 
     return `<div class="gql-ops-inline">${ops.join(' ')}</div>`;
@@ -723,6 +671,20 @@ export class MarkdownGenerator {
     // Page-based data flow
     lines.push('## Page Data Flows');
     lines.push('');
+    // Wrap this whole section so the sticky filter is bounded to it (not "fixed" for the entire doc).
+    lines.push('<div class="dataflow-page-flows">');
+    lines.push(
+      [
+        '<div class="ops-filters" data-filter-scope="dataflow">',
+        '  <span class="ops-filters__label">Show:</span>',
+        '  <label class="ops-toggle"><input type="checkbox" data-filter="direct" checked> Direct</label>',
+        '  <label class="ops-toggle"><input type="checkbox" data-filter="close" checked> Close</label>',
+        '  <label class="ops-toggle"><input type="checkbox" data-filter="indirect" checked> Indirect</label>',
+        '  <label class="ops-toggle"><input type="checkbox" data-filter="common"> Common</label>',
+        '</div>',
+      ].join('\n')
+    );
+    lines.push('');
 
     for (const page of repo.analysis.pages) {
       const pageFeature = this.extractFeatureFromPage(page.filePath);
@@ -745,89 +707,106 @@ export class MarkdownGenerator {
       lines.push('');
 
       // Mermaid flow diagram for this page
-      const pageOps = this.getPageOperations(
-        page,
-        relatedComponents,
-        repo.analysis.graphqlOperations
-      );
-
-      // Filter out empty operation names before creating diagram
-      const validQueries = pageOps.queries.filter((q) => q && q.trim().length > 0);
-      const validMutations = pageOps.mutations.filter((m) => m && m.trim().length > 0);
+      const pageOpGroups = this.getPageOperationGroups(page);
+      const validQueries = this.flattenGroups(pageOpGroups, 'queries');
+      const validMutations = this.flattenGroups(pageOpGroups, 'mutations');
 
       if (validQueries.length > 0 || validMutations.length > 0) {
-        lines.push('```mermaid');
-        lines.push('flowchart LR');
         const pageId = page.path.replace(/[^a-zA-Z0-9]/g, '_');
         // Escape special characters in path for Mermaid
         const safePath = page.path.replace(/"/g, "'");
+
+        // Use <pre class="mermaid"> to avoid markdown injecting <p> tags inside HTML blocks.
+        // Keep data attributes for filtering/rerendering.
+        lines.push(
+          `<pre class="mermaid" data-mermaid-scope="dataflow" data-mermaid-page="${pageId}">`
+        );
+        lines.push('flowchart LR');
         lines.push(`  Page${pageId}["${safePath}"]`);
-
-        validQueries.slice(0, 5).forEach((q, i) => {
-          const qId = `Q${pageId}_${i}`;
-          // Escape special characters in operation name
-          const safeQ = q.replace(/"/g, "'").replace(/[<>]/g, '');
-          lines.push(`  ${qId}["${safeQ}"]:::query --> Page${pageId}`);
-        });
-
-        validMutations.slice(0, 5).forEach((m, i) => {
-          const mId = `M${pageId}_${i}`;
-          // Escape special characters in operation name
-          const safeM = m.replace(/"/g, "'").replace(/[<>]/g, '');
-          lines.push(`  Page${pageId} --> ${mId}["${safeM}"]:::mutation`);
-        });
-
-        lines.push('  classDef query fill:#dbeafe,stroke:#1d4ed8,color:#1e40af');
-        lines.push('  classDef mutation fill:#fce7f3,stroke:#be185d,color:#9d174d');
-        lines.push('```');
         lines.push('');
-      }
 
-      // Operations list with clickable tags - grouped by type
-      if (pageOps.queries.length > 0 || pageOps.mutations.length > 0) {
-        // Queries section - use original name for consistency, filter empty
-        if (validQueries.length > 0) {
-          lines.push(`**Queries (${validQueries.length})**`);
-          lines.push('');
-          lines.push('<div class="gql-ops-list">');
-          for (const q of validQueries) {
-            const isRef = q.startsWith('→') || q.startsWith('->');
-            const cleanName = q.replace(/^[→\->\s]+/, '');
-            if (cleanName && cleanName.trim().length > 0) {
-              if (isRef) {
-                lines.push(
-                  `<span class="gql-ref" data-ref="${cleanName}" title="Component: ${cleanName}">${cleanName}</span>`
-                );
-              } else {
-                lines.push(`<span class="gql-op" data-op="${cleanName}">${cleanName}</span>`);
-              }
-            }
-          }
-          lines.push('</div>');
+        const maxPerGroup = 10;
+        const groupOrder: PageOpGroupKey[] = ['direct', 'close', 'indirect', 'common'];
+
+        for (const key of groupOrder) {
+          const g = pageOpGroups[key];
+          if (g.queries.length === 0 && g.mutations.length === 0) continue;
+
+          lines.push(`%%DFG_GROUP:${key}:start%%`);
+
+          g.queries.slice(0, maxPerGroup).forEach((q, i) => {
+            const qId = `Q${pageId}_${key}_${i}`;
+            // Escape special characters in operation name
+            const safeQ = q.replace(/"/g, "'").replace(/[<>]/g, '');
+            lines.push(`  ${qId}["${safeQ}"]:::query --> Page${pageId}`);
+          });
+
+          g.mutations.slice(0, maxPerGroup).forEach((m, i) => {
+            const mId = `M${pageId}_${key}_${i}`;
+            // Escape special characters in operation name
+            const safeM = m.replace(/"/g, "'").replace(/[<>]/g, '');
+            lines.push(`  Page${pageId} --> ${mId}["${safeM}"]:::mutation`);
+          });
+
+          lines.push(`%%DFG_GROUP:${key}:end%%`);
           lines.push('');
         }
 
-        // Mutations section - use original name for consistency, filter empty
-        if (validMutations.length > 0) {
-          lines.push(`**Mutations (${validMutations.length})**`);
-          lines.push('');
-          lines.push('<div class="gql-ops-list">');
-          for (const m of validMutations) {
-            const isRef = m.startsWith('→') || m.startsWith('->');
-            const cleanName = m.replace(/^[→\->\s]+/, '');
-            if (cleanName && cleanName.trim().length > 0) {
-              if (isRef) {
-                lines.push(
-                  `<span class="gql-ref mutation" data-ref="${cleanName}" title="Component: ${cleanName}">${cleanName}</span>`
-                );
-              } else {
-                lines.push(
-                  `<span class="gql-op mutation" data-op="${cleanName}">${cleanName}</span>`
-                );
-              }
+        lines.push('  classDef query fill:#dbeafe,stroke:#1d4ed8,color:#1e40af');
+        lines.push('  classDef mutation fill:#fce7f3,stroke:#be185d,color:#9d174d');
+        lines.push('</pre>');
+        lines.push('');
+      }
+
+      // Operations list with clickable tags - grouped by relationship (direct/close/indirect/common)
+      const groupOrder: PageOpGroupKey[] = ['direct', 'close', 'indirect', 'common'];
+      const groupMeta: Record<
+        PageOpGroupKey,
+        { label: string; open: boolean; defaultVisible: boolean }
+      > = {
+        direct: { label: 'Direct (this page)', open: true, defaultVisible: true },
+        close: { label: 'Close (related)', open: true, defaultVisible: true },
+        indirect: { label: 'Indirect (via imports)', open: false, defaultVisible: true },
+        common: { label: 'Common (shared)', open: false, defaultVisible: false },
+      };
+
+      const hasAnyOps = groupOrder.some(
+        (k) => pageOpGroups[k].queries.length > 0 || pageOpGroups[k].mutations.length > 0
+      );
+      if (hasAnyOps) {
+        for (const key of groupOrder) {
+          const g = pageOpGroups[key];
+          const meta = groupMeta[key];
+          if (g.queries.length === 0 && g.mutations.length === 0) continue;
+
+          const openAttr = meta.open ? ' open' : '';
+          const displayStyle = meta.defaultVisible ? '' : ' style="display:none"';
+          lines.push(
+            `<details class="ops-group" data-ops-scope="dataflow" data-ops-group="${key}"${openAttr}${displayStyle}>`
+          );
+          lines.push(
+            `<summary class="ops-group__summary"><span class="ops-group__title">${meta.label}</span><span class="ops-group__count">${g.queries.length + g.mutations.length}</span></summary>`
+          );
+
+          if (g.queries.length > 0) {
+            lines.push(`<p><strong>Queries (${g.queries.length})</strong></p>`);
+            lines.push('<div class="gql-ops-list">');
+            for (const q of g.queries) {
+              lines.push(`<span class="gql-op" data-op="${q}">${q}</span>`);
             }
+            lines.push('</div>');
           }
-          lines.push('</div>');
+
+          if (g.mutations.length > 0) {
+            lines.push(`<p><strong>Mutations (${g.mutations.length})</strong></p>`);
+            lines.push('<div class="gql-ops-list">');
+            for (const m of g.mutations) {
+              lines.push(`<span class="gql-op mutation" data-op="${m}">${m}</span>`);
+            }
+            lines.push('</div>');
+          }
+
+          lines.push('</details>');
           lines.push('');
         }
       }
@@ -835,6 +814,8 @@ export class MarkdownGenerator {
       lines.push('---');
       lines.push('');
     }
+
+    lines.push('</div>');
 
     // Context providers
     const providers = new Set<string>();
@@ -856,58 +837,73 @@ export class MarkdownGenerator {
     return lines.join('\n');
   }
 
-  private getPageOperations(
-    page: PageInfo,
-    relatedComponents: ComponentInfo[],
-    _allOperations: GraphQLOperation[]
-  ): { queries: string[]; mutations: string[] } {
-    const queries = new Set<string>();
-    const mutations = new Set<string>();
+  private getPageOperationGroups(page: PageInfo): PageOpGroups {
+    const groups: PageOpGroupSets = {
+      direct: { queries: new Set<string>(), mutations: new Set<string>() },
+      close: { queries: new Set<string>(), mutations: new Set<string>() },
+      indirect: { queries: new Set<string>(), mutations: new Set<string>() },
+      common: { queries: new Set<string>(), mutations: new Set<string>() },
+    };
 
     // Helper to validate operation name
-    const isValidOpName = (name: string | undefined | null): boolean => {
+    const isValidOpName = (name: string | undefined | null): name is string => {
       if (!name) return false;
       const trimmed = name.trim();
-      // Must have at least 2 alphanumeric characters
+      // Must have at least 2 characters and contain at least one letter
       return trimmed.length >= 2 && /[a-zA-Z]/.test(trimmed);
     };
 
-    // From page dataFetching
-    for (const df of page.dataFetching) {
-      const rawName = df.operationName?.replace(/^[→\->\s]+/, '') || '';
-      const name = rawName.replace(/Document$/g, '');
-      if (isValidOpName(name)) {
-        if (df.type?.includes('Mutation')) {
-          mutations.add(name);
-        } else {
-          queries.add(name);
-        }
-      }
-    }
-
-    // From related components
-    for (const comp of relatedComponents) {
-      for (const hook of comp.hooks) {
-        if (hook.includes('Query')) {
-          const match = hook.match(/:\s*(.+)$/);
-          if (match && isValidOpName(match[1])) {
-            queries.add(match[1].trim());
-          }
-        }
-        if (hook.includes('Mutation')) {
-          const match = hook.match(/:\s*(.+)$/);
-          if (match && isValidOpName(match[1])) {
-            mutations.add(match[1].trim());
-          }
-        }
-      }
-    }
-
-    // Filter out any remaining invalid names
-    return {
-      queries: Array.from(queries).filter(isValidOpName),
-      mutations: Array.from(mutations).filter(isValidOpName),
+    const pickGroupKey = (source: string | undefined): PageOpGroupKey => {
+      if (!source) return 'direct';
+      const s = source.trim();
+      if (s.startsWith('common:')) return 'common';
+      if (s.startsWith('close:')) return 'close';
+      if (s.startsWith('indirect:')) return 'indirect';
+      return 'direct';
     };
+
+    for (const df of page.dataFetching || []) {
+      const rawName = df.operationName?.replace(/^[→\->\s]+/, '') || '';
+      const cleaned = rawName.replace(/Document$/g, '').trim();
+      if (!isValidOpName(cleaned)) continue;
+
+      const key = pickGroupKey(df.source);
+      const isMutation = df.type?.includes('Mutation') ?? false;
+      if (isMutation) groups[key].mutations.add(cleaned);
+      else groups[key].queries.add(cleaned);
+    }
+
+    const finalize = (set: Set<string>): string[] =>
+      Array.from(set)
+        .filter(isValidOpName)
+        .sort((a, b) => a.localeCompare(b));
+
+    return {
+      direct: {
+        queries: finalize(groups.direct.queries),
+        mutations: finalize(groups.direct.mutations),
+      },
+      close: {
+        queries: finalize(groups.close.queries),
+        mutations: finalize(groups.close.mutations),
+      },
+      indirect: {
+        queries: finalize(groups.indirect.queries),
+        mutations: finalize(groups.indirect.mutations),
+      },
+      common: {
+        queries: finalize(groups.common.queries),
+        mutations: finalize(groups.common.mutations),
+      },
+    };
+  }
+
+  private flattenGroups(groups: PageOpGroups, kind: 'queries' | 'mutations'): string[] {
+    const all = new Set<string>();
+    for (const g of Object.values(groups)) {
+      for (const name of g[kind]) all.add(name);
+    }
+    return Array.from(all).sort((a, b) => a.localeCompare(b));
   }
 
   private generateCrossRepoDoc(report: DocumentationReport): string {

@@ -490,6 +490,13 @@ export class DocServer {
 
     // Render all mermaid diagrams on page load
     document.addEventListener('DOMContentLoaded', async () => {
+      // Snapshot raw dataflow mermaid source BEFORE first render (needed for filtering rerenders)
+      document.querySelectorAll('.mermaid[data-mermaid-scope="dataflow"]').forEach((el) => {
+        if (!el.dataset.mermaidRaw) {
+          el.dataset.mermaidRaw = el.textContent || '';
+        }
+      });
+
       // Wrap mermaid divs with container and controls
       document.querySelectorAll('.mermaid').forEach((el, idx) => {
         const container = document.createElement('div');
@@ -515,20 +522,145 @@ export class DocServer {
       });
 
       try {
-        await mermaid.run({ querySelector: '.mermaid' });
+        await renderMermaidElements(document.querySelectorAll('.mermaid'));
 
-        // Add click handlers to nodes
-        document.querySelectorAll('.mermaid .node').forEach(node => {
-          node.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const text = node.querySelector('span, text, .nodeLabel')?.textContent || '';
-            showNodeDetail(text, node);
-          });
-        });
+        attachMermaidNodeHandlers();
+
+        // Init toggle filters AFTER mermaid is ready (prevents double-run issues)
+        initOpsFilters();
       } catch (e) {
         console.error('Mermaid rendering error:', e);
       }
     });
+
+    function initOpsFilters() {
+      document.querySelectorAll('.ops-filters').forEach((container) => {
+        const scope = container.getAttribute('data-filter-scope') || 'default';
+        const inputs = Array.from(
+          container.querySelectorAll('input[type="checkbox"][data-filter]')
+        );
+        if (inputs.length === 0) return;
+
+        const apply = async () => {
+          const enabled = new Set(
+            inputs
+              .filter((i) => i.checked)
+              .map((i) => i.getAttribute('data-filter'))
+              .filter(Boolean)
+          );
+          document
+            .querySelectorAll('[data-ops-scope="' + scope + '"][data-ops-group]')
+            .forEach((el) => {
+              const key = el.getAttribute('data-ops-group');
+              // If key is missing, do nothing
+              if (!key) return;
+              el.style.display = enabled.has(key) ? '' : 'none';
+            });
+
+          // Update UI state for pill toggles
+          inputs.forEach((i) => {
+            const wrap = i.closest('.ops-toggle');
+            if (wrap) wrap.classList.toggle('is-on', i.checked);
+          });
+
+          // Apply to dataflow mermaid charts by re-rendering with filtered groups
+          if (scope === 'dataflow') {
+            await applyDataflowMermaidFilter(enabled);
+          }
+        };
+
+        inputs.forEach((i) => i.addEventListener('change', () => void apply()));
+        void apply();
+      });
+    }
+
+    async function applyDataflowMermaidFilter(enabledGroups) {
+      const els = Array.from(document.querySelectorAll('.mermaid[data-mermaid-scope="dataflow"]'));
+      if (els.length === 0) return;
+
+      // Store original source before the first render (or first filter)
+      els.forEach((el) => {
+        if (!el.dataset.mermaidRaw) {
+          el.dataset.mermaidRaw = el.textContent || '';
+        }
+      });
+
+      const buildFiltered = (raw) => {
+        // NOTE: This code is embedded inside an HTML template literal.
+        // Avoid using quotes/backslashes in comments here (they can be mangled by the outer template).
+        const lines = raw.split('\\n');
+        const out = [];
+        let current = null; // 'direct'|'close'|'indirect'|'common'|null
+
+        for (const line of lines) {
+          const start = line.match(/^%%DFG_GROUP:(direct|close|indirect|common):start%%$/);
+          if (start) {
+            current = start[1];
+            continue;
+          }
+          const end = line.match(/^%%DFG_GROUP:(direct|close|indirect|common):end%%$/);
+          if (end) {
+            current = null;
+            continue;
+          }
+
+          if (!current) {
+            out.push(line);
+            continue;
+          }
+          if (enabledGroups.has(current)) out.push(line);
+        }
+
+        return out.join('\\n').trim();
+      };
+
+      // Update the mermaid source text and re-run mermaid renderer
+      for (const el of els) {
+        const raw = el.dataset.mermaidRaw || '';
+        const filtered = buildFiltered(raw);
+        el.removeAttribute('data-processed');
+        el.textContent = filtered;
+      }
+
+      try {
+        await renderMermaidElements(
+          document.querySelectorAll('.mermaid[data-mermaid-scope="dataflow"]')
+        );
+        attachMermaidNodeHandlers();
+      } catch (e) {
+        console.error('Mermaid rendering error (dataflow filter):', e);
+      }
+    }
+
+    async function renderMermaidElements(nodeList) {
+      const elements = Array.from(nodeList || []);
+      for (let idx = 0; idx < elements.length; idx++) {
+        const el = elements[idx];
+        const marker = 'mermaid-single-run';
+        const unique = marker + '-' + idx;
+        el.classList.add(marker, unique);
+        try {
+          await mermaid.run({ querySelector: '.' + unique });
+        } catch (e) {
+          const page = el.getAttribute('data-mermaid-page') || '';
+          const scope = el.getAttribute('data-mermaid-scope') || '';
+          const preview = (el.textContent || '').slice(0, 260);
+          console.error('Mermaid rendering error (element)', { idx, scope, page, preview }, e);
+        } finally {
+          el.classList.remove(marker, unique);
+        }
+      }
+    }
+
+    function attachMermaidNodeHandlers() {
+      document.querySelectorAll('.mermaid .node').forEach(node => {
+        node.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const text = node.querySelector('span, text, .nodeLabel')?.textContent || '';
+          showNodeDetail(text, node);
+        });
+      });
+    }
 
     function setupDragHandlers(idx) {
       const wrapper = document.getElementById(\`wrapper-\${idx}\`);

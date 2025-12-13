@@ -74,7 +74,8 @@ body {
   padding: 32px;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  overflow-x: auto;
+  /* Keep vertical scrolling on .content-area so sticky works correctly */
+  overflow-x: visible;
   max-width: 100%;
 }
 
@@ -139,6 +140,23 @@ body {
   margin: 12px 0;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.content pre.mermaid {
+  /* Mermaid is rendered into SVG; don't treat it like a code block */
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  overflow: visible;
+  margin: 0;
+}
+
+.content pre.mermaid code {
+  background: none;
+  padding: 0;
+  border: none;
+  color: inherit;
 }
 
 .content pre code {
@@ -233,6 +251,141 @@ body {
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
+}
+.ops-group {
+  border: 1px solid var(--docs-border);
+  background: var(--docs-bg3);
+  border-radius: 10px;
+  margin: 10px 0;
+  overflow: hidden;
+}
+.ops-group > summary {
+  list-style: none;
+}
+.ops-group > summary::-webkit-details-marker {
+  display: none;
+}
+.ops-group > summary::marker {
+  content: '';
+}
+.ops-group__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--docs-text);
+  /* Top-level row: keep most prominent within the group */
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+.ops-group__summary:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+.ops-group__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ops-group__title::before {
+  content: '';
+  /* Smaller chevron */
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid rgba(102, 102, 102, 0.85);
+  border-bottom: 1px solid rgba(102, 102, 102, 0.85);
+  transform: rotate(-45deg);
+  transform-origin: 50% 50%;
+  transition: transform 0.15s ease;
+}
+.ops-group[open] .ops-group__title::before {
+  transform: rotate(45deg);
+}
+.ops-group__count {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--docs-text2);
+  background: rgba(148, 163, 184, 0.25);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.ops-group .gql-ops-list {
+  margin: 8px 12px 12px;
+}
+.ops-group p {
+  margin: 8px 12px 0;
+}
+.ops-group p strong {
+  margin: 0;
+}
+
+/* Toggle filters for operation groups */
+.dataflow-page-flows {
+  position: relative;
+}
+.ops-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  backdrop-filter: blur(6px);
+}
+.ops-filters__label {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--docs-text2);
+  margin-right: 2px;
+}
+.ops-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--docs-text);
+  user-select: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.6);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.ops-toggle:hover {
+  border-color: rgba(59, 130, 246, 0.45);
+}
+.ops-toggle.is-on {
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(59, 130, 246, 0.55);
+  color: var(--docs-text);
+}
+.ops-toggle input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Secondary labels inside groups (Queries/Mutations) */
+.ops-group strong {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--docs-text2);
 }
 .gql-ops-list {
   display: flex;
