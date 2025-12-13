@@ -1432,7 +1432,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
           // Check imports first
           if (documentImports.has(varName)) {
-            return documentImports.get(varName)!;
+            return documentImports.get(varName) || null;
           }
 
           // Check codegen map

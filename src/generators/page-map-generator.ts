@@ -859,12 +859,18 @@ export class PageMapGenerator {
       html += '<div class="route-stat" data-filter="grpc"><div class="route-stat-val cyan">' + totalWithGrpc + '</div><div class="route-stat-label">gRPC</div></div>';
       html += '</div>';
       // Analysis coverage indicator
-      if (totalWithActionInfo > 0) {
-        const coverage = Math.round((totalWithActionInfo / combinedData.length) * 100);
-        const coverageTooltip = 'Percentage of routes successfully matched with controller actions to extract details (JSON/HTML rendering, redirects, etc). This is a tool analysis metric, not a code quality indicator.';
-        const coverageClass = coverage > 70 ? 'coverage-high' : coverage > 40 ? 'coverage-mid' : 'coverage-low';
+      {
+        const totalRoutesAnalyzed = combinedData.length;
+        const totalWithControllerMatch = combinedData.filter(r => r.controllerInfo).length;
+        const overallCoverage = totalRoutesAnalyzed > 0 ? Math.round((totalWithActionInfo / totalRoutesAnalyzed) * 100) : 0;
+        const matchedCoverage = totalWithControllerMatch > 0 ? Math.round((totalWithActionInfo / totalWithControllerMatch) * 100) : 0;
+        const overallTooltip = 'Percentage of routes that were successfully matched with controller actions to extract details. This includes routes pointing to external controllers (gems/engines) which are not analyzable from app/controllers.';
+        const matchedTooltip = 'Percentage of routes with a matched app controller (app/controllers) where the target action method was found and parsed.';
+        const overallClass = overallCoverage > 70 ? 'coverage-high' : overallCoverage > 40 ? 'coverage-mid' : 'coverage-low';
+        const matchedClass = matchedCoverage > 70 ? 'coverage-high' : matchedCoverage > 40 ? 'coverage-mid' : 'coverage-low';
         html += '<div class="coverage-info">';
-        html += '<div class="coverage-text" title="' + coverageTooltip + '">Action Details Coverage: <span class="' + coverageClass + '">' + coverage + '%</span> (' + totalWithActionInfo + '/' + combinedData.length + ' routes analyzed) ℹ️</div>';
+        html += '<div class="coverage-text" title="' + overallTooltip + '">Action Details Coverage (overall): <span class="' + overallClass + '">' + overallCoverage + '%</span> (' + totalWithActionInfo + '/' + totalRoutesAnalyzed + ' routes analyzed) ℹ️</div>';
+        html += '<div class="coverage-text" title="' + matchedTooltip + '">Action Details Coverage (matched controllers): <span class="' + matchedClass + '">' + matchedCoverage + '%</span> (' + totalWithActionInfo + '/' + totalWithControllerMatch + ' matched) ℹ️</div>';
         html += '</div>';
       }
       html += '</div>';

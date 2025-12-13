@@ -50,6 +50,7 @@ Powered by [SWC](https://swc.rs/) for blazing-fast AST parsing. Analyze large-sc
 - **Field details** - View all fields with types and arguments
 - **Usage tracking** - See where operations are used in components
 - **Component integration** - Track GraphQL usage through component dependencies
+- **Custom wrapper hooks** - Configurable hook presets/patterns (Apollo/urql/Relay/custom)
 
 ### 📊 Data Flow
 - **Visual diagrams** - Mermaid-generated flowcharts
@@ -425,6 +426,7 @@ export default config;
 - Auto-generated markdown documentation
 - Navigation sidebar
 - Syntax-highlighted code blocks
+- Coverage metrics (parse failures, codegen detection) to prevent silent omissions
 
 ## Supported Frameworks
 
@@ -466,6 +468,7 @@ interface AnalysisResult {
   timestamp: string;
   version: string;
   commitHash: string;
+  coverage?: CoverageMetrics;
   pages: PageInfo[];
   graphqlOperations: GraphQLOperation[];
   apiCalls: APICall[];
@@ -474,6 +477,15 @@ interface AnalysisResult {
   apiEndpoints: APIEndpoint[];
   models: ModelInfo[];
   crossRepoLinks: CrossRepoLink[];
+}
+
+interface CoverageMetrics {
+  tsFilesScanned: number;
+  tsParseFailures: number;
+  graphqlParseFailures: number;
+  codegenFilesDetected: number;
+  codegenFilesParsed: number;
+  codegenExportsFound: number;
 }
 
 // Report

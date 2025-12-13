@@ -212,7 +212,6 @@ export class MarkdownGenerator {
 
           const isMutation = df.type.includes('Mutation');
           const src = df.source || '';
-          const conf = df.confidence;
 
           let key = 'direct';
           let label = 'Direct (this page)';
