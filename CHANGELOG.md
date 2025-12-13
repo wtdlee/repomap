@@ -1,5 +1,11 @@
 # @wtdlee/repomap
 
+## 0.10.0
+
+### Minor Changes
+
+- ce35a0b: Improve analysis reliability with coverage metrics (parse failures, codegen detection) in reports/docs, sync CLI version with `package.json`, and refine Rails action details coverage display (overall vs matched controllers).
+
 ## 0.9.1
 
 ### Patch Changes
