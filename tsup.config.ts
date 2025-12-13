@@ -25,6 +25,8 @@ export default defineConfig({
     'child_process',
     'url',
     'os',
+    // Large runtime dependency: keep external to avoid bundling TS into dist
+    'typescript',
     // Dependencies (not bundled, installed separately)
     '@swc/core',
     'chalk',
