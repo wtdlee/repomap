@@ -18,11 +18,38 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onView:repomap.explorer",
+    "onCommand:repomap.open",
+    "onCommand:repomap.refresh",
     "onCommand:repomap.serve",
     "onCommand:repomap.generate"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "repomap",
+          "title": "Repomap"
+        }
+      ]
+    },
+    "views": {
+      "repomap": [
+        {
+          "id": "repomap.explorer",
+          "name": "Explorer"
+        }
+      ]
+    },
     "commands": [
+      {
+        "command": "repomap.open",
+        "title": "Repomap: Open"
+      },
+      {
+        "command": "repomap.refresh",
+        "title": "Repomap: Refresh"
+      },
       {
         "command": "repomap.serve",
         "title": "Repomap: Serve"
@@ -30,6 +57,10 @@
       {
         "command": "repomap.generate",
         "title": "Repomap: Generate (Static)"
+      },
+      {
+        "command": "repomap.openFile",
+        "title": "Repomap: Open File"
       }
     ],
     "configuration": {
@@ -49,6 +80,11 @@
           "type": "string",
           "default": ".repomap",
           "description": "Output directory for generated docs"
+        },
+        "repomap.jsonOutputDir": {
+          "type": "string",
+          "default": ".repomap",
+          "description": "Directory where repomap writes report.json (used by the extension UI)"
         }
       }
     }
