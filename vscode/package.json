@@ -20,6 +20,11 @@
   "activationEvents": [
     "onView:repomap.explorer",
     "onView:repomap.explorer.fallback",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:ruby",
     "onCommand:repomap.open",
     "onCommand:repomap.refresh",
     "onCommand:repomap.serve",

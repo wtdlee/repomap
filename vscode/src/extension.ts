@@ -58,12 +58,82 @@ function resolveWorkspacePath(workspaceRoot: string, filePath: string): string {
   return path.join(workspaceRoot, filePath);
 }
 
+async function fileExists(fsPath: string): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.file(fsPath));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeSlashes(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+async function resolveExistingFile(
+  workspaceRoot: string,
+  reportedPath: string
+): Promise<{ fsPath: string; tried: string[] }> {
+  const tried: string[] = [];
+
+  const abs = resolveWorkspacePath(workspaceRoot, reportedPath);
+  tried.push(abs);
+  if (await fileExists(abs)) return { fsPath: abs, tried };
+
+  // If repomap provided an absolute path that doesn't exist, try locating a close match
+  // inside the current workspace by basename + suffix match.
+  const basename = path.basename(reportedPath);
+  const normalized = normalizeSlashes(reportedPath);
+  const parts = normalized.split('/').filter(Boolean);
+  const suffixParts = parts.slice(Math.max(0, parts.length - 4));
+  const suffix = suffixParts.join('/');
+
+  const candidates = await vscode.workspace.findFiles(
+    `**/${basename}`,
+    '{**/node_modules/**,**/.git/**,**/.next/**,**/dist/**,**/build/**,**/coverage/**}',
+    50
+  );
+
+  const ranked = candidates
+    .map((u) => u.fsPath)
+    .filter((p) => normalizeSlashes(p).endsWith(suffix) || normalizeSlashes(p).endsWith('/' + basename))
+    .sort((a, b) => a.length - b.length);
+
+  if (ranked.length === 1) {
+    tried.push(ranked[0]);
+    return { fsPath: ranked[0], tried };
+  }
+
+  if (ranked.length > 1) {
+    const picked = await vscode.window.showQuickPick(
+      ranked.map((p) => ({
+        label: path.relative(workspaceRoot, p),
+        description: p,
+      })),
+      { placeHolder: `Multiple matches for '${basename}'. Pick one to open.` }
+    );
+    if (picked?.description) {
+      tried.push(picked.description);
+      return { fsPath: picked.description, tried };
+    }
+  }
+
+  return { fsPath: abs, tried };
+}
+
 async function openFile(
   workspaceRoot: string,
   args: { filePath: string; line?: number }
 ): Promise<void> {
-  const abs = resolveWorkspacePath(workspaceRoot, args.filePath);
-  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(abs));
+  const resolved = await resolveExistingFile(workspaceRoot, args.filePath);
+  if (!(await fileExists(resolved.fsPath))) {
+    throw new Error(
+      `Unable to resolve nonexistent file '${args.filePath}'. Tried:\n- ${resolved.tried.join('\n- ')}`
+    );
+  }
+
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(resolved.fsPath));
   const editor = await vscode.window.showTextDocument(doc, { preview: false });
   if (typeof args.line === 'number' && args.line > 0) {
     const pos = new vscode.Position(args.line - 1, 0);
