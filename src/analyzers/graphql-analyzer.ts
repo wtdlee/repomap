@@ -808,6 +808,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
               relativePath,
               operationByName,
               operationByQueryType,
+              operationByVariableName,
               extraHookPatterns
             );
           } catch {
@@ -827,6 +828,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     relativePath: string,
     operationByName: Map<string, GraphQLOperation>,
     operationByQueryType: Map<string, GraphQLOperation>,
+    operationByVariableName: Map<string, GraphQLOperation>,
     extraHookPatterns: string[]
   ): Promise<void> {
     try {
@@ -862,7 +864,11 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
             const argName = this.extractFirstArgName(node);
             if (argName) {
               const cleanName = argName.replace(/Document$/, '');
-              const operation = operationByName.get(cleanName) || operationByQueryType.get(argName);
+              const operation =
+                operationByVariableName.get(argName) ||
+                operationByVariableName.get(cleanName) ||
+                operationByName.get(cleanName) ||
+                operationByQueryType.get(argName);
               if (operation && relativePath !== operation.filePath) {
                 if (!operation.usedIn.includes(relativePath)) {
                   operation.usedIn.push(relativePath);
