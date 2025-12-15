@@ -56,7 +56,10 @@ function resolveWorkspacePath(workspaceRoot: string, filePath: string): string {
   return path.join(workspaceRoot, filePath);
 }
 
-async function openFile(workspaceRoot: string, args: { filePath: string; line?: number }): Promise<void> {
+async function openFile(
+  workspaceRoot: string,
+  args: { filePath: string; line?: number }
+): Promise<void> {
   const abs = resolveWorkspacePath(workspaceRoot, args.filePath);
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(abs));
   const editor = await vscode.window.showTextDocument(doc, { preview: false });
@@ -82,7 +85,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const tree = new RepomapTreeDataProvider();
   const treeView = vscode.window.createTreeView('repomap.explorer', { treeDataProvider: tree });
-  context.subscriptions.push(treeView);
+  const treeViewFallback = vscode.window.createTreeView('repomap.explorer.fallback', { treeDataProvider: tree });
+  context.subscriptions.push(treeView, treeViewFallback);
 
   const codelens = new RepomapCodeLensProvider(getState);
   context.subscriptions.push(
@@ -101,7 +105,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let panel: vscode.WebviewPanel | null = null;
 
   const setReport = (workspaceRoot: string, report: AnalysisResult | null) => {
-    state = { report, derived: computeDerived(report) };
+    state = { report, derived: computeDerived(report, workspaceRoot) };
     tree.setReport(report);
     codelens.refresh();
 
@@ -192,15 +196,18 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('repomap.openFile', async (args: { filePath: string; line?: number }) => {
-      try {
-        const root = getWorkspaceRoot();
-        await openFile(root, args);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Repomap: ${msg}`);
+    vscode.commands.registerCommand(
+      'repomap.openFile',
+      async (args: { filePath: string; line?: number }) => {
+        try {
+          const root = getWorkspaceRoot();
+          await openFile(root, args);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          vscode.window.showErrorMessage(`Repomap: ${msg}`);
+        }
       }
-    })
+    )
   );
 
   context.subscriptions.push(

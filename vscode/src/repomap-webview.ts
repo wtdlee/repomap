@@ -5,18 +5,10 @@ export type WebviewInit = {
   report: AnalysisResult | null;
 };
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 export function getWebviewHtml(webview: vscode.Webview, init: WebviewInit): string {
   const nonce = String(Date.now());
-  const data = escapeHtml(JSON.stringify(init.report ?? null));
+  // Safely inline JSON into <script> (avoid </script> injection via '<').
+  const reportJson = JSON.stringify(init.report ?? null).replace(/</g, '\\u003c');
 
   // Note: this UI is intentionally simple and self-contained.
   return `<!doctype html>
@@ -56,7 +48,7 @@ export function getWebviewHtml(webview: vscode.Webview, init: WebviewInit): stri
 
     <script nonce="${nonce}">
       const vscode = acquireVsCodeApi();
-      const report = JSON.parse(${JSON.stringify(data)});
+      const report = ${reportJson};
 
       const state = { tab: 'pages', q: '' };
 

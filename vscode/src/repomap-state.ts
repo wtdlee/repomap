@@ -1,3 +1,4 @@
+import * as path from 'path';
 import type { AnalysisResult, PageInfo, ComponentInfo, GraphQLOperation } from './repomap-types';
 
 export type FileInsights = {
@@ -27,7 +28,14 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
-export function computeDerived(report: AnalysisResult | null): RepomapDerived {
+function resolveWorkspacePath(workspaceRoot: string | undefined, filePath: string): string {
+  if (!workspaceRoot) return filePath;
+  if (path.isAbsolute(filePath)) return filePath;
+  if (/^[A-Za-z]:[\\/]/.test(filePath)) return filePath;
+  return path.join(workspaceRoot, filePath);
+}
+
+export function computeDerived(report: AnalysisResult | null, workspaceRoot?: string): RepomapDerived {
   const pages = report?.pages ?? [];
   const components = report?.components ?? [];
   const ops = report?.graphqlOperations ?? [];
@@ -52,7 +60,8 @@ export function computeDerived(report: AnalysisResult | null): RepomapDerived {
   const componentByFilePath = new Map<string, ComponentInfo[]>();
 
   const pushInsight = (filePath: string, insight: FileInsights) => {
-    const key = normalizePath(filePath);
+    const abs = resolveWorkspacePath(workspaceRoot, filePath);
+    const key = normalizePath(abs);
     const arr = insightsByFilePath.get(key) ?? [];
     arr.push(insight);
     insightsByFilePath.set(key, arr);
@@ -78,7 +87,7 @@ export function computeDerived(report: AnalysisResult | null): RepomapDerived {
       dependents: dents,
     });
 
-    const key = normalizePath(c.filePath);
+    const key = normalizePath(resolveWorkspacePath(workspaceRoot, c.filePath));
     componentByFilePath.set(key, [...(componentByFilePath.get(key) ?? []), c]);
   }
 
@@ -89,7 +98,7 @@ export function computeDerived(report: AnalysisResult | null): RepomapDerived {
       usedIn: (op.usedIn ?? []).length,
     });
 
-    const key = normalizePath(op.filePath);
+    const key = normalizePath(resolveWorkspacePath(workspaceRoot, op.filePath));
     graphqlByFilePath.set(key, [...(graphqlByFilePath.get(key) ?? []), op]);
   }
 

@@ -29,11 +29,18 @@
       "activitybar": [
         {
           "id": "repomap",
-          "title": "Repomap"
+          "title": "Repomap",
+          "icon": "resources/repomap.svg"
         }
       ]
     },
     "views": {
+      "explorer": [
+        {
+          "id": "repomap.explorer.fallback",
+          "name": "Repomap"
+        }
+      ],
       "repomap": [
         {
           "id": "repomap.explorer",
