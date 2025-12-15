@@ -2,7 +2,7 @@
   "name": "repomap-vscode",
   "displayName": "Repomap",
   "description": "Run @wtdlee/repomap from VS Code and open generated docs.",
-  "version": "0.1.0",
+  "version": "0.1.16",
   "publisher": "wtdlee",
   "license": "MIT",
   "repository": {
@@ -16,10 +16,12 @@
   "categories": [
     "Other"
   ],
+  "icon": "resources/repomap.png",
   "main": "./dist/extension.js",
   "activationEvents": [
     "onView:repomap.explorer",
     "onView:repomap.explorer.fallback",
+    "onView:repomap.context",
     "onLanguage:typescript",
     "onLanguage:typescriptreact",
     "onLanguage:javascript",
@@ -27,6 +29,8 @@
     "onLanguage:ruby",
     "onCommand:repomap.open",
     "onCommand:repomap.refresh",
+    "onCommand:repomap.search",
+    "onCommand:repomap.graphqlStructure",
     "onCommand:repomap.serve",
     "onCommand:repomap.generate"
   ],
@@ -51,6 +55,10 @@
         {
           "id": "repomap.explorer",
           "name": "Explorer"
+        },
+        {
+          "id": "repomap.context",
+          "name": "Current File"
         }
       ]
     },
@@ -64,16 +72,20 @@
         "title": "Repomap: Refresh"
       },
       {
+        "command": "repomap.search",
+        "title": "Repomap: Search (Quick Jump)"
+      },
+      {
+        "command": "repomap.graphqlStructure",
+        "title": "Repomap: GraphQL Structure (Highlight)"
+      },
+      {
         "command": "repomap.serve",
         "title": "Repomap: Serve"
       },
       {
         "command": "repomap.generate",
         "title": "Repomap: Generate (Static)"
-      },
-      {
-        "command": "repomap.openFile",
-        "title": "Repomap: Open File"
       }
     ],
     "configuration": {
@@ -103,8 +115,39 @@
           "type": "boolean",
           "default": true,
           "description": "Write analysis output to an extension-owned temp folder to avoid creating diffs in the repository"
+        },
+        "repomap.autoRefreshOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically refresh Repomap analysis after saving files (debounced)"
+        },
+        "repomap.autoRefreshDebounceMs": {
+          "type": "number",
+          "default": 3000,
+          "description": "Debounce time in milliseconds for auto refresh on save"
+        },
+        "repomap.hideDocumentVariableNames": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide GraphQL variableNames ending with 'Document' in the Current File view"
         }
       }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "repomap.explorer.focus",
+          "when": "false"
+        },
+        {
+          "command": "repomap.context.focus",
+          "when": "false"
+        },
+        {
+          "command": "repomap.openFile",
+          "when": "false"
+        }
+      ]
     }
   },
   "scripts": {

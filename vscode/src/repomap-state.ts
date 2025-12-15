@@ -14,9 +14,11 @@ export type FileInsights = {
 export type RepomapDerived = {
   pageIncomingByPath: Map<string, number>;
   pageByPath: Map<string, PageInfo>;
+  pagesByFilePath: Map<string, PageInfo[]>;
   insightsByFilePath: Map<string, FileInsights[]>;
   graphqlByFilePath: Map<string, GraphQLOperation[]>;
   componentByFilePath: Map<string, ComponentInfo[]>;
+  componentByName: Map<string, ComponentInfo[]>;
 };
 
 export type RepomapState = {
@@ -61,6 +63,8 @@ export function computeDerived(
   const insightsByFilePath = new Map<string, FileInsights[]>();
   const graphqlByFilePath = new Map<string, GraphQLOperation[]>();
   const componentByFilePath = new Map<string, ComponentInfo[]>();
+  const componentByName = new Map<string, ComponentInfo[]>();
+  const pagesByFilePath = new Map<string, PageInfo[]>();
 
   const pushInsight = (filePath: string, insight: FileInsights) => {
     const abs = resolveWorkspacePath(workspaceRoot, filePath);
@@ -68,6 +72,11 @@ export function computeDerived(
     const arr = insightsByFilePath.get(key) ?? [];
     arr.push(insight);
     insightsByFilePath.set(key, arr);
+  };
+
+  const toKey = (filePath: string): string => {
+    const abs = resolveWorkspacePath(workspaceRoot, filePath);
+    return normalizePath(abs);
   };
 
   for (const page of pages) {
@@ -78,6 +87,9 @@ export function computeDerived(
       linkedTo: (page.linkedPages ?? []).length,
       linkedFrom: incoming,
     });
+
+    const k = toKey(page.filePath);
+    pagesByFilePath.set(k, [...(pagesByFilePath.get(k) ?? []), page]);
   }
 
   for (const c of components) {
@@ -90,8 +102,9 @@ export function computeDerived(
       dependents: dents,
     });
 
-    const key = normalizePath(resolveWorkspacePath(workspaceRoot, c.filePath));
+    const key = toKey(c.filePath);
     componentByFilePath.set(key, [...(componentByFilePath.get(key) ?? []), c]);
+    componentByName.set(c.name, [...(componentByName.get(c.name) ?? []), c]);
   }
 
   for (const op of ops) {
@@ -101,15 +114,17 @@ export function computeDerived(
       usedIn: (op.usedIn ?? []).length,
     });
 
-    const key = normalizePath(resolveWorkspacePath(workspaceRoot, op.filePath));
+    const key = toKey(op.filePath);
     graphqlByFilePath.set(key, [...(graphqlByFilePath.get(key) ?? []), op]);
   }
 
   return {
     pageIncomingByPath,
     pageByPath,
+    pagesByFilePath,
     insightsByFilePath,
     graphqlByFilePath,
     componentByFilePath,
+    componentByName,
   };
 }
