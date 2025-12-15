@@ -89,11 +89,11 @@ npx @wtdlee/repomap serve
 
 | Command | Description |
 |---------|-------------|
-| `repomap serve` | Start interactive documentation server |
-| `repomap generate` | Generate static documentation files |
-| `repomap init` | Create configuration file |
-| `repomap rails` | Analyze Rails application and generate HTML map |
-| `repomap diff` | Show changes since last generation |
+| `repomap serve` | Start local documentation server with live reload |
+| `repomap generate` | Generate documentation from source code |
+| `repomap init` | Initialize repomap configuration |
+| `repomap rails` | Analyze a Rails application and generate interactive map |
+| `repomap diff` | Show documentation changes since last generation |
 
 ### CLI Options
 
