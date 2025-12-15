@@ -11,6 +11,7 @@ export type GenerateReportArgs = {
   workspaceRoot: string;
   npxSpecifier: string;
   outputDir: string;
+  useTemp: boolean;
 };
 
 function getNpxCommand(): { cmd: string; argsPrefix: string[] } {
@@ -21,7 +22,9 @@ function getNpxCommand(): { cmd: string; argsPrefix: string[] } {
   return { cmd: 'npx', argsPrefix: [] };
 }
 
-export async function generateReportJson(args: GenerateReportArgs): Promise<{ report: AnalysisResult; reportPath: string }> {
+export async function generateReportJson(
+  args: GenerateReportArgs
+): Promise<{ report: AnalysisResult; reportPath: string }> {
   const { cmd, argsPrefix } = getNpxCommand();
 
   const outAbs = path.isAbsolute(args.outputDir)
@@ -36,6 +39,8 @@ export async function generateReportJson(args: GenerateReportArgs): Promise<{ re
     'generate',
     '--format',
     'json',
+    ...(args.useTemp ? ['--temp'] : []),
+    // If outputDir is set, it takes precedence over --temp in repomap CLI.
     '--output',
     outAbs,
     '--ci',

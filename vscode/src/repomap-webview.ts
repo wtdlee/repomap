@@ -8,7 +8,11 @@ export type WebviewInit = {
 export function getWebviewHtml(webview: vscode.Webview, init: WebviewInit): string {
   const nonce = String(Date.now());
   // Safely inline JSON into <script> (avoid </script> injection via '<').
-  const reportJson = JSON.stringify(init.report ?? null).replace(/</g, '\\u003c');
+  const reportJson = JSON.stringify(init.report ?? null)
+    .replace(/</g, '\\u003c')
+    // Prevent line/paragraph separators from breaking <script> in some JS parsers.
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 
   // Note: this UI is intentionally simple and self-contained.
   return `<!doctype html>
@@ -45,6 +49,7 @@ export function getWebviewHtml(webview: vscode.Webview, init: WebviewInit): stri
       <div class="tab" data-tab="graphql">GraphQL</div>
     </div>
     <div id="list" class="list"></div>
+    <div id="err" class="empty" style="display:none; color:#ef4444;"></div>
 
     <script nonce="${nonce}">
       const vscode = acquireVsCodeApi();
@@ -54,6 +59,14 @@ export function getWebviewHtml(webview: vscode.Webview, init: WebviewInit): stri
 
       const elQ = document.getElementById('q');
       const elList = document.getElementById('list');
+      const elErr = document.getElementById('err');
+
+      window.addEventListener('error', (e) => {
+        try {
+          elErr.style.display = 'block';
+          elErr.textContent = 'WebView error: ' + (e && e.message ? e.message : String(e));
+        } catch {}
+      });
 
       function norm(s) { return String(s || '').toLowerCase(); }
 

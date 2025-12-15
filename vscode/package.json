@@ -19,6 +19,7 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onView:repomap.explorer",
+    "onView:repomap.explorer.fallback",
     "onCommand:repomap.open",
     "onCommand:repomap.refresh",
     "onCommand:repomap.serve",
@@ -92,6 +93,11 @@
           "type": "string",
           "default": ".repomap",
           "description": "Directory where repomap writes report.json (used by the extension UI)"
+        },
+        "repomap.useTempOutput": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write analysis output to an extension-owned temp folder to avoid creating diffs in the repository"
         }
       }
     }

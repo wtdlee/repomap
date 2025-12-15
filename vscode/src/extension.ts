@@ -13,6 +13,7 @@ type RepoMapSettings = {
   port: number;
   outputDir: string;
   jsonOutputDir: string;
+  useTempOutput: boolean;
 };
 
 function getSettings(): RepoMapSettings {
@@ -22,6 +23,7 @@ function getSettings(): RepoMapSettings {
     port: cfg.get<number>('port', 3030),
     outputDir: cfg.get<string>('outputDir', '.repomap'),
     jsonOutputDir: cfg.get<string>('jsonOutputDir', '.repomap'),
+    useTempOutput: cfg.get<boolean>('useTempOutput', true),
   };
 }
 
@@ -85,7 +87,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const tree = new RepomapTreeDataProvider();
   const treeView = vscode.window.createTreeView('repomap.explorer', { treeDataProvider: tree });
-  const treeViewFallback = vscode.window.createTreeView('repomap.explorer.fallback', { treeDataProvider: tree });
+  const treeViewFallback = vscode.window.createTreeView('repomap.explorer.fallback', {
+    treeDataProvider: tree,
+  });
   context.subscriptions.push(treeView, treeViewFallback);
 
   const codelens = new RepomapCodeLensProvider(getState);
@@ -175,14 +179,21 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('repomap.refresh', async () => {
       try {
         const root = getWorkspaceRoot();
-        const { npxSpecifier, jsonOutputDir } = getSettings();
+        const { npxSpecifier, jsonOutputDir, useTempOutput } = getSettings();
         status.text = 'Repomap: Analyzing…';
         ensurePanel(state.report);
+
+        // Always avoid writing into the repository by default.
+        // Use extension global storage as the output root.
+        const storageDir = context.globalStorageUri.fsPath;
+        const safeOutDir = path.join(storageDir, 'repomap');
 
         const { report } = await generateReportJson({
           workspaceRoot: root,
           npxSpecifier,
-          outputDir: jsonOutputDir,
+          // If the user explicitly disables temp output, fall back to configured output dir.
+          outputDir: useTempOutput ? safeOutDir : jsonOutputDir,
+          useTemp: useTempOutput,
         });
 
         setReport(root, report);

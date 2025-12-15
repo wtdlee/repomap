@@ -11,7 +11,9 @@ export type RepomapTreeItem = {
 };
 
 export class RepomapTreeDataProvider implements vscode.TreeDataProvider<RepomapTreeItem> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<RepomapTreeItem | undefined | null | void>();
+  private _onDidChangeTreeData = new vscode.EventEmitter<
+    RepomapTreeItem | undefined | null | void
+  >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private report: AnalysisResult | null = null;
@@ -24,7 +26,9 @@ export class RepomapTreeDataProvider implements vscode.TreeDataProvider<RepomapT
   getTreeItem(element: RepomapTreeItem): vscode.TreeItem {
     const item = new vscode.TreeItem(
       element.label,
-      element.children ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+      element.children
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None
     );
 
     item.description = element.description;
@@ -48,7 +52,6 @@ export class RepomapTreeDataProvider implements vscode.TreeDataProvider<RepomapT
           kind: 'section',
           label: 'No report loaded',
           description: 'Run Repomap: Refresh',
-          children: [],
         },
       ]);
     }
@@ -62,13 +65,26 @@ export class RepomapTreeDataProvider implements vscode.TreeDataProvider<RepomapT
     }
 
     const pages = (this.report.pages ?? []).slice().sort((a, b) => a.path.localeCompare(b.path));
-    const components = (this.report.components ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
-    const ops = (this.report.graphqlOperations ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    const components = (this.report.components ?? [])
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const ops = (this.report.graphqlOperations ?? [])
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return Promise.resolve([
-      this.section('Pages', pages.map((p) => this.pageItem(p))),
-      this.section('Components', components.map((c) => this.componentItem(c))),
-      this.section('GraphQL Operations', ops.map((o) => this.graphqlItem(o))),
+      this.section(
+        'Pages',
+        pages.map((p) => this.pageItem(p))
+      ),
+      this.section(
+        'Components',
+        components.map((c) => this.componentItem(c))
+      ),
+      this.section(
+        'GraphQL Operations',
+        ops.map((o) => this.graphqlItem(o))
+      ),
     ]);
   }
 
