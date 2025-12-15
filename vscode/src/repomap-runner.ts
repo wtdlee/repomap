@@ -58,7 +58,39 @@ export async function generateReportJson(
   }
 
   const raw = await fs.readFile(reportPath, 'utf-8');
-  const parsed = JSON.parse(raw) as AnalysisResult;
+  const parsed = JSON.parse(raw) as unknown;
 
-  return { report: parsed, reportPath };
+  const report = extractAnalysisResult(parsed);
+  if (!report) {
+    throw new Error(
+      'Unsupported report.json schema. Expected AnalysisResult or DocumentationReport.repositories[].analysis.'
+    );
+  }
+
+  return { report, reportPath };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function extractAnalysisResult(root: unknown): AnalysisResult | null {
+  // Case 1: direct AnalysisResult (single repo)
+  if (isRecord(root) && Array.isArray(root.pages) && Array.isArray(root.components)) {
+    return root as AnalysisResult;
+  }
+
+  // Case 2: DocumentationReport { repositories: [{ analysis: AnalysisResult, ... }] }
+  if (isRecord(root) && Array.isArray(root.repositories)) {
+    const repos = root.repositories as unknown[];
+    for (const r of repos) {
+      if (!isRecord(r)) continue;
+      const analysis = r.analysis;
+      if (isRecord(analysis) && Array.isArray(analysis.pages) && Array.isArray(analysis.components)) {
+        return analysis as AnalysisResult;
+      }
+    }
+  }
+
+  return null;
 }
