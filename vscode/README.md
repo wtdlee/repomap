@@ -1,27 +1,50 @@
 ## Repomap (VS Code)
 
-Make your codebase navigable in seconds.
+**Understand GraphQL at a glance. Click any field to jump to the exact place in your editor.**
 
-- **Quick Jump**: search RepoMap results and jump to files instantly
+Repomap’s main feature is **GraphQL Structure (Highlight)**: it visualizes the structure of a query/fragment (including fragment spreads) and keeps navigation inside VS Code.
+
+## Main feature: GraphQL Structure (Highlight)
+
+**What it does**
+
+- Shows a clean, query-like structure view for the GraphQL under your cursor/selection
+- Resolves fragment spreads (co-located and cross-file)
+- Click-to-jump to the exact file/line and highlights only the focused field (no distracting “highlight everything” mode)
+- Optional cursor-follow: as you move the editor cursor, the panel selection updates (and vice versa)
+
+**How to use**
+
+1) Put your cursor inside a GraphQL document (or select a range)  
+2) Run **`Repomap: GraphQL Structure (Highlight)`**  
+3) Click any field to jump, or toggle **Follow cursor** in the panel
+
+Supported co-location patterns:
+
+```ts
+gql`...`
+gql(`...`)
+gql(/* GraphQL */ `...`)
+```
+
+## Workflow (recommended)
+
+1) Run **`Repomap: Refresh`** once to generate/load a report  
+2) Use **GraphQL Structure (Highlight)** while reading code  
+3) Use the sidebar for quick context and navigation
+
+## Other productivity features
+
+- **Quick Jump**: search Repomap results and jump to files instantly
 - **Current File view**: see pages/components/GraphQL/deps for the active editor
-- **GraphQL Structure (Highlight)**: inspect query/fragment structure and click to jump + highlight in-editor
 - **Serve / Generate**: run Repomap from VS Code (same engine as the npm package)
-
-## Getting started
-
-1) Run **`Repomap: Refresh`** to generate/load a report  
-2) Open the **Repomap** activity bar  
-3) Use:
-   - **Current File**: context for the active editor
-   - **Search (Quick Jump)**: search the report and jump
-   - **GraphQL Structure (Highlight)**: run it while your cursor is inside `gql\`...\`` (or `gql(\`...\`)`)
 
 ## Commands
 
 - **Repomap: Refresh**: generate and load `report.json`
-- **Repomap: Open**: open the Repomap webview
-- **Repomap: Search (Quick Jump)**: quick search/jump across the report
 - **Repomap: GraphQL Structure (Highlight)**: show query/fragment structure and jump on click
+- **Repomap: Search (Quick Jump)**: quick search/jump across the report
+- **Repomap: Open**: open the Repomap webview
 - **Repomap: Serve**: start Repomap dev server (extension uses `--no-open` by default)
 - **Repomap: Generate (Static)**: generate static docs
 
@@ -36,6 +59,3 @@ Make your codebase navigable in seconds.
 ## Notes
 
 - This extension runs Repomap via `npx`. Make sure your workspace can run Node tools.
-- For GraphQL co-location, the highlight panel supports both `gql\`...\`` and `gql(/* GraphQL */ \`...\`)` patterns.
-
-

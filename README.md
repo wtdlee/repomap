@@ -89,11 +89,11 @@ npx @wtdlee/repomap serve
 
 | Command | Description |
 |---------|-------------|
-| `repomap serve` | Start interactive documentation server |
-| `repomap generate` | Generate static documentation files |
-| `repomap init` | Create configuration file |
-| `repomap rails` | Analyze Rails application and generate HTML map |
-| `repomap diff` | Show changes since last generation |
+| `repomap serve` | Start local documentation server with live reload |
+| `repomap generate` | Generate documentation from source code |
+| `repomap init` | Initialize repomap configuration |
+| `repomap rails` | Analyze a Rails application and generate interactive map |
+| `repomap diff` | Show documentation changes since last generation |
 
 ### CLI Options
 
@@ -397,6 +397,7 @@ export default config;
 - **Rails Routes**: Browse routes with response type indicators (JSON, HTML, Redirect)
 - **Rails Screens**: View-based screen listing with template info
 - **React Components**: React components used in Rails views with usage locations
+- **Export CSV**: Export the currently selected page details as a human-readable CSV (includes a timestamp in the filename)
 
 #### Route Indicators
 | Tag | Meaning |
@@ -414,7 +415,7 @@ export default config;
 - **Controllers Tab**: Controllers with actions and filters
 - **Models Tab**: Models with associations and validations
 - **gRPC Tab**: gRPC services with RPC methods
-- **Diagram Tab**: Model relationships ER diagram
+- **Diagram Tab**: Model relationships ER diagram (copy Mermaid source, download SVG/PNG)
 
 #### Features
 - Multi-select filters (Ctrl/Cmd + click)
@@ -426,6 +427,7 @@ export default config;
 - Auto-generated markdown documentation
 - Navigation sidebar
 - Syntax-highlighted code blocks
+- Mermaid diagrams: zoom, reset, fullscreen, copy Mermaid source, download SVG/PNG
 - Coverage metrics (parse failures, codegen detection) to prevent silent omissions
 
 ## Supported Frameworks
