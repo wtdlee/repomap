@@ -41,6 +41,7 @@
   "scripts": {
     "build": "tsup",
     "build:tsc": "tsc && npm run copy-assets",
+    "build:vscode": "pnpm -C vscode install && pnpm -C vscode build",
     "copy-assets": "mkdir -p dist/generators/assets && cp src/generators/assets/*.css dist/generators/assets/",
     "dev": "tsx watch src/cli.ts",
     "dev:serve": "tsx watch --clear-screen=false src/cli.ts serve --no-cache",
@@ -48,10 +49,10 @@
     "generate": "tsx src/cli.ts generate",
     "serve": "tsx src/cli.ts serve",
     "test": "vitest --pool=threads",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"vscode/src/**/*.ts\" \"*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" \"vscode/src/**/*.ts\" \"*.ts\" --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"vscode/src/**/*.ts\" \"*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"vscode/src/**/*.ts\" \"*.ts\"",
     "typecheck": "tsc --noEmit",
     "prepare": "husky",
     "changeset": "changeset",
@@ -59,6 +60,14 @@
   },
   "lint-staged": {
     "src/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "vscode/src/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.ts": [
       "eslint --fix",
       "prettier --write"
     ]

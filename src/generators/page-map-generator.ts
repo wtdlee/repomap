@@ -345,7 +345,10 @@ export class PageMapGenerator {
   <div class="detail" id="detail">
     <div class="detail-header">
       <div class="detail-title" id="detail-title"></div>
+      <div class="detail-actions">
+        <button class="detail-export" id="detail-export" onclick="exportSelectedPageCsv()" disabled title="Export the selected page as a CSV">Export CSV</button>
       <button class="detail-close" onclick="closeDetail()">×</button>
+      </div>
     </div>
     <div class="detail-body" id="detail-body"></div>
   </div>
@@ -2108,9 +2111,166 @@ export class PageMapGenerator {
       showDetail(path);
     }
 
+    // Selected page state for export
+    let selectedPagePathForExport = null;
+
+    function csvEscape(v) {
+      const s = v == null ? '' : String(v);
+      if (/[",\\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+
+    function downloadCsv(filename, csvText) {
+      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 250);
+    }
+
+    function buildSelectedPageCsv(pagePath) {
+      const page = pageMap.get(pagePath);
+      if (!page) return null;
+
+      const rows = [];
+      // Header
+      rows.push(['section', 'type', 'name', 'origin', 'detail']);
+
+      // Page info
+      rows.push(['page', 'path', page.path || pagePath, '']);
+      rows.push(['page', 'file', page.filePath || '', '']);
+      rows.push(['page', 'layout', page.layout || '', '']);
+      rows.push(['page', 'auth', page.authentication?.required ? 'required' : 'none', '']);
+      if (page.params && page.params.length) {
+        rows.push(['page', 'params', page.params.join(', '), '']);
+      }
+
+      // Steps
+      (page.steps || []).forEach((st, idx) => {
+        const stepName = st.name || ('Step ' + (st.id || (idx + 1)));
+        const comp = st.component ? ('component: ' + st.component) : '';
+        rows.push(['steps', 'step', stepName, '', comp]);
+      });
+
+      // Related pages (hierarchy + links)
+      if (page.parent) rows.push(['related', 'parent', page.parent, '', '']);
+      (page.children || []).forEach((c) => rows.push(['related', 'child', c, '', '']));
+      (page.linkedPages || []).forEach((lp) => rows.push(['related', 'link', lp, '', '']));
+
+      // GraphQL (from enriched page.dataFetching)
+      const dfs = page.dataFetching || [];
+      dfs
+        .filter((df) => df && df.type !== 'component')
+        .forEach((df) => {
+          const kind = (df.type || '').includes('Mutation') ? 'mutation' : 'query';
+
+          // Human-friendly origin normalization (Direct / Close / Indirect / Common)
+          const rawName = df.operationName || df.queryName || '';
+          const arrowCount = (rawName.match(/→/g) || []).length;
+          let name = String(rawName).replace(/^[→\s]+/, '').trim();
+
+          // Extract "(via xxx)" if present
+          let origin = 'Direct';
+          let detail = '';
+          const viaMatch = name.match(/\s*\(via\s+([^)]+)\)/);
+          if (viaMatch) {
+            detail = viaMatch[1];
+            name = name.replace(viaMatch[0], '').trim();
+            origin = arrowCount ? 'Indirect' : 'Close';
+          }
+
+          const source = String(df.source || '');
+          if (!viaMatch && source) {
+            if (source.startsWith('common:')) {
+              origin = 'Common';
+              detail = source.replace('common:', '');
+            } else if (source.startsWith('close:')) {
+              origin = 'Close';
+              detail = source.replace('close:', '');
+            } else if (source.startsWith('indirect:') || source.startsWith('usedIn:')) {
+              origin = 'Indirect';
+              detail = source.replace(/^indirect:|^usedIn:/, '');
+            } else if (source.startsWith('import:')) {
+              origin = 'Import';
+              detail = source.replace('import:', '');
+            } else if (source.startsWith('hook:')) {
+              origin = 'Close';
+              detail = source.replace('hook:', '');
+            } else if (source.startsWith('component:')) {
+              origin = 'Close';
+              detail = source.replace('component:', '');
+            } else {
+              // Unknown source format; keep in detail
+              detail = source;
+            }
+          }
+
+          // Map to human labels (English)
+          const originLabelMap = {
+            Direct: 'Direct (this page)',
+            Close: 'Close (nearby)',
+            Indirect: 'Indirect (reference)',
+            Common: 'Common (shared)',
+            Import: 'Import',
+          };
+          const originLabel = originLabelMap[origin] || origin;
+
+          rows.push(['graphql', kind, name, originLabel, detail || '']);
+        });
+
+      // Used components (if present as component refs)
+      dfs
+        .filter((df) => df && df.type === 'component')
+        .forEach((df) => rows.push(['components', 'used', df.operationName || '', '', '']));
+
+      // REST API calls (best-effort match as used in the UI)
+      const pageFileName = page.filePath?.split('/').pop() || '';
+      const pageBaseName = pageFileName.replace(/\\.(tsx?|jsx?)$/, '');
+      const pageApis = apiCallsData.filter(api => {
+        if (!api.filePath || !page.filePath) return false;
+        return api.filePath.includes(page.filePath) ||
+               page.filePath.includes(api.filePath) ||
+               api.filePath.endsWith(pageFileName) ||
+               api.filePath.includes('/' + pageBaseName + '/');
+      });
+      pageApis.forEach((api) => {
+        rows.push(['rest', api.method || '', api.url || '', '', api.filePath || '']);
+      });
+
+      // Serialize
+      return rows.map((r) => r.map(csvEscape).join(',')).join('\\n') + '\\n';
+    }
+
+    function exportSelectedPageCsv() {
+      if (!selectedPagePathForExport) return;
+      const csv = buildSelectedPageCsv(selectedPagePathForExport);
+      if (!csv) return;
+      const safe = selectedPagePathForExport.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+      const d = new Date();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const ts =
+        String(d.getFullYear()) +
+        pad2(d.getMonth() + 1) +
+        pad2(d.getDate()) +
+        '_' +
+        pad2(d.getHours()) +
+        pad2(d.getMinutes()) +
+        pad2(d.getSeconds());
+      const fileName = 'repomap-page_' + (safe || 'page') + '_' + ts + '.csv';
+      downloadCsv(fileName, csv);
+    }
+
     function showDetail(path) {
       const page = pageMap.get(path);
       if (!page) return;
+
+      selectedPagePathForExport = path;
+      const exportBtn = document.getElementById('detail-export');
+      if (exportBtn) exportBtn.disabled = false;
 
       const rels = relations.filter(r => r.from === path || r.to === path);
       const parent = page.parent ? pageMap.get(page.parent) : null;
@@ -2458,6 +2618,9 @@ export class PageMapGenerator {
     function closeDetail() {
       document.getElementById('detail').classList.remove('open');
       document.querySelectorAll('.page-item').forEach(p => p.classList.remove('selected'));
+      selectedPagePathForExport = null;
+      const exportBtn = document.getElementById('detail-export');
+      if (exportBtn) exportBtn.disabled = true;
     }
 
     // Filter by stat type

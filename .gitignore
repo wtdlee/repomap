@@ -4,6 +4,11 @@ node_modules/
 # Build output
 dist/
 
+# VS Code extension (kept as a subproject)
+vscode/node_modules/
+vscode/dist/
+vscode/*.vsix
+
 # Generated docs
 .repomap/
 generated-docs/

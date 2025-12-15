@@ -429,8 +429,35 @@ program
         config.outputDir = path.resolve(options.output);
       }
 
-      const server = new DocServer(config, parseInt(options.port));
-      await server.start(!options.open);
+      // If a Repomap server is already running on the requested port, reuse it:
+      // trigger regenerate (which emits a live-reload event) and focus the browser.
+      const requestedPort = parseInt(options.port);
+      if (options.open) {
+        const baseUrl = `http://localhost:${requestedPort}`;
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 650);
+          const res = await fetch(`${baseUrl}/api/regenerate`, {
+            method: 'POST',
+            signal: ctrl.signal,
+          });
+          clearTimeout(t);
+          if (res.ok) {
+            console.log(
+              chalk.cyan(`↻ Existing Repomap server detected. Regenerated and reloaded: ${baseUrl}`)
+            );
+            const open = (await import('open')).default;
+            // Best-effort: focus an existing tab/window if possible.
+            await open(baseUrl, { wait: false, newInstance: false });
+            return;
+          }
+        } catch {
+          // Not running (or not Repomap). Continue to start a new server.
+        }
+      }
+
+      const server = new DocServer(config, requestedPort);
+      await server.start(options.open);
     } catch (error) {
       console.error(chalk.red('Error:'), (error as Error).message);
       process.exit(1);

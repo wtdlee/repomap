@@ -1,0 +1,167 @@
+{
+  "name": "repomap-vscode",
+  "displayName": "Repomap",
+  "description": "Explore your repo map and GraphQL structure inside VS Code. Search, understand context, and jump instantly.",
+  "version": "1.0.0",
+  "publisher": "wtdlee",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wtdlee/repomap.git"
+  },
+  "homepage": "https://github.com/wtdlee/repomap",
+  "bugs": {
+    "url": "https://github.com/wtdlee/repomap/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Productivity",
+    "Visualization"
+  ],
+  "keywords": [
+    "repomap",
+    "repo map",
+    "architecture",
+    "graphql",
+    "navigation",
+    "codebase",
+    "documentation"
+  ],
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
+  "icon": "resources/repomap.png",
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "repomap",
+          "title": "Repomap",
+          "icon": "resources/repomap.svg"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "repomap.explorer.fallback",
+          "name": "Repomap"
+        }
+      ],
+      "repomap": [
+        {
+          "id": "repomap.explorer",
+          "name": "Explorer"
+        },
+        {
+          "id": "repomap.context",
+          "name": "Current File"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "repomap.open",
+        "title": "Repomap: Open"
+      },
+      {
+        "command": "repomap.refresh",
+        "title": "Repomap: Refresh"
+      },
+      {
+        "command": "repomap.search",
+        "title": "Repomap: Search (Quick Jump)"
+      },
+      {
+        "command": "repomap.graphqlStructure",
+        "title": "Repomap: GraphQL Structure (Highlight)"
+      },
+      {
+        "command": "repomap.serve",
+        "title": "Repomap: Serve"
+      },
+      {
+        "command": "repomap.generate",
+        "title": "Repomap: Generate (Static)"
+      }
+    ],
+    "configuration": {
+      "title": "Repomap",
+      "properties": {
+        "repomap.npxSpecifier": {
+          "type": "string",
+          "default": "@wtdlee/repomap",
+          "description": "NPX package specifier, e.g. '@wtdlee/repomap' or '@wtdlee/repomap@latest'"
+        },
+        "repomap.port": {
+          "type": "number",
+          "default": 3030,
+          "description": "Port for 'repomap serve'"
+        },
+        "repomap.outputDir": {
+          "type": "string",
+          "default": ".repomap",
+          "description": "Output directory for generated docs"
+        },
+        "repomap.jsonOutputDir": {
+          "type": "string",
+          "default": ".repomap",
+          "description": "Directory where repomap writes report.json (used by the extension UI)"
+        },
+        "repomap.useTempOutput": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write analysis output to an extension-owned temp folder to avoid creating diffs in the repository"
+        },
+        "repomap.autoRefreshOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically refresh Repomap analysis after saving files (debounced)"
+        },
+        "repomap.autoRefreshDebounceMs": {
+          "type": "number",
+          "default": 3000,
+          "description": "Debounce time in milliseconds for auto refresh on save"
+        },
+        "repomap.hideDocumentVariableNames": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide GraphQL variableNames ending with 'Document' in the Current File view"
+        }
+      }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "repomap.explorer.focus",
+          "when": "false"
+        },
+        {
+          "command": "repomap.context.focus",
+          "when": "false"
+        },
+        {
+          "command": "repomap.openFile",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "package": "npx @vscode/vsce package",
+    "publish": "npx @vscode/vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.1",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.6.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.3.2"
+  }
+}

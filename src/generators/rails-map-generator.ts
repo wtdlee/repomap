@@ -10,6 +10,7 @@ import {
   type RailsAnalysisResult,
   type RailsRoute,
 } from '../analyzers/rails/index.js';
+import { ICONS_SPRITE_SVG } from './icon-sprite.js';
 
 export interface RailsMapOptions {
   title?: string;
@@ -65,6 +66,7 @@ export class RailsMapGenerator {
   <link rel="stylesheet" href="/rails-map.css">
 </head>
 <body>
+  ${ICONS_SPRITE_SVG}
   <header>
     <h1>🛤️ ${title}</h1>
     <nav class="header-nav">
@@ -1088,6 +1090,9 @@ export class RailsMapGenerator {
       updateDiagram();
     };
 
+    // Keep latest mermaid source for copy/export.
+    window.railsMermaidRaw = window.railsMermaidRaw || '';
+
     window.updateDiagram = function() {
       const countInput = document.getElementById('model-count-input');
       const countSelect = document.getElementById('model-count-select');
@@ -1122,6 +1127,7 @@ export class RailsMapGenerator {
       }
 
       const { mermaidCode, modelCount, totalModels } = generateMermaidCode(count, diagramNamespace, diagramFocusModel, diagramDepth);
+      window.railsMermaidRaw = mermaidCode;
 
       // Update diagram - need to recreate SVG
       const container = document.getElementById('mermaid-container');
@@ -1160,6 +1166,7 @@ export class RailsMapGenerator {
       const namespaces = getNamespaces();
       const modelNames = getModelNames();
       const { mermaidCode, modelCount, totalModels } = generateMermaidCode(diagramModelCount, diagramNamespace, diagramFocusModel, diagramDepth);
+      window.railsMermaidRaw = mermaidCode;
 
       let filterText = '';
       if (diagramFocusModel) {
@@ -1174,6 +1181,17 @@ export class RailsMapGenerator {
         <div class="diagram-view-wrapper" style="display:flex;flex-direction:column;height:100%;min-height:0;">
           <div class="panel-header" style="flex-wrap:wrap;gap:8px;flex-shrink:0;">
             <div class="panel-title diagram-title-text">Model Relationships (\${modelCount}/\${totalModels} models\${filterText})</div>
+            <div class="diagram-actions" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <button class="diagram-action-btn icon" id="rails-copy-btn" onclick="copyRailsMermaid()" title="Copy Mermaid source to clipboard" aria-label="Copy Mermaid source">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-copy"></use><use xlink:href="#icon-copy"></use></svg>
+              </button>
+              <button class="diagram-action-btn icon" onclick="downloadRailsDiagramSvg()" title="Download diagram as SVG" aria-label="Download SVG">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-download"></use><use xlink:href="#icon-download"></use></svg>
+              </button>
+              <button class="diagram-action-btn icon" onclick="downloadRailsDiagramPng()" title="Download diagram as PNG" aria-label="Download PNG">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-image"></use><use xlink:href="#icon-image"></use></svg>
+              </button>
+            </div>
             <div class="diagram-filters" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;">
               <label style="display:flex;align-items:center;gap:6px;">
                 <span>Limit:</span>
@@ -1190,7 +1208,7 @@ export class RailsMapGenerator {
                     value="\${isCustom ? diagramModelCount : ''}"
                     style="width:100px;padding:6px 10px;border-radius:4px;background:#2d2d2d;color:#fff;border:1px solid #444;"
                     onchange="updateDiagram()" onkeyup="if(event.key==='Enter')updateDiagram()">
-                  <button onclick="updateDiagram()" style="padding:6px 12px;border-radius:4px;background:#3b82f6;color:#fff;border:none;cursor:pointer;">Apply</button>
+                  <button class="diagram-action-btn icon primary" onclick="updateDiagram()" title="Apply" aria-label="Apply"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-check"></use><use xlink:href="#icon-check"></use></svg></button>
                 </div>
               </label>
               <label style="display:flex;align-items:center;gap:6px;">
@@ -1206,7 +1224,7 @@ export class RailsMapGenerator {
                   <option value="">None</option>
                   \${modelNames.map(name => \`<option value="\${name}" \${diagramFocusModel === name ? 'selected' : ''}>\${name}</option>\`).join('')}
                 </select>
-                \${diagramFocusModel ? \`<button onclick="clearFocusModel()" style="padding:4px 8px;border-radius:4px;background:#666;color:#fff;border:none;cursor:pointer;" title="Clear focus">✕</button>\` : ''}
+                \${diagramFocusModel ? \`<button class="diagram-action-btn icon subtle" onclick="clearFocusModel()" title="Clear focus" aria-label="Clear focus"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-x"></use><use xlink:href="#icon-x"></use></svg></button>\` : ''}
               </label>
               <label style="display:flex;align-items:center;gap:6px;">
                 <span style="opacity:\${diagramFocusModel ? 1 : 0.5}">Depth:</span>
@@ -1259,6 +1277,158 @@ export class RailsMapGenerator {
       };
       document.head.appendChild(script);
     }
+
+    async function copyTextToClipboard(text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch {
+        // fallthrough
+      }
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+      } catch {
+        return false;
+      }
+    }
+
+    function timestamp() {
+      const d = new Date();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      return (
+        String(d.getFullYear()) +
+        pad2(d.getMonth() + 1) +
+        pad2(d.getDate()) +
+        '_' +
+        pad2(d.getHours()) +
+        pad2(d.getMinutes()) +
+        pad2(d.getSeconds())
+      );
+    }
+
+    function downloadBlob(filename, blob) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    }
+
+    function getRailsDiagramSvgEl() {
+      const container = document.getElementById('mermaid-container');
+      if (!container) return null;
+      return container.querySelector('svg');
+    }
+
+    window.copyRailsMermaid = async function() {
+      const raw = (window.railsMermaidRaw || '').trim();
+      if (!raw) return;
+      const ok = await copyTextToClipboard(raw);
+      const btn = document.getElementById('rails-copy-btn');
+      if (btn) {
+        btn.classList.toggle('is-ok', ok);
+        btn.classList.toggle('is-fail', !ok);
+        const oldTitle = btn.getAttribute('title') || '';
+        btn.setAttribute('title', ok ? 'Copied' : 'Copy failed');
+        setTimeout(() => {
+          btn.classList.remove('is-ok', 'is-fail');
+          btn.setAttribute('title', oldTitle);
+        }, 900);
+      }
+    };
+
+    window.downloadRailsDiagramSvg = function() {
+      const svg = getRailsDiagramSvgEl();
+      if (!svg) return;
+      const ser = new XMLSerializer();
+      const svgText = ser.serializeToString(svg);
+      const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+      downloadBlob('repomap-rails-diagram_' + timestamp() + '.svg', blob);
+    };
+
+    window.downloadRailsDiagramPng = function() {
+      const svg = getRailsDiagramSvgEl();
+      if (!svg) return;
+      const ser = new XMLSerializer();
+      const getSvgSize = (svgEl) => {
+        try {
+          const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+          if (vb && vb.width && vb.height) return { w: vb.width, h: vb.height };
+        } catch {}
+        try {
+          const w = svgEl.width && svgEl.width.baseVal && svgEl.width.baseVal.value;
+          const h = svgEl.height && svgEl.height.baseVal && svgEl.height.baseVal.value;
+          if (w && h) return { w, h };
+        } catch {}
+        try {
+          const bb = svgEl.getBBox();
+          if (bb && bb.width && bb.height) return { w: bb.width, h: bb.height };
+        } catch {}
+        const r = svgEl.getBoundingClientRect();
+        return { w: Math.max(1, r.width), h: Math.max(1, r.height) };
+      };
+
+      const s = getSvgSize(svg);
+      const w = Math.max(1, Math.round(s.w));
+      const h = Math.max(1, Math.round(s.h));
+
+      const svgClone = svg.cloneNode(true);
+      try {
+        svgClone.setAttribute('width', String(w));
+        svgClone.setAttribute('height', String(h));
+        if (!svgClone.getAttribute('viewBox')) {
+          svgClone.setAttribute('viewBox', '0 0 ' + String(w) + ' ' + String(h));
+        }
+      } catch {
+        // ignore
+      }
+
+      let svgText = ser.serializeToString(svgClone);
+      if (!/xmlns=/.test(svgText)) {
+        svgText = svgText.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+      if (!/xmlns:xlink=/.test(svgText)) {
+        svgText = svgText.replace('<svg', '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+      }
+      const svgBase64 = btoa(unescape(encodeURIComponent(svgText)));
+      const dataUrl = 'data:image/svg+xml;base64,' + svgBase64;
+
+      const img = new Image();
+      img.decoding = 'async';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const g = canvas.getContext('2d');
+          if (!g) return;
+          g.fillStyle = '#ffffff';
+          g.fillRect(0, 0, w, h);
+          g.drawImage(img, 0, 0, w, h);
+          canvas.toBlob((pngBlob) => {
+            if (pngBlob) {
+              downloadBlob('repomap-rails-diagram_' + timestamp() + '.png', pngBlob);
+            }
+          }, 'image/png');
+        } catch {
+        }
+      };
+      img.onerror = () => {};
+      img.src = dataUrl;
+    };
 
     // Pan and zoom functionality for mermaid diagram
     function initDiagramPanZoom() {
