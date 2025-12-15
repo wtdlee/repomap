@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
-import type { AnalysisResult, PageInfo, ComponentInfo, GraphQLOperation } from './repomap-types';
+import type { AnalysisResult } from './repomap-types';
 
 function toUri(workspaceRoot: string, filePath: string): vscode.Uri {
-  const p = filePath.startsWith('/') || /^[A-Za-z]:\\/.test(filePath)
-    ? filePath
-    : vscode.Uri.joinPath(vscode.Uri.file(workspaceRoot), filePath).fsPath;
+  const p =
+    filePath.startsWith('/') || /^[A-Za-z]:\\/.test(filePath)
+      ? filePath
+      : vscode.Uri.joinPath(vscode.Uri.file(workspaceRoot), filePath).fsPath;
   return vscode.Uri.file(p);
 }
 
@@ -15,7 +16,10 @@ function makeDiag(message: string, severity: vscode.DiagnosticSeverity): vscode.
   return d;
 }
 
-export function buildDiagnostics(args: { workspaceRoot: string; report: AnalysisResult | null }): Map<string, vscode.Diagnostic[]> {
+export function buildDiagnostics(args: {
+  workspaceRoot: string;
+  report: AnalysisResult | null;
+}): Map<string, vscode.Diagnostic[]> {
   const out = new Map<string, vscode.Diagnostic[]>();
   const report = args.report;
   if (!report) return out;
@@ -38,12 +42,18 @@ export function buildDiagnostics(args: { workspaceRoot: string; report: Analysis
     out.set(key, [...(out.get(key) ?? []), d]);
   };
 
-  // Unused GraphQL operations (safe signal: usedIn is empty).
+  // Unused GraphQL operations (heuristic).
+  // If variableNames exist, the operation is likely referenced via codegen/wrappers even when usedIn mapping fails.
   for (const op of ops) {
-    if ((op.usedIn ?? []).length === 0) {
+    const usedInCount = (op.usedIn ?? []).length;
+    const varNameCount = (op.variableNames ?? []).length;
+    if (usedInCount === 0 && varNameCount === 0) {
       push(
         toUri(args.workspaceRoot, op.filePath).fsPath,
-        makeDiag(`Repomap: GraphQL ${op.type} '${op.name}' appears unused`, vscode.DiagnosticSeverity.Warning)
+        makeDiag(
+          `Repomap: GraphQL ${op.type} '${op.name}' appears unused`,
+          vscode.DiagnosticSeverity.Warning
+        )
       );
     }
   }
@@ -55,7 +65,10 @@ export function buildDiagnostics(args: { workspaceRoot: string; report: Analysis
     if (dependents === 0 && type !== 'page') {
       push(
         toUri(args.workspaceRoot, c.filePath).fsPath,
-        makeDiag(`Repomap: Component '${c.name}' has no dependents (possible unused)`, vscode.DiagnosticSeverity.Hint)
+        makeDiag(
+          `Repomap: Component '${c.name}' has no dependents (possible unused)`,
+          vscode.DiagnosticSeverity.Hint
+        )
       );
     }
   }
@@ -66,7 +79,10 @@ export function buildDiagnostics(args: { workspaceRoot: string; report: Analysis
     if (incoming === 0 && p.path !== '/' && p.path !== '') {
       push(
         toUri(args.workspaceRoot, p.filePath).fsPath,
-        makeDiag(`Repomap: Page '${p.path}' has no incoming links (possible orphan)`, vscode.DiagnosticSeverity.Information)
+        makeDiag(
+          `Repomap: Page '${p.path}' has no incoming links (possible orphan)`,
+          vscode.DiagnosticSeverity.Information
+        )
       );
     }
   }

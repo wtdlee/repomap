@@ -27,6 +27,8 @@ export type GraphQLOperation = {
   type: 'query' | 'mutation' | 'subscription' | 'fragment';
   filePath: string;
   usedIn?: string[];
+  // Codegen variable names referencing this operation (e.g. FooDocument, FOO_QUERY)
+  variableNames?: string[];
 };
 
 export type APICall = {
