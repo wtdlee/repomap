@@ -5,7 +5,7 @@
 <h1 align="center">@wtdlee/repomap</h1>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@wtdlee/repomap"><img src="https://badge.fury.io/js/@wtdlee%2Frepomap.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@wtdlee/repomap"><img src="https://img.shields.io/npm/v/@wtdlee/repomap.svg" alt="npm version"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
