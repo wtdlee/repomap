@@ -71,6 +71,44 @@ function normalizeSlashes(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
+function escapeGlobSegment(seg: string): string {
+  // Escape glob-special chars for vscode.workspace.findFiles (minimatch-like).
+  // Most important here: '[' and ']' used by Next.js dynamic routes.
+  return seg.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+}
+
+function stripExtension(fileName: string): string {
+  return fileName.replace(/\.(tsx?|jsx?)$/i, '');
+}
+
+function buildAlternateReportedPaths(reportedPath: string): string[] {
+  const normalized = normalizeSlashes(reportedPath);
+  const extMatch = normalized.match(/\.(tsx?|jsx?)$/i);
+  const ext = extMatch ? extMatch[0] : '';
+  const base = path.basename(normalized);
+  const dir = path.posix.dirname(normalized);
+
+  const alts: string[] = [];
+
+  // If we got ".../[param].tsx", also try ".../[param]/page.tsx" and ".../[param]/index.tsx".
+  // This helps App Router style layouts.
+  if (ext) {
+    const nameNoExt = stripExtension(base);
+    const folderStyle = `${dir}/${nameNoExt}`;
+    alts.push(`${folderStyle}/page${ext}`);
+    alts.push(`${folderStyle}/index${ext}`);
+  }
+
+  // Also try common Next.js conventions even when extension is not present / is unexpected.
+  // For example, some reports might point at a route segment rather than a file.
+  if (!ext) {
+    alts.push(`${normalized}/page.tsx`);
+    alts.push(`${normalized}/index.tsx`);
+  }
+
+  return Array.from(new Set(alts.filter(Boolean)));
+}
+
 async function resolveExistingFile(
   workspaceRoot: string,
   reportedPath: string
@@ -81,24 +119,61 @@ async function resolveExistingFile(
   tried.push(abs);
   if (await fileExists(abs)) return { fsPath: abs, tried };
 
+  // Try alternate path interpretations (e.g. App Router /page.tsx).
+  for (const alt of buildAlternateReportedPaths(reportedPath)) {
+    const altAbs = resolveWorkspacePath(workspaceRoot, alt);
+    tried.push(altAbs);
+    if (await fileExists(altAbs)) return { fsPath: altAbs, tried };
+  }
+
+  // Try common repo roots (some reports omit these prefixes).
+  const prefixes = ['app', 'pages', 'src', 'src/app', 'src/pages'];
+  for (const prefix of prefixes) {
+    const prefixed = normalizeSlashes(prefix + '/' + normalizeSlashes(reportedPath));
+    const prefAbs = resolveWorkspacePath(workspaceRoot, prefixed);
+    tried.push(prefAbs);
+    if (await fileExists(prefAbs)) return { fsPath: prefAbs, tried };
+
+    for (const alt of buildAlternateReportedPaths(prefixed)) {
+      const altAbs = resolveWorkspacePath(workspaceRoot, alt);
+      tried.push(altAbs);
+      if (await fileExists(altAbs)) return { fsPath: altAbs, tried };
+    }
+  }
+
   // If repomap provided an absolute path that doesn't exist, try locating a close match
   // inside the current workspace by basename + suffix match.
   const basename = path.basename(reportedPath);
   const normalized = normalizeSlashes(reportedPath);
   const parts = normalized.split('/').filter(Boolean);
-  const suffixParts = parts.slice(Math.max(0, parts.length - 4));
+  const suffixParts = parts.slice(Math.max(0, parts.length - 6));
   const suffix = suffixParts.join('/');
 
   const candidates = await vscode.workspace.findFiles(
-    `**/${basename}`,
+    `**/${escapeGlobSegment(basename)}`,
     '{**/node_modules/**,**/.git/**,**/.next/**,**/dist/**,**/build/**,**/coverage/**}',
     50
   );
 
+  const normReported = normalizeSlashes(reportedPath);
+
+  const scoreCandidate = (p: string): number => {
+    const np = normalizeSlashes(p);
+    let score = 0;
+    if (np.endsWith(normReported)) score += 1000;
+    if (suffix && np.endsWith(suffix)) score += 500;
+    if (np.endsWith('/' + basename)) score += 200;
+    // Prefer closer to workspace root (shorter path) if scores tie.
+    score -= Math.min(100, Math.floor(np.length / 50));
+    return score;
+  };
+
   const ranked = candidates
     .map((u) => u.fsPath)
-    .filter((p) => normalizeSlashes(p).endsWith(suffix) || normalizeSlashes(p).endsWith('/' + basename))
-    .sort((a, b) => a.length - b.length);
+    .map((p) => ({ p, score: scoreCandidate(p) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.p);
 
   if (ranked.length === 1) {
     tried.push(ranked[0]);
