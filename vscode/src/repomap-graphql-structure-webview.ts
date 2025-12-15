@@ -109,13 +109,13 @@ export function getGraphqlStructureWebviewHtml(
     <div class="header">
       <div>
         <div class="title">${title}</div>
-        <div class="hint">항목을 클릭하면 에디터에서 해당 위치로 이동합니다</div>
+        <div class="hint">Click an item to jump to its location in the editor.</div>
       </div>
       <div class="toolbar">
-        <button class="btn primary" id="follow" title="커서 이동에 맞춰 패널 선택을 자동으로 따라갑니다" aria-pressed="true">
-          커서 연동 <span class="badge on" id="followBadge">ON</span>
+        <button class="btn primary" id="follow" title="Automatically follow the editor cursor in this panel." aria-pressed="true">
+          Follow cursor <span class="badge on" id="followBadge">ON</span>
         </button>
-        <button class="btn" id="clear" title="현재 선택/하이라이트를 해제합니다">지우기</button>
+        <button class="btn" id="clear" title="Clear the current selection/highlight.">Clear</button>
       </div>
     </div>
     <pre id="code">${code}</pre>
@@ -174,5 +174,3 @@ export function getGraphqlStructureWebviewHtml(
   </body>
 </html>`;
 }
-
-

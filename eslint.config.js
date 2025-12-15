@@ -12,7 +12,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   prettierConfig,
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'vscode/src/**/*.ts', '*.ts'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',

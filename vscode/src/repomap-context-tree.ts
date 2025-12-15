@@ -33,7 +33,9 @@ function relOrBasename(workspaceRoot: string | undefined, fsPath: string): strin
 }
 
 export class RepomapContextTreeDataProvider implements vscode.TreeDataProvider<ContextTreeItem> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<ContextTreeItem | undefined | null | void>();
+  private _onDidChangeTreeData = new vscode.EventEmitter<
+    ContextTreeItem | undefined | null | void
+  >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private activeFileFsPath: string | null = null;
@@ -327,5 +329,3 @@ export class RepomapContextTreeDataProvider implements vscode.TreeDataProvider<C
     };
   }
 }
-
-

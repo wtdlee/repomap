@@ -121,7 +121,10 @@ async function findTextMatchesInWorkspace(args: {
 
       results.push({
         uri,
-        range: new vscode.Range(new vscode.Position(line, col), new vscode.Position(line, col + q.length)),
+        range: new vscode.Range(
+          new vscode.Position(line, col),
+          new vscode.Position(line, col + q.length)
+        ),
         preview,
       });
     }
@@ -478,6 +481,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   let panel: vscode.WebviewPanel | null = null;
   let graphqlPanel: vscode.WebviewPanel | null = null;
+  // Ensure we never run multiple expensive analyses concurrently.
+  // If a refresh is already running, subsequent callers will await it instead of starting another run.
+  let refreshInFlight: Promise<void> | null = null;
   // Default ON: highlights only the currently focused field (no "highlight all fields").
   let graphqlFollowCursor = true;
   let graphqlSession: null | {
@@ -608,29 +614,40 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  const doRefresh = async (opts?: { quiet?: boolean }) => {
+  const doRefresh = async (opts?: { quiet?: boolean; openMainWebview?: boolean }) => {
     const root = getWorkspaceRoot();
     const { npxSpecifier, jsonOutputDir, useTempOutput } = getSettings();
     status.text = 'Repomap: Analyzing…';
-    ensurePanel(state.report);
 
     // Always avoid writing into the repository by default.
     // Use extension global storage as the output root.
     const storageDir = context.globalStorageUri.fsPath;
     const safeOutDir = path.join(storageDir, 'repomap');
 
-    const { report } = await generateReportJson({
-      workspaceRoot: root,
-      npxSpecifier,
-      // If the user explicitly disables temp output, fall back to configured output dir.
-      outputDir: useTempOutput ? safeOutDir : jsonOutputDir,
-      useTemp: useTempOutput,
-    });
+    // Optionally open the main webview even when we're just awaiting.
+    if (opts?.openMainWebview !== false) ensurePanel(state.report);
 
-    setReport(root, report);
-    if (!opts?.quiet) {
-      vscode.window.showInformationMessage('Repomap: analysis refreshed.');
+    // Coalesce concurrent refresh requests into a single in-flight Promise.
+    if (!refreshInFlight) {
+      refreshInFlight = (async () => {
+        const { report } = await generateReportJson({
+          workspaceRoot: root,
+          npxSpecifier,
+          // If the user explicitly disables temp output, fall back to configured output dir.
+          outputDir: useTempOutput ? safeOutDir : jsonOutputDir,
+          useTemp: useTempOutput,
+        });
+
+        setReport(root, report);
+        if (!opts?.quiet) {
+          vscode.window.showInformationMessage('Repomap: analysis refreshed.');
+        }
+      })().finally(() => {
+        refreshInFlight = null;
+      });
     }
+
+    await refreshInFlight;
   };
 
   context.subscriptions.push(
@@ -746,7 +763,17 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Ensure Repomap analysis is ready. GraphQL Structure uses the report to resolve fragments across files.
         if (!state.report) {
-          await doRefresh({ quiet: true });
+          await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: refreshInFlight
+                ? 'Repomap: Waiting for the current analysis to finish…'
+                : 'Repomap: Preparing analysis…',
+            },
+            async () => {
+              await doRefresh({ quiet: true, openMainWebview: false });
+            }
+          );
         }
 
         const ext = extractGraphqlFromEditor({
@@ -841,8 +868,8 @@ export function activate(context: vscode.ExtensionContext): void {
             const size = loc.end - loc.start;
             return { d, size };
           })
-          .filter(Boolean)
-          .sort((a, b) => (a!.size ?? 0) - (b!.size ?? 0));
+          .filter((x): x is { d: (typeof parsed.definitions)[number]; size: number } => x !== null)
+          .sort((a, b) => a.size - b.size);
 
         let picked = containing[0]?.d ?? null;
         if (!picked) {
@@ -1032,7 +1059,9 @@ export function activate(context: vscode.ExtensionContext): void {
               // Otherwise, jump within the currently extracted template.
               const parts = msg.id.split('/');
               const fragParts = parts.filter((p) => p.startsWith('fragment:'));
-              const lastFrag = fragParts.length ? fragParts[fragParts.length - 1].slice('fragment:'.length) : null;
+              const lastFrag = fragParts.length
+                ? fragParts[fragParts.length - 1].slice('fragment:'.length)
+                : null;
 
               const origin = lastFrag ? fragmentOrigin.get(lastFrag) : null;
               const targetDoc = origin
@@ -1152,7 +1181,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (autoRefreshInFlight) return;
         autoRefreshInFlight = true;
         try {
-          await doRefresh({ quiet: true });
+          await doRefresh({ quiet: true, openMainWebview: false });
         } catch {
           // Intentionally swallow errors for auto refresh to avoid noisy popups.
           status.text = 'Repomap: Error';
