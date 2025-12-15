@@ -538,7 +538,7 @@ body {
 .mermaid-wrapper {
   overflow: hidden;
   padding: 24px;
-  min-height: 200px;
+  min-height: 360px;
   cursor: grab;
   position: relative;
 }

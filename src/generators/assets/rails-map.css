@@ -279,6 +279,22 @@ header h1 {
   align-items: center;
   justify-content: center;
 }
+.diagram-action-btn.icon.subtle {
+  background: #666;
+  border-color: #666;
+  color: #fff;
+}
+.diagram-action-btn.icon.subtle:hover {
+  filter: brightness(1.05);
+}
+.diagram-action-btn.icon.primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+.diagram-action-btn.icon.primary:hover {
+  filter: brightness(1.05);
+}
 .diagram-action-btn.is-ok {
   background: #22c55e;
   border-color: #22c55e;

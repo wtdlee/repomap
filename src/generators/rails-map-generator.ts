@@ -10,6 +10,7 @@ import {
   type RailsAnalysisResult,
   type RailsRoute,
 } from '../analyzers/rails/index.js';
+import { ICONS_SPRITE_SVG } from './icon-sprite.js';
 
 export interface RailsMapOptions {
   title?: string;
@@ -65,6 +66,7 @@ export class RailsMapGenerator {
   <link rel="stylesheet" href="/rails-map.css">
 </head>
 <body>
+  ${ICONS_SPRITE_SVG}
   <header>
     <h1>🛤️ ${title}</h1>
     <nav class="header-nav">
@@ -1181,19 +1183,13 @@ export class RailsMapGenerator {
             <div class="panel-title diagram-title-text">Model Relationships (\${modelCount}/\${totalModels} models\${filterText})</div>
             <div class="diagram-actions" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
               <button class="diagram-action-btn icon" id="rails-copy-btn" onclick="copyRailsMermaid()" title="Copy Mermaid source to clipboard" aria-label="Copy Mermaid source">
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                  <path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm4 4H8a2 2 0 0 0-2 2v16h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 18H8V7h12v16z"/>
-                </svg>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-copy"></use><use xlink:href="#icon-copy"></use></svg>
               </button>
               <button class="diagram-action-btn icon" onclick="downloadRailsDiagramSvg()" title="Download diagram as SVG" aria-label="Download SVG">
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                  <path fill="currentColor" d="M5 20h14v-2H5v2zm7-18v10l4-4 1.41 1.41L12 17.83 6.59 11.41 8 10l4 4V2z"/>
-                </svg>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-download"></use><use xlink:href="#icon-download"></use></svg>
               </button>
               <button class="diagram-action-btn icon" onclick="downloadRailsDiagramPng()" title="Download diagram as PNG" aria-label="Download PNG">
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                  <path fill="currentColor" d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14h18zm-2-2H5V5h14v12zm-3-9l-3 4-2-3-3 4h10z"/>
-                </svg>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-image"></use><use xlink:href="#icon-image"></use></svg>
               </button>
             </div>
             <div class="diagram-filters" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;">
@@ -1212,7 +1208,7 @@ export class RailsMapGenerator {
                     value="\${isCustom ? diagramModelCount : ''}"
                     style="width:100px;padding:6px 10px;border-radius:4px;background:#2d2d2d;color:#fff;border:1px solid #444;"
                     onchange="updateDiagram()" onkeyup="if(event.key==='Enter')updateDiagram()">
-                  <button onclick="updateDiagram()" style="padding:6px 12px;border-radius:4px;background:#3b82f6;color:#fff;border:none;cursor:pointer;">Apply</button>
+                  <button class="diagram-action-btn icon primary" onclick="updateDiagram()" title="Apply" aria-label="Apply"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-check"></use><use xlink:href="#icon-check"></use></svg></button>
                 </div>
               </label>
               <label style="display:flex;align-items:center;gap:6px;">
@@ -1228,7 +1224,7 @@ export class RailsMapGenerator {
                   <option value="">None</option>
                   \${modelNames.map(name => \`<option value="\${name}" \${diagramFocusModel === name ? 'selected' : ''}>\${name}</option>\`).join('')}
                 </select>
-                \${diagramFocusModel ? \`<button onclick="clearFocusModel()" style="padding:4px 8px;border-radius:4px;background:#666;color:#fff;border:none;cursor:pointer;" title="Clear focus">✕</button>\` : ''}
+                \${diagramFocusModel ? \`<button class="diagram-action-btn icon subtle" onclick="clearFocusModel()" title="Clear focus" aria-label="Clear focus"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-x"></use><use xlink:href="#icon-x"></use></svg></button>\` : ''}
               </label>
               <label style="display:flex;align-items:center;gap:6px;">
                 <span style="opacity:\${diagramFocusModel ? 1 : 0.5}">Depth:</span>

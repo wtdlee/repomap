@@ -13,6 +13,7 @@ import type {
 import { DocGeneratorEngine } from '../core/engine.js';
 import { PageMapGenerator } from '../generators/page-map-generator.js';
 import { RailsMapGenerator } from '../generators/rails-map-generator.js';
+import { ICONS_SPRITE_SVG } from '../generators/icon-sprite.js';
 import { detectEnvironments, type EnvironmentDetectionResult } from '../utils/env-detector.js';
 import { analyzeRailsApp, type RailsAnalysisResult } from '../analyzers/rails/index.js';
 import { findAvailablePort } from '../utils/port.js';
@@ -46,6 +47,37 @@ export class DocServer {
   private setupRoutes(): void {
     // Serve static assets
     this.app.use('/assets', express.static(path.join(this.config.outputDir, 'assets')));
+
+    // Serve icon sprite
+    this.app.get('/icons.svg', async (req, res) => {
+      const possiblePaths = [
+        path.join(
+          path.dirname(new URL(import.meta.url).pathname),
+          'generators',
+          'assets',
+          'icons.svg'
+        ),
+        path.join(
+          path.dirname(new URL(import.meta.url).pathname),
+          '..',
+          'generators',
+          'assets',
+          'icons.svg'
+        ),
+        path.join(process.cwd(), 'dist', 'generators', 'assets', 'icons.svg'),
+        path.join(process.cwd(), 'src', 'generators', 'assets', 'icons.svg'),
+      ];
+      for (const p of possiblePaths) {
+        try {
+          const data = await fs.readFile(p);
+          res.type('image/svg+xml').send(data);
+          return;
+        } catch {
+          // try next
+        }
+      }
+      res.status(404).send('icons.svg not found');
+    });
 
     // Serve CSS files from generators/assets
     const cssFiles = ['common.css', 'page-map.css', 'docs.css', 'rails-map.css'];
@@ -415,6 +447,7 @@ export class DocServer {
   <link rel="stylesheet" href="/docs.css">
 </head>
 <body>
+  ${ICONS_SPRITE_SVG}
   <header class="header">
     <div style="display:flex;align-items:center;gap:24px">
       <h1 style="cursor:pointer" onclick="location.href='/'">📊 ${this.config.repositories[0]?.displayName || this.config.repositories[0]?.name || 'Repository'}</h1>
@@ -504,36 +537,26 @@ export class DocServer {
         container.innerHTML = \`
           <div class="mermaid-controls">
             <button class="mermaid-iconbtn" onclick="zoomDiagram(\${idx}, 0.8)" title="Zoom Out" aria-label="Zoom Out">
-              <span aria-hidden="true">−</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-zoom-out"></use><use xlink:href="#icon-zoom-out"></use></svg>
             </button>
             <button class="mermaid-iconbtn" onclick="zoomDiagram(\${idx}, 1.25)" title="Zoom In" aria-label="Zoom In">
-              <span aria-hidden="true">+</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-zoom-in"></use><use xlink:href="#icon-zoom-in"></use></svg>
             </button>
             <button class="mermaid-iconbtn" onclick="zoomDiagram(\${idx}, 'reset')" title="Reset" aria-label="Reset">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <path fill="currentColor" d="M12 6V3L8 7l4 4V8c2.76 0 5 2.24 5 5a5 5 0 1 1-9.9-1H5a7 7 0 1 0 7-6z"/>
-              </svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-reset"></use><use xlink:href="#icon-reset"></use></svg>
             </button>
             <button class="mermaid-iconbtn" onclick="toggleFullscreen(\${idx})" title="Fullscreen" aria-label="Fullscreen">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <path fill="currentColor" d="M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 9h-3v-2h3v-3h2v5h-2zm0-14V5h2v5h-2V7h-3V5h3z"/>
-              </svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-fullscreen"></use><use xlink:href="#icon-fullscreen"></use></svg>
             </button>
             <span class="mermaid-controls-spacer"></span>
             <button class="mermaid-iconbtn" data-action="copy" onclick="copyMermaidSource(\${idx})" title="Copy Mermaid source" aria-label="Copy Mermaid source">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm4 4H8a2 2 0 0 0-2 2v16h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 18H8V7h12v16z"/>
-              </svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-copy"></use><use xlink:href="#icon-copy"></use></svg>
             </button>
             <button class="mermaid-iconbtn" data-action="svg" onclick="downloadMermaidSvg(\${idx})" title="Download SVG" aria-label="Download SVG">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <path fill="currentColor" d="M5 20h14v-2H5v2zm7-18v10l4-4 1.41 1.41L12 17.83 6.59 11.41 8 10l4 4V2z"/>
-              </svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-download"></use><use xlink:href="#icon-download"></use></svg>
             </button>
             <button class="mermaid-iconbtn" data-action="png" onclick="downloadMermaidPng(\${idx})" title="Download PNG" aria-label="Download PNG">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                <path fill="currentColor" d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14h18zm-2-2H5V5h14v12zm-3-9l-3 4-2-3-3 4h10z"/>
-              </svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="icon"><use href="#icon-image"></use><use xlink:href="#icon-image"></use></svg>
             </button>
           </div>
           <div class="mermaid-wrapper" id="wrapper-\${idx}">
