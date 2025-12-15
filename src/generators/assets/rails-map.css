@@ -257,6 +257,39 @@ header h1 {
   font-weight: 600;
 }
 
+.diagram-action-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.diagram-action-btn:hover {
+  background: var(--bg-tertiary);
+}
+
+.diagram-action-btn.icon {
+  width: 34px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.diagram-action-btn.is-ok {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: white;
+}
+.diagram-action-btn.is-fail {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+}
+
 /* View Toggle */
 .view-toggle {
   display: flex;

@@ -490,8 +490,8 @@ export class DocServer {
 
     // Render all mermaid diagrams on page load
     document.addEventListener('DOMContentLoaded', async () => {
-      // Snapshot raw dataflow mermaid source BEFORE first render (needed for filtering rerenders)
-      document.querySelectorAll('.mermaid[data-mermaid-scope="dataflow"]').forEach((el) => {
+      // Snapshot raw mermaid source BEFORE first render (needed for copy + rerender)
+      document.querySelectorAll('.mermaid').forEach((el) => {
         if (!el.dataset.mermaidRaw) {
           el.dataset.mermaidRaw = el.textContent || '';
         }
@@ -503,10 +503,38 @@ export class DocServer {
         container.className = 'mermaid-container';
         container.innerHTML = \`
           <div class="mermaid-controls">
-            <button onclick="zoomDiagram(\${idx}, 0.8)" title="Zoom Out">➖</button>
-            <button onclick="zoomDiagram(\${idx}, 1.25)" title="Zoom In">➕</button>
-            <button onclick="zoomDiagram(\${idx}, 'reset')" title="Reset">🔄</button>
-            <button onclick="toggleFullscreen(\${idx})" title="Fullscreen">⛶</button>
+            <button class="mermaid-iconbtn" onclick="zoomDiagram(\${idx}, 0.8)" title="Zoom Out" aria-label="Zoom Out">
+              <span aria-hidden="true">−</span>
+            </button>
+            <button class="mermaid-iconbtn" onclick="zoomDiagram(\${idx}, 1.25)" title="Zoom In" aria-label="Zoom In">
+              <span aria-hidden="true">+</span>
+            </button>
+            <button class="mermaid-iconbtn" onclick="zoomDiagram(\${idx}, 'reset')" title="Reset" aria-label="Reset">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M12 6V3L8 7l4 4V8c2.76 0 5 2.24 5 5a5 5 0 1 1-9.9-1H5a7 7 0 1 0 7-6z"/>
+              </svg>
+            </button>
+            <button class="mermaid-iconbtn" onclick="toggleFullscreen(\${idx})" title="Fullscreen" aria-label="Fullscreen">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 9h-3v-2h3v-3h2v5h-2zm0-14V5h2v5h-2V7h-3V5h3z"/>
+              </svg>
+            </button>
+            <span class="mermaid-controls-spacer"></span>
+            <button class="mermaid-iconbtn" data-action="copy" onclick="copyMermaidSource(\${idx})" title="Copy Mermaid source" aria-label="Copy Mermaid source">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm4 4H8a2 2 0 0 0-2 2v16h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 18H8V7h12v16z"/>
+              </svg>
+            </button>
+            <button class="mermaid-iconbtn" data-action="svg" onclick="downloadMermaidSvg(\${idx})" title="Download SVG" aria-label="Download SVG">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M5 20h14v-2H5v2zm7-18v10l4-4 1.41 1.41L12 17.83 6.59 11.41 8 10l4 4V2z"/>
+              </svg>
+            </button>
+            <button class="mermaid-iconbtn" data-action="png" onclick="downloadMermaidPng(\${idx})" title="Download PNG" aria-label="Download PNG">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14h18zm-2-2H5V5h14v12zm-3-9l-3 4-2-3-3 4h10z"/>
+              </svg>
+            </button>
           </div>
           <div class="mermaid-wrapper" id="wrapper-\${idx}">
             <div class="mermaid-inner" id="inner-\${idx}"></div>
@@ -748,6 +776,177 @@ export class DocServer {
           wrapper.style.maxHeight = 'calc(100vh - 60px)';
         }
       }
+    }
+
+    async function copyTextToClipboard(text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch {
+        // fallthrough
+      }
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+      } catch {
+        return false;
+      }
+    }
+
+    function getMermaidContext(idx) {
+      const wrapper = document.getElementById(\`wrapper-\${idx}\`);
+      if (!wrapper) return null;
+      const mermaidEl = wrapper.querySelector('.mermaid');
+      const raw = mermaidEl?.dataset?.mermaidRaw || mermaidEl?.textContent || '';
+      const svg = wrapper.querySelector('svg');
+      return { wrapper, mermaidEl, raw, svg };
+    }
+
+    async function copyMermaidSource(idx) {
+      const ctx = getMermaidContext(idx);
+      if (!ctx) return;
+      const ok = await copyTextToClipboard((ctx.raw || '').trim());
+      // Simple visual feedback
+      const btn = ctx.wrapper.closest('.mermaid-container')?.querySelector('button[data-action="copy"]');
+      if (btn) {
+        btn.classList.toggle('is-ok', ok);
+        btn.classList.toggle('is-fail', !ok);
+        const oldTitle = btn.getAttribute('title') || '';
+        btn.setAttribute('title', ok ? 'Copied' : 'Copy failed');
+        setTimeout(() => {
+          btn.classList.remove('is-ok', 'is-fail');
+          btn.setAttribute('title', oldTitle);
+        }, 900);
+      }
+    }
+
+    function downloadBlob(filename, blob) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    }
+
+    function sanitizeFilePart(s) {
+      return String(s || 'diagram').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+    }
+
+    function timestamp() {
+      const d = new Date();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      return (
+        String(d.getFullYear()) +
+        pad2(d.getMonth() + 1) +
+        pad2(d.getDate()) +
+        '_' +
+        pad2(d.getHours()) +
+        pad2(d.getMinutes()) +
+        pad2(d.getSeconds())
+      );
+    }
+
+    function downloadMermaidSvg(idx) {
+      const ctx = getMermaidContext(idx);
+      if (!ctx || !ctx.svg) return;
+      const ser = new XMLSerializer();
+      const svgText = ser.serializeToString(ctx.svg);
+      const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+      downloadBlob('repomap-diagram_' + sanitizeFilePart(ctx.mermaidEl?.getAttribute('data-mermaid-page') || idx) + '_' + timestamp() + '.svg', blob);
+    }
+
+    function downloadMermaidPng(idx) {
+      const ctx = getMermaidContext(idx);
+      if (!ctx || !ctx.svg) return;
+
+      const ser = new XMLSerializer();
+      const getSvgSize = (svg) => {
+        try {
+          const vb = svg.viewBox && svg.viewBox.baseVal;
+          if (vb && vb.width && vb.height) return { w: vb.width, h: vb.height };
+        } catch {}
+        try {
+          const w = svg.width && svg.width.baseVal && svg.width.baseVal.value;
+          const h = svg.height && svg.height.baseVal && svg.height.baseVal.value;
+          if (w && h) return { w, h };
+        } catch {}
+        try {
+          const bb = svg.getBBox();
+          if (bb && bb.width && bb.height) return { w: bb.width, h: bb.height };
+        } catch {}
+        const r = svg.getBoundingClientRect();
+        return { w: Math.max(1, r.width), h: Math.max(1, r.height) };
+      };
+
+      const s = getSvgSize(ctx.svg);
+      const w = Math.max(1, Math.round(s.w));
+      const h = Math.max(1, Math.round(s.h));
+
+      // Clone and force explicit size so SVG -> image decode is stable across browsers.
+      const svgClone = ctx.svg.cloneNode(true);
+      try {
+        svgClone.setAttribute('width', String(w));
+        svgClone.setAttribute('height', String(h));
+        if (!svgClone.getAttribute('viewBox')) {
+          svgClone.setAttribute('viewBox', '0 0 ' + String(w) + ' ' + String(h));
+        }
+      } catch {
+        // ignore
+      }
+
+      let svgText = ser.serializeToString(svgClone);
+      if (!/xmlns=/.test(svgText)) {
+        svgText = svgText.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+      if (!/xmlns:xlink=/.test(svgText)) {
+        svgText = svgText.replace('<svg', '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+      }
+
+      const svgBase64 = btoa(unescape(encodeURIComponent(svgText)));
+      const dataUrl = 'data:image/svg+xml;base64,' + svgBase64;
+
+      const img = new Image();
+      img.decoding = 'async';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const g = canvas.getContext('2d');
+          if (!g) return;
+          // White background for readability
+          g.fillStyle = '#ffffff';
+          g.fillRect(0, 0, w, h);
+          g.drawImage(img, 0, 0, w, h);
+          canvas.toBlob((pngBlob) => {
+            if (pngBlob) {
+              downloadBlob(
+                'repomap-diagram_' +
+                  sanitizeFilePart(ctx.mermaidEl?.getAttribute('data-mermaid-page') || idx) +
+                  '_' +
+                  timestamp() +
+                  '.png',
+                pngBlob
+              );
+            }
+          }, 'image/png');
+        } catch {
+        }
+      };
+      img.onerror = () => {};
+      img.src = dataUrl;
     }
 
     function showNodeDetail(text, node) {
