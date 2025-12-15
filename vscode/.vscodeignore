@@ -1,0 +1,11 @@
+**/.vscode/**
+**/.github/**
+**/*.ts
+src/**
+pnpm-lock.yaml
+tsconfig.json
+tsup.config.ts
+.gitignore
+
+# Keep compiled output
+!dist/**

@@ -1,0 +1,69 @@
+{
+  "name": "repomap-vscode",
+  "displayName": "Repomap",
+  "description": "Run @wtdlee/repomap from VS Code and open generated docs.",
+  "version": "0.1.0",
+  "publisher": "wtdlee",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wtdlee/repomap.git"
+  },
+  "homepage": "https://github.com/wtdlee/repomap",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onCommand:repomap.serve",
+    "onCommand:repomap.generate"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "repomap.serve",
+        "title": "Repomap: Serve"
+      },
+      {
+        "command": "repomap.generate",
+        "title": "Repomap: Generate (Static)"
+      }
+    ],
+    "configuration": {
+      "title": "Repomap",
+      "properties": {
+        "repomap.npxSpecifier": {
+          "type": "string",
+          "default": "@wtdlee/repomap",
+          "description": "NPX package specifier, e.g. '@wtdlee/repomap' or '@wtdlee/repomap@latest'"
+        },
+        "repomap.port": {
+          "type": "number",
+          "default": 3030,
+          "description": "Port for 'repomap serve'"
+        },
+        "repomap.outputDir": {
+          "type": "string",
+          "default": ".repomap",
+          "description": "Output directory for generated docs"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "package": "npx @vscode/vsce package",
+    "publish": "npx @vscode/vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.1",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.6.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.3.2"
+  }
+}

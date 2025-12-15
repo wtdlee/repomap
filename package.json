@@ -41,6 +41,7 @@
   "scripts": {
     "build": "tsup",
     "build:tsc": "tsc && npm run copy-assets",
+    "build:vscode": "pnpm -C vscode install && pnpm -C vscode build",
     "copy-assets": "mkdir -p dist/generators/assets && cp src/generators/assets/*.css dist/generators/assets/",
     "dev": "tsx watch src/cli.ts",
     "dev:serve": "tsx watch --clear-screen=false src/cli.ts serve --no-cache",
