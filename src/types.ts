@@ -212,6 +212,10 @@ export interface GraphQLOperation {
   name: string;
   type: 'query' | 'mutation' | 'subscription' | 'fragment';
   filePath: string;
+  /** 1-based line number where the operation starts (best-effort) */
+  line?: number;
+  /** 1-based column number where the operation starts (best-effort) */
+  column?: number;
   usedIn: string[];
   variables: VariableInfo[];
   returnType: string;

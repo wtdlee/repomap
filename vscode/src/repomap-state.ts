@@ -35,7 +35,10 @@ function resolveWorkspacePath(workspaceRoot: string | undefined, filePath: strin
   return path.join(workspaceRoot, filePath);
 }
 
-export function computeDerived(report: AnalysisResult | null, workspaceRoot?: string): RepomapDerived {
+export function computeDerived(
+  report: AnalysisResult | null,
+  workspaceRoot?: string
+): RepomapDerived {
   const pages = report?.pages ?? [];
   const components = report?.components ?? [];
   const ops = report?.graphqlOperations ?? [];

@@ -22,20 +22,52 @@ function getNpxCommand(): { cmd: string; argsPrefix: string[] } {
   return { cmd: 'npx', argsPrefix: [] };
 }
 
+function getNodeCommand(): string {
+  return process.platform === 'win32' ? 'node.exe' : 'node';
+}
+
+function isPathLike(spec: string): boolean {
+  return (
+    spec.startsWith('file:') ||
+    spec.startsWith('.') ||
+    spec.startsWith('/') ||
+    /^[A-Za-z]:[\\/]/.test(spec)
+  );
+}
+
+function toFsPath(spec: string): string {
+  if (spec.startsWith('file:')) {
+    // file:/Users/... or file:///Users/...
+    return spec.replace(/^file:\/*/i, '/');
+  }
+  return spec;
+}
+
+function resolveLocalCliEntry(spec: string): string {
+  const p = toFsPath(spec);
+  if (p.endsWith('.js') || p.endsWith('.cjs') || p.endsWith('.mjs')) return p;
+  // Treat as package folder.
+  return path.join(p, 'dist', 'cli.js');
+}
+
+function resolveWorkspaceBin(workspaceRoot: string): string | null {
+  const bin =
+    process.platform === 'win32'
+      ? path.join(workspaceRoot, 'node_modules', '.bin', 'repomap.cmd')
+      : path.join(workspaceRoot, 'node_modules', '.bin', 'repomap');
+  return existsSync(bin) ? bin : null;
+}
+
 export async function generateReportJson(
   args: GenerateReportArgs
 ): Promise<{ report: AnalysisResult; reportPath: string }> {
-  const { cmd, argsPrefix } = getNpxCommand();
-
   const outAbs = path.isAbsolute(args.outputDir)
     ? args.outputDir
     : path.join(args.workspaceRoot, args.outputDir);
 
   await fs.mkdir(outAbs, { recursive: true });
 
-  const npxArgs = [
-    ...argsPrefix,
-    args.npxSpecifier,
+  const commonArgs = [
     'generate',
     '--format',
     'json',
@@ -46,11 +78,29 @@ export async function generateReportJson(
     '--ci',
   ];
 
-  // Run in workspace root so repomap analyzes the opened project.
-  await execFileAsync(cmd, npxArgs, {
-    cwd: args.workspaceRoot,
-    maxBuffer: 1024 * 1024 * 20,
-  });
+  // Prefer (1) local workspace-installed repomap bin, (2) local path spec, (3) npx.
+  const workspaceBin = resolveWorkspaceBin(args.workspaceRoot);
+  if (workspaceBin) {
+    await execFileAsync(workspaceBin, commonArgs, {
+      cwd: args.workspaceRoot,
+      maxBuffer: 1024 * 1024 * 20,
+    });
+  } else if (isPathLike(args.npxSpecifier)) {
+    const entry = resolveLocalCliEntry(args.npxSpecifier);
+    await execFileAsync(getNodeCommand(), [entry, ...commonArgs], {
+      cwd: args.workspaceRoot,
+      maxBuffer: 1024 * 1024 * 20,
+    });
+  } else {
+    const { cmd, argsPrefix } = getNpxCommand();
+    const npxArgs = [...argsPrefix, args.npxSpecifier, ...commonArgs];
+
+    // Run in workspace root so repomap analyzes the opened project.
+    await execFileAsync(cmd, npxArgs, {
+      cwd: args.workspaceRoot,
+      maxBuffer: 1024 * 1024 * 20,
+    });
+  }
 
   const reportPath = path.join(outAbs, 'report.json');
   if (!existsSync(reportPath)) {
@@ -86,7 +136,11 @@ function extractAnalysisResult(root: unknown): AnalysisResult | null {
     for (const r of repos) {
       if (!isRecord(r)) continue;
       const analysis = r.analysis;
-      if (isRecord(analysis) && Array.isArray(analysis.pages) && Array.isArray(analysis.components)) {
+      if (
+        isRecord(analysis) &&
+        Array.isArray(analysis.pages) &&
+        Array.isArray(analysis.components)
+      ) {
         return analysis as AnalysisResult;
       }
     }

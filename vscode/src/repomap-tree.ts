@@ -124,6 +124,7 @@ export class RepomapTreeDataProvider implements vscode.TreeDataProvider<RepomapT
       label: `${o.type}: ${o.name}`,
       description: `used-in ${(o.usedIn ?? []).length}`,
       filePath: o.filePath,
+      line: o.line,
     };
   }
 }

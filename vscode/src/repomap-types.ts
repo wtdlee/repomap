@@ -26,6 +26,8 @@ export type GraphQLOperation = {
   name: string;
   type: 'query' | 'mutation' | 'subscription' | 'fragment';
   filePath: string;
+  line?: number;
+  column?: number;
   usedIn?: string[];
   // Codegen variable names referencing this operation (e.g. FooDocument, FOO_QUERY)
   variableNames?: string[];

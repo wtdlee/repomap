@@ -100,6 +100,7 @@ export function getWebviewHtml(webview: vscode.Webview, init: WebviewInit): stri
         const graphql = (report.graphqlOperations || []).map(o => ({
           title: o.type + ': ' + o.name,
           filePath: o.filePath,
+          line: o.line,
           meta: o.filePath + ' · used-in ' + (o.usedIn || []).length,
         }));
 
@@ -117,11 +118,12 @@ export function getWebviewHtml(webview: vscode.Webview, init: WebviewInit): stri
         elList.innerHTML = items.map(it => {
           const safeTitle = it.title.replace(/</g,'&lt;').replace(/>/g,'&gt;');
           const safeMeta = it.meta.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          const lineAttr = it.line ? (' data-line=\"' + String(it.line) + '\"') : '';
           return (
             '<div class=\"item\">' +
               '<div class=\"title\">' + safeTitle + '</div>' +
               '<div class=\"meta\">' +
-                '<span class=\"click\" data-open=\"' + encodeURIComponent(it.filePath) + '\">Open file</span>' +
+                '<span class=\"click\" data-open=\"' + encodeURIComponent(it.filePath) + '\"' + lineAttr + '>Open file</span>' +
                 ' · ' + safeMeta +
               '</div>' +
             '</div>'
@@ -131,7 +133,8 @@ export function getWebviewHtml(webview: vscode.Webview, init: WebviewInit): stri
         for (const a of elList.querySelectorAll('[data-open]')) {
           a.addEventListener('click', () => {
             const fp = decodeURIComponent(a.getAttribute('data-open'));
-            openFile(fp);
+            const line = a.getAttribute('data-line');
+            openFile(fp, line ? Number(line) : undefined);
           });
         }
       }

@@ -13,7 +13,8 @@ export class RepomapCodeLensProvider implements vscode.CodeLensProvider {
 
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
     const state = this.getState();
-    const insights = state.derived.insightsByFilePath.get(document.uri.fsPath.replace(/\\/g, '/')) ?? [];
+    const insights =
+      state.derived.insightsByFilePath.get(document.uri.fsPath.replace(/\\/g, '/')) ?? [];
 
     const lenses: vscode.CodeLens[] = [];
 
