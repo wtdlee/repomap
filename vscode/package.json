@@ -2,7 +2,7 @@
   "name": "repomap-vscode",
   "displayName": "Repomap",
   "description": "Explore your repo map and GraphQL structure inside VS Code. Search, understand context, and jump instantly.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "wtdlee",
   "license": "MIT",
   "repository": {
