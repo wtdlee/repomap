@@ -1,8 +1,8 @@
 {
   "name": "repomap-vscode",
   "displayName": "Repomap",
-  "description": "Run @wtdlee/repomap from VS Code and open generated docs.",
-  "version": "0.1.16",
+  "description": "Explore your repo map and GraphQL structure inside VS Code. Search, understand context, and jump instantly.",
+  "version": "1.0.0",
   "publisher": "wtdlee",
   "license": "MIT",
   "repository": {
@@ -10,30 +10,31 @@
     "url": "https://github.com/wtdlee/repomap.git"
   },
   "homepage": "https://github.com/wtdlee/repomap",
+  "bugs": {
+    "url": "https://github.com/wtdlee/repomap/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Productivity",
+    "Visualization"
   ],
+  "keywords": [
+    "repomap",
+    "repo map",
+    "architecture",
+    "graphql",
+    "navigation",
+    "codebase",
+    "documentation"
+  ],
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
   "icon": "resources/repomap.png",
   "main": "./dist/extension.js",
-  "activationEvents": [
-    "onView:repomap.explorer",
-    "onView:repomap.explorer.fallback",
-    "onView:repomap.context",
-    "onLanguage:typescript",
-    "onLanguage:typescriptreact",
-    "onLanguage:javascript",
-    "onLanguage:javascriptreact",
-    "onLanguage:ruby",
-    "onCommand:repomap.open",
-    "onCommand:repomap.refresh",
-    "onCommand:repomap.search",
-    "onCommand:repomap.graphqlStructure",
-    "onCommand:repomap.serve",
-    "onCommand:repomap.generate"
-  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [

@@ -67,10 +67,38 @@ export function getGraphqlStructureWebviewHtml(
       body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif; padding: 12px; }
       .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
       .title { font-weight: 700; }
-      .toolbar { display: flex; gap: 6px; align-items: center; }
-      .iconbtn { width: 32px; height: 28px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--vscode-foreground); cursor: pointer; display:flex; align-items:center; justify-content:center; }
-      .iconbtn:hover { background: rgba(127,127,127,0.18); }
-      .iconbtn.on { background: rgba(91, 91, 214, 0.22); border-color: rgba(91, 91, 214, 0.35); }
+      .toolbar { display: flex; gap: 8px; align-items: center; }
+      .btn {
+        height: 28px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid var(--vscode-button-border, transparent);
+        background: var(--vscode-button-secondaryBackground, rgba(127,127,127,0.18));
+        color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        user-select: none;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .btn:hover { filter: brightness(1.08); }
+      .btn:active { transform: translateY(0.5px); }
+      .btn.primary {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border-color: var(--vscode-button-border, transparent);
+      }
+      .badge {
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(127,127,127,0.35);
+        opacity: 0.95;
+      }
+      .badge.on { background: rgba(91, 91, 214, 0.18); border-color: rgba(91, 91, 214, 0.35); }
+      .badge.off { background: rgba(127,127,127,0.12); }
       .hint { opacity: 0.75; font-size: 12px; margin-top: 4px; }
       pre { margin: 0; padding: 10px 12px; border: 1px solid #333; border-radius: 10px; background: rgba(0,0,0,0.08); overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12.5px; line-height: 1.55; }
       .node { cursor: pointer; border-radius: 4px; padding: 0 2px; }
@@ -81,11 +109,13 @@ export function getGraphqlStructureWebviewHtml(
     <div class="header">
       <div>
         <div class="title">${title}</div>
-        <div class="hint">Click a field / fragment to jump to it in the editor</div>
+        <div class="hint">항목을 클릭하면 에디터에서 해당 위치로 이동합니다</div>
       </div>
       <div class="toolbar">
-        <button class="iconbtn on" id="follow" title="Follow cursor (sync selection)" aria-pressed="true">◎</button>
-        <button class="iconbtn" id="clear" title="Clear selection">✕</button>
+        <button class="btn primary" id="follow" title="커서 이동에 맞춰 패널 선택을 자동으로 따라갑니다" aria-pressed="true">
+          커서 연동 <span class="badge on" id="followBadge">ON</span>
+        </button>
+        <button class="btn" id="clear" title="현재 선택/하이라이트를 해제합니다">지우기</button>
       </div>
     </div>
     <pre id="code">${code}</pre>
@@ -117,8 +147,10 @@ export function getGraphqlStructureWebviewHtml(
 
       document.getElementById('follow').addEventListener('click', () => {
         follow = !follow;
-        document.getElementById('follow').classList.toggle('on', follow);
         document.getElementById('follow').setAttribute('aria-pressed', follow ? 'true' : 'false');
+        document.getElementById('followBadge').textContent = follow ? 'ON' : 'OFF';
+        document.getElementById('followBadge').classList.toggle('on', follow);
+        document.getElementById('followBadge').classList.toggle('off', !follow);
         vscode.postMessage({ type: 'setFollowCursor', enabled: follow });
       });
 
@@ -132,8 +164,10 @@ export function getGraphqlStructureWebviewHtml(
         }
         if (msg.type === 'setFollowCursor' && typeof msg.enabled === 'boolean') {
           follow = msg.enabled;
-          document.getElementById('follow').classList.toggle('on', follow);
           document.getElementById('follow').setAttribute('aria-pressed', follow ? 'true' : 'false');
+          document.getElementById('followBadge').textContent = follow ? 'ON' : 'OFF';
+          document.getElementById('followBadge').classList.toggle('on', follow);
+          document.getElementById('followBadge').classList.toggle('off', !follow);
         }
       });
     </script>

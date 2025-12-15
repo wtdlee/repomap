@@ -430,7 +430,7 @@ program
       }
 
       const server = new DocServer(config, parseInt(options.port));
-      await server.start(!options.open);
+      await server.start(options.open);
     } catch (error) {
       console.error(chalk.red('Error:'), (error as Error).message);
       process.exit(1);

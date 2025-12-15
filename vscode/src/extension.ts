@@ -127,26 +127,24 @@ async function findTextMatchesInWorkspace(args: {
     }
   };
 
+  // Fast path: if we have a preferred file, scan it directly first.
+  if (args.preferFileFsPath) {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(args.preferFileFsPath));
+      const text = new TextDecoder('utf-8').decode(bytes);
+      scanText(vscode.Uri.file(args.preferFileFsPath), text);
+      if (results.length >= args.maxResults) return results;
+    } catch {
+      // ignore
+    }
+  }
+
   // NOTE: Some VS Code type setups may not expose workspace.findTextInFiles.
   // Implement a small, reliable fallback using findFiles + content scan.
   const candidates = await vscode.workspace.findFiles(
     '**/*.{ts,tsx,js,jsx,graphql,gql,md,rb}',
     '{**/node_modules/**,**/.git/**,**/.next/**,**/dist/**,**/build/**,**/coverage/**}'
   );
-
-  // Prefer scanning a specific file first (e.g. the operation file) to make jumps feel instant.
-  if (args.preferFileFsPath) {
-    const pref = candidates.find((u) => u.fsPath === args.preferFileFsPath);
-    if (pref) {
-      try {
-        const bytes = await vscode.workspace.fs.readFile(pref);
-        const text = new TextDecoder('utf-8').decode(bytes);
-        scanText(pref, text);
-      } catch {
-        // ignore
-      }
-    }
-  }
 
   for (const uri of candidates) {
     if (results.length >= args.maxResults) break;
@@ -677,37 +675,59 @@ export function activate(context: vscode.ExtensionContext): void {
         const query = typeof a?.query === 'string' ? a.query : '';
         if (!query.trim()) return;
 
-        const preferFileFsPath = typeof a?.filePath === 'string' ? a.filePath : undefined;
-        const matches = await findTextMatchesInWorkspace({ query, maxResults: 30, preferFileFsPath });
-        if (matches.length === 0) {
-          vscode.window.showInformationMessage(`Repomap: no matches for '${query}'.`);
-          return;
+        const root = getWorkspaceRoot();
+        let preferFileFsPath: string | undefined = undefined;
+        if (typeof a?.filePath === 'string') {
+          try {
+            const resolved = await resolveExistingFile(root, a.filePath);
+            preferFileFsPath = resolved.fsPath;
+          } catch {
+            // ignore
+          }
         }
 
-        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const openMatch = async (m: TextMatch) => {
+        const openFirst = async (m: TextMatch) => {
           const doc = await vscode.workspace.openTextDocument(m.uri);
           const editor = await vscode.window.showTextDocument(doc, { preview: false });
           editor.selection = new vscode.Selection(m.range.start, m.range.end);
           editor.revealRange(m.range, vscode.TextEditorRevealType.InCenter);
         };
 
-        if (matches.length === 1) {
-          await openMatch(matches[0]);
-          return;
+        const q = query.trim();
+        const isIdent = /^[A-Za-z_$][\w$]*$/.test(q);
+        const candidates = isIdent
+          ? [
+              `const ${q}`,
+              `export const ${q}`,
+              `let ${q}`,
+              `export let ${q}`,
+              `function ${q}`,
+              `class ${q}`,
+              `import { ${q}`,
+              q,
+            ]
+          : [q];
+
+        for (const cand of candidates) {
+          const matches = await findTextMatchesInWorkspace({
+            query: cand,
+            maxResults: 5,
+            preferFileFsPath,
+          });
+          if (matches.length > 0) {
+            await openFirst(matches[0]);
+            return;
+          }
         }
 
-        const picked = await vscode.window.showQuickPick(
-          matches.map((m) => ({
-            label: root ? vscode.workspace.asRelativePath(m.uri, false) : m.uri.fsPath,
-            description: `${m.range.start.line + 1}:${m.range.start.character + 1}`,
-            detail: m.preview,
-            m,
-          })),
-          { placeHolder: `Multiple matches for '${query}'. Pick one.` }
-        );
-        if (!picked) return;
-        await openMatch(picked.m);
+        // No matches.
+        if (/Document$/i.test(q)) {
+          vscode.window.showInformationMessage(
+            `Repomap: no matches for '${q}'. This name is often a codegen convention and may not exist in this repo. You can hide '*Document' via 'repomap.hideDocumentVariableNames'.`
+          );
+          return;
+        }
+        vscode.window.showInformationMessage(`Repomap: no matches for '${q}'.`);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         vscode.window.showErrorMessage(`Repomap: ${msg}`);
@@ -722,6 +742,11 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!editor) {
           vscode.window.showErrorMessage('Repomap: no active editor.');
           return;
+        }
+
+        // Ensure Repomap analysis is ready. GraphQL Structure uses the report to resolve fragments across files.
+        if (!state.report) {
+          await doRefresh({ quiet: true });
         }
 
         const ext = extractGraphqlFromEditor({
@@ -1071,12 +1096,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('repomap.serve', async () => {
       try {
         const root = getWorkspaceRoot();
-        const { npxSpecifier, port } = getSettings();
+        const { npxSpecifier, port, useTempOutput } = getSettings();
 
         await runInTerminal({
           name: 'Repomap',
           cwd: root,
-          command: `npx ${npxSpecifier} serve --no-open --port ${port}`,
+          command: `npx ${npxSpecifier} serve --no-open --port ${port}${useTempOutput ? ' --temp' : ''}`,
         });
 
         const open = await vscode.window.showInformationMessage(
