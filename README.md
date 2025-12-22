@@ -25,6 +25,36 @@ Powered by [SWC](https://swc.rs/) for blazing-fast AST parsing. Analyze large-sc
 
 > 🚀 **10x faster** than ts-morph based solutions. No caching needed!
 
+## Screenshots
+
+### Page Map - List View
+Browse all pages with filtering by page type, relationships, and data operations.
+
+<p align="center">
+  <img src="./docs/images/page-map.png" alt="Page Map List View" width="800">
+</p>
+
+### Page Map - Detail Panel
+View page details including file path, authentication status, data operations (queries/mutations), REST API calls, and related pages.
+
+<p align="center">
+  <img src="./docs/images/page-map-detail-panel.png" alt="Page Map Detail Panel" width="800">
+</p>
+
+### Page Map - Operation Detail Modal
+Drill down into specific GraphQL operations with full query definition and evidence chain showing how the operation connects to the page.
+
+<p align="center">
+  <img src="./docs/images/page-map-detail-modal.png" alt="Page Map Operation Detail" width="800">
+</p>
+
+### Page Map - Graph View
+Interactive force-directed graph visualization of page relationships and hierarchies.
+
+<p align="center">
+  <img src="./docs/images/page-map-graph.png" alt="Page Map Graph View" width="800">
+</p>
+
 ## Features
 
 ### 🗺️ Page Map

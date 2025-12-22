@@ -480,10 +480,10 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Normalize and strip extension
     let p = filePath.replace(/\\/g, '/').replace(/\.(tsx?|jsx?)$/, '');
 
-    // Next.js App Router: ".../page" maps to directory route
-    p = p.replace(/\/page$/, '');
+    // Next.js App Router: ".../page" or "page" (root) maps to directory route
+    p = p.replace(/\/page$/, '').replace(/^page$/, '');
     // (Optional) route handlers are not pages, but avoid accidental mapping if ever included
-    p = p.replace(/\/route$/, '');
+    p = p.replace(/\/route$/, '').replace(/^route$/, '');
 
     // Remove route groups: "(group)" segments
     const segments = p
@@ -524,11 +524,56 @@ export class PagesAnalyzer extends BaseAnalyzer {
   }
 
   /**
+   * Find the name of the default export (function/class declaration)
+   * Returns null if the default export is anonymous or an expression
+   */
+  private findDefaultExportName(ast: Module): string | null {
+    for (const item of ast.body) {
+      if (item.type === 'ExportDefaultDeclaration') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const decl = item.decl as any;
+        // Named function (declaration or expression)
+        if (
+          (decl?.type === 'FunctionExpression' || decl?.type === 'FunctionDeclaration') &&
+          decl.identifier?.value
+        ) {
+          return decl.identifier.value;
+        }
+        // Class component
+        if (
+          (decl?.type === 'ClassDeclaration' || decl?.type === 'ClassExpression') &&
+          decl.identifier?.value
+        ) {
+          return decl.identifier.value;
+        }
+        // Identifier reference: export default ComponentName
+        if (decl?.type === 'Identifier') {
+          return decl.value;
+        }
+      }
+      // export default ComponentName (expression form)
+      if (item.type === 'ExportDefaultExpression') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const expr = (item as any).expression;
+        if (expr?.type === 'Identifier') {
+          return expr.value;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * Find page component name from AST
    */
   private findPageComponent(ast: Module, content: string): string | null {
-    // First, try to find the main component used in JSX
-    // This is more accurate than the default export name
+    // First, look for named default export function (most accurate for page components)
+    const defaultExportName = this.findDefaultExportName(ast);
+    if (defaultExportName && defaultExportName !== 'Page' && defaultExportName !== 'default') {
+      return defaultExportName;
+    }
+
+    // Fallback: try to find the main component used in JSX
     const jsxComponent = this.findMainJsxComponent(ast, content);
     if (jsxComponent && jsxComponent !== 'Page' && jsxComponent !== 'default') {
       return jsxComponent;
@@ -537,12 +582,26 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Look for default export
     for (const item of ast.body) {
       // export default function ComponentName() {}
+      // export default async function ComponentName() {}
+      // export default class ComponentName {}
       if (item.type === 'ExportDefaultDeclaration') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const decl = item.decl as any;
-        if (decl?.type === 'FunctionExpression' && decl.identifier?.value) {
+        // Named function (declaration or expression)
+        if (
+          (decl?.type === 'FunctionExpression' || decl?.type === 'FunctionDeclaration') &&
+          decl.identifier?.value
+        ) {
           const name = decl.identifier.value;
           // If it's a generic name, try to find JSX component instead
+          if (name !== 'Page') return name;
+        }
+        // Class component (legacy React)
+        if (
+          (decl?.type === 'ClassDeclaration' || decl?.type === 'ClassExpression') &&
+          decl.identifier?.value
+        ) {
+          const name = decl.identifier.value;
           if (name !== 'Page') return name;
         }
         if (decl?.type === 'Identifier') {
@@ -551,6 +610,14 @@ export class PagesAnalyzer extends BaseAnalyzer {
         }
         // Arrow function or anonymous - use JSX component if found
         if (decl?.type === 'ArrowFunctionExpression') {
+          if (jsxComponent) return jsxComponent;
+          return 'default';
+        }
+        // Anonymous function without identifier - use JSX component if found
+        if (
+          (decl?.type === 'FunctionExpression' || decl?.type === 'FunctionDeclaration') &&
+          !decl.identifier
+        ) {
           if (jsxComponent) return jsxComponent;
           return 'default';
         }
@@ -622,6 +689,38 @@ export class PagesAnalyzer extends BaseAnalyzer {
   }
 
   /**
+   * Check if an import source is from the project (not an external package)
+   */
+  private isProjectImport(source: string): boolean {
+    // Relative imports are always project imports
+    if (source.startsWith('./') || source.startsWith('../')) {
+      return true;
+    }
+
+    // Common alias patterns used in various frameworks
+    // @/ (Next.js, Vite), ~/ (Nuxt, some configs), #/ (some configs)
+    if (/^[@~#]\//.test(source)) {
+      return true;
+    }
+
+    // Scoped packages from npm (e.g., @radix-ui/react-dialog, @tanstack/react-query)
+    // These are external libraries, not project code
+    if (source.startsWith('@') && !source.startsWith('@/')) {
+      return false;
+    }
+
+    // Bare imports starting with lowercase are likely external packages
+    // e.g., react, next/link, lodash, framer-motion
+    if (/^[a-z]/.test(source)) {
+      return false;
+    }
+
+    // Uppercase bare imports could be project aliases (e.g., Components/Button)
+    // This is less common but some projects use it
+    return true;
+  }
+
+  /**
    * Find the main component used in the page's JSX
    * This is more accurate than using the default export name like "Page"
    */
@@ -629,14 +728,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const imports = this.extractImports(ast);
     const importedComponents = new Set<string>();
 
-    // Collect imported components (PascalCase from feature/component directories)
+    // Collect imported components:
+    // - PascalCase names (React component convention)
+    // - From project imports (not external packages)
     for (const [name, source] of imports) {
-      if (
-        /^[A-Z]/.test(name) &&
-        (source.includes('features') ||
-          source.includes('components') ||
-          source.includes('containers'))
-      ) {
+      if (/^[A-Z]/.test(name) && this.isProjectImport(source)) {
         importedComponents.add(name);
       }
     }
