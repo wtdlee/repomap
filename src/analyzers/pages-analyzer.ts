@@ -689,6 +689,38 @@ export class PagesAnalyzer extends BaseAnalyzer {
   }
 
   /**
+   * Check if an import source is from the project (not an external package)
+   */
+  private isProjectImport(source: string): boolean {
+    // Relative imports are always project imports
+    if (source.startsWith('./') || source.startsWith('../')) {
+      return true;
+    }
+
+    // Common alias patterns used in various frameworks
+    // @/ (Next.js, Vite), ~/ (Nuxt, some configs), #/ (some configs)
+    if (/^[@~#]\//.test(source)) {
+      return true;
+    }
+
+    // Scoped packages from npm (e.g., @radix-ui/react-dialog, @tanstack/react-query)
+    // These are external libraries, not project code
+    if (source.startsWith('@') && !source.startsWith('@/')) {
+      return false;
+    }
+
+    // Bare imports starting with lowercase are likely external packages
+    // e.g., react, next/link, lodash, framer-motion
+    if (/^[a-z]/.test(source)) {
+      return false;
+    }
+
+    // Uppercase bare imports could be project aliases (e.g., Components/Button)
+    // This is less common but some projects use it
+    return true;
+  }
+
+  /**
    * Find the main component used in the page's JSX
    * This is more accurate than using the default export name like "Page"
    */
@@ -696,27 +728,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
     const imports = this.extractImports(ast);
     const importedComponents = new Set<string>();
 
-    // Common directory patterns for UI components across different project structures
-    const componentPathPatterns = [
-      'features',
-      'components',
-      'containers',
-      'views',
-      'screens',
-      'pages',
-      'layouts',
-      'ui',
-      'modules',
-      'widgets',
-      'shared',
-    ];
-
-    // Collect imported components (PascalCase from component directories)
+    // Collect imported components:
+    // - PascalCase names (React component convention)
+    // - From project imports (not external packages)
     for (const [name, source] of imports) {
-      if (
-        /^[A-Z]/.test(name) &&
-        componentPathPatterns.some((pattern) => source.includes(pattern))
-      ) {
+      if (/^[A-Z]/.test(name) && this.isProjectImport(source)) {
         importedComponents.add(name);
       }
     }
