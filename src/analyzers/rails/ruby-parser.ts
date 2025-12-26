@@ -46,10 +46,7 @@ export async function initRubyParser(): Promise<Parser> {
     wasmPath = path.join(path.dirname(wasmPkgPath), 'tree-sitter-ruby.wasm');
   } catch {
     // Fallback: Try cwd for development environments
-    const cwdPath = path.join(
-      process.cwd(),
-      'node_modules/tree-sitter-ruby/tree-sitter-ruby.wasm'
-    );
+    const cwdPath = path.join(process.cwd(), 'node_modules/tree-sitter-ruby/tree-sitter-ruby.wasm');
     if (fs.existsSync(cwdPath)) {
       wasmPath = cwdPath;
     }
