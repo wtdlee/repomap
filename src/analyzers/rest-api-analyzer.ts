@@ -1,5 +1,5 @@
 import { parseSync, CallExpression, Expression, Module } from '@swc/core';
-import fg from 'fast-glob';
+import { glob } from 'glob';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
@@ -24,7 +24,7 @@ export class RestApiAnalyzer extends BaseAnalyzer {
   async analyze(): Promise<Partial<AnalysisResult>> {
     this.log('Starting REST API analysis...');
 
-    const tsFiles = await fg(['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'], {
+    const tsFiles = await glob(['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'], {
       cwd: this.basePath,
       ignore: [
         '**/node_modules/**',

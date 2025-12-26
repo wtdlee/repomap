@@ -6,7 +6,7 @@ import {
   CallExpression,
   Expression,
 } from '@swc/core';
-import fg from 'fast-glob';
+import { glob } from 'glob';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
@@ -125,7 +125,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
    */
   private async loadCodegenMapping(): Promise<void> {
     // Dynamically find all potential codegen files
-    const generatedFiles = await fg(
+    const generatedFiles = await glob(
       [
         '**/__generated__/graphql.ts',
         '**/__generated__/gql.ts',
@@ -256,7 +256,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
           ? ['**/page.{tsx,ts,jsx,js}'] // Next.js App Router pages only
           : ['**/*.tsx', '**/*.ts', '**/*.jsx', '**/*.js']; // Next.js Pages Router / generic
 
-        const files = await fg(patterns, {
+        const files = await glob(patterns, {
           cwd: dirPath,
           ignore: [
             '_app.tsx',
@@ -288,7 +288,7 @@ export class PagesAnalyzer extends BaseAnalyzer {
 
     for (const pattern of railsReactDirs) {
       try {
-        const files = await fg(
+        const files = await glob(
           [
             `${pattern}/**/*.tsx`,
             `${pattern}/**/*.ts`,
@@ -327,12 +327,11 @@ export class PagesAnalyzer extends BaseAnalyzer {
     // Prepare TS resolver once for alias imports (best-effort).
     if (!this.tsResolver) {
       try {
-        const known = await fg(['**/*.{ts,tsx,js,jsx}'], {
+        const known = await glob(['**/*.{ts,tsx,js,jsx}'], {
           cwd: this.basePath,
           ignore: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**'],
           absolute: false,
-          onlyFiles: true,
-          unique: true,
+          nodir: true,
           dot: false,
         });
         this.tsResolver = new TsModuleResolver(

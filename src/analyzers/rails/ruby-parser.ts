@@ -42,14 +42,11 @@ export async function initRubyParser(): Promise<Parser> {
 
   try {
     // Best approach: Use require.resolve to find the package location
-    const wasmPkgPath = require.resolve('tree-sitter-wasms/package.json');
-    wasmPath = path.join(path.dirname(wasmPkgPath), 'out/tree-sitter-ruby.wasm');
+    const wasmPkgPath = require.resolve('tree-sitter-ruby/package.json');
+    wasmPath = path.join(path.dirname(wasmPkgPath), 'tree-sitter-ruby.wasm');
   } catch {
     // Fallback: Try cwd for development environments
-    const cwdPath = path.join(
-      process.cwd(),
-      'node_modules/tree-sitter-wasms/out/tree-sitter-ruby.wasm'
-    );
+    const cwdPath = path.join(process.cwd(), 'node_modules/tree-sitter-ruby/tree-sitter-ruby.wasm');
     if (fs.existsSync(cwdPath)) {
       wasmPath = cwdPath;
     }
@@ -57,7 +54,7 @@ export async function initRubyParser(): Promise<Parser> {
 
   if (!wasmPath || !fs.existsSync(wasmPath)) {
     throw new Error(
-      'tree-sitter-ruby.wasm not found. Please ensure tree-sitter-wasms package is installed.'
+      'tree-sitter-ruby.wasm not found. Please ensure tree-sitter-ruby package is installed.'
     );
   }
 

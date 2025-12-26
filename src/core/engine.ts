@@ -343,9 +343,9 @@ export class DocGeneratorEngine {
     const includePatterns = (this.config.analysis?.include || ['**/*.ts', '**/*.tsx']).map(String);
     const excludePatterns = (this.config.analysis?.exclude || []).map(String);
 
-    // Fast-glob is already a dependency; use it to list files.
-    const fg = (await import('fast-glob')).default;
-    const allSourceFiles = await fg(includePatterns, {
+    // Use glob to list files.
+    const { glob } = await import('glob');
+    const allSourceFiles = await glob(includePatterns, {
       cwd: repoPath,
       ignore: [
         '**/node_modules/**',
@@ -355,8 +355,7 @@ export class DocGeneratorEngine {
         '**/coverage/**',
         ...excludePatterns,
       ],
-      onlyFiles: true,
-      unique: true,
+      nodir: true,
       dot: false,
     });
 

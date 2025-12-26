@@ -39,7 +39,7 @@ export default defineConfig({
     'open',
     'simple-git',
     'socket.io',
-    'tree-sitter-wasms',
+    'tree-sitter-ruby',
     'web-tree-sitter',
     'yaml',
   ],
