@@ -115,8 +115,8 @@
     "simple-git": "^3.21.0",
     "socket.io": "^4.7.2",
     "typescript": "^5.3.2",
-    "tree-sitter-wasms": "^0.1.13",
-    "web-tree-sitter": "^0.25.10",
+    "tree-sitter-ruby": "^0.23.1",
+    "web-tree-sitter": "^0.26.3",
     "yaml": "^2.3.4"
   },
   "devDependencies": {
