@@ -1,5 +1,5 @@
 import { parseSync, Module, TaggedTemplateExpression, CallExpression, Expression } from '@swc/core';
-import fg from 'fast-glob';
+import { glob } from 'glob';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
@@ -111,7 +111,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     const operations: GraphQLOperation[] = [];
 
     // Find potential codegen output files with broader patterns
-    const generatedFiles = await fg(
+    const generatedFiles = await glob(
       [
         '**/__generated__/graphql.ts',
         '**/__generated__/gql.ts',
@@ -280,7 +280,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   }
 
   private async analyzeGraphQLFiles(): Promise<GraphQLOperation[]> {
-    const graphqlFiles = await fg(['**/*.graphql'], {
+    const graphqlFiles = await glob(['**/*.graphql'], {
       cwd: this.basePath,
       ignore: ['**/node_modules/**', '**/.next/**'],
       absolute: true,
@@ -304,7 +304,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
   private async analyzeInlineGraphQL(): Promise<GraphQLOperation[]> {
     const operations: GraphQLOperation[] = [];
 
-    const tsFiles = await fg(['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'], {
+    const tsFiles = await glob(['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'], {
       cwd: this.basePath,
       ignore: [
         '**/node_modules/**',
@@ -709,7 +709,7 @@ export class GraphQLAnalyzer extends BaseAnalyzer {
     if (operations.length === 0) return;
     const extraHookPatterns = this.getGraphQLHookPatterns();
 
-    const tsFiles = await fg(['**/*.ts', '**/*.tsx'], {
+    const tsFiles = await glob(['**/*.ts', '**/*.tsx'], {
       cwd: this.basePath,
       ignore: [
         '**/node_modules/**',

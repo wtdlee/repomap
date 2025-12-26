@@ -1,5 +1,5 @@
 import { parseSync, Module } from '@swc/core';
-import fg from 'fast-glob';
+import { glob } from 'glob';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { BaseAnalyzer } from './base-analyzer.js';
@@ -78,7 +78,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
     // Search all directories at once using glob patterns
     // Include both .tsx and .ts files to analyze custom hooks with GraphQL
     const patterns = dirs.flatMap((dir) => [`${dir}/**/*.tsx`, `${dir}/**/*.ts`]);
-    const files = await fg(patterns, {
+    const files = await glob(patterns, {
       cwd: this.basePath,
       ignore: [
         '**/*.test.*',
@@ -88,8 +88,7 @@ export class DataFlowAnalyzer extends BaseAnalyzer {
         '**/__generated__/**',
       ],
       absolute: true,
-      onlyFiles: true,
-      unique: true,
+      nodir: true,
     });
 
     this.log(`[DataFlowAnalyzer] Found ${files.length} component files to analyze`);
